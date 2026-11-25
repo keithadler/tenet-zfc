@@ -78,6 +78,23 @@ public sealed partial class Replayer
         }
 
         public IReadOnlyList<Expr> TypesOf(Expr e) => Types.TryGetValue(e, out List<Expr>? l) ? l : [];
+
+        /// <summary>The types recorded for each term in checking mode (Check conclusions).</summary>
+        private readonly Dictionary<Expr, List<Expr>> _checked = new(ReferenceEqualityComparer.Instance);
+
+        public void AddChecked(Expr e, Expr t)
+        {
+            if (!_checked.TryGetValue(e, out List<Expr>? l))
+            {
+                _checked[e] = l = new List<Expr>();
+            }
+            if (!l.Contains(t))
+            {
+                l.Add(t);
+            }
+        }
+
+        public IReadOnlyList<Expr> CheckedTypesOf(Expr e) => _checked.TryGetValue(e, out List<Expr>? l) ? l : [];
     }
 
     /// <summary>Equal by the recorded facts, or by congruence over them to a small depth.</summary>
@@ -209,17 +226,25 @@ public sealed partial class Replayer
                     {
                         return (Verdict.Failed, "not two projections of the same field");
                     }
-                    foreach (Expr x in Reachable(pa.Struct, st))
+                    // Both structures are unfolded lazily; then either the structures are equal, or both have
+                    // become constructor applications and the projected fields are equal.
+                    List<Expr> xs = Reachable(pa.Struct, st), ys = Reachable(pb.Struct, st);
+                    foreach (Expr x in xs)
                     {
-                        foreach (Expr y in Reachable(pb.Struct, st))
+                        Expr? fx = FieldOf(x, pa.StructName, pa.Idx);
+                        foreach (Expr y in ys)
                         {
                             if (Equal(x, y, st))
                             {
                                 return (Verdict.Verified, null);
                             }
+                            if (fx is not null && FieldOf(y, pb.StructName, pb.Idx) is Expr fy && Equal(fx, fy, st))
+                            {
+                                return (Verdict.Verified, null);
+                            }
                         }
                     }
-                    return (Verdict.Failed, "the projected structures are not recorded equal");
+                    return (Verdict.Failed, "neither the projected structures nor their fields are recorded equal");
                 }
             case "DefEqReflect":
                 return b is Const c && ReferenceEquals(c.Name, _boolTrue) && Reachable(a, st).Any(x => x is Const k && ReferenceEquals(k.Name, _boolTrue))
@@ -238,6 +263,12 @@ public sealed partial class Replayer
                 return (Verdict.NotYet, null);
         }
     }
+
+    /// <summary>Field idx of a constructor application of structure s (the kernel's reduce_proj_core), or null.</summary>
+    private Expr? FieldOf(Expr c, Name s, int idx) =>
+        Ops.Spine(c, out List<Expr> args) is Const k && _env.Find(k.Name) is { Kind: ConstKind.Constructor } ctor
+        && ReferenceEquals(ctor.Induct, s) && ctor.NumParams + idx < args.Count
+            ? args[ctor.NumParams + idx] : null;
 
     /// <summary>
     /// Binders compared as Tenet compares them: walk both telescopes together, compare the domains (when they differ
@@ -457,6 +488,128 @@ public sealed partial class Replayer
                 return (Verdict.Failed, "a term that has no type");
         }
         return ok ? (Verdict.Verified, null) : (Verdict.Failed, $"the recorded type is not what inference gives from the recorded facts");
+    }
+
+    /// <summary>
+    /// e : T in checking mode: the type is computed as in <see cref="InferConclusion"/>, from checking-mode facts about
+    /// e's parts, and the checks that mode adds must hold: an argument's type equals its domain, every binder domain
+    /// and let type is a type, a let value has its type, and universe levels use only the declaration's parameters.
+    /// </summary>
+    private (Verdict, string?) CheckConclusion(Step s, IReadOnlyList<Step> steps, DeclState st)
+    {
+        Expr e = s.A, T = s.B!;
+        string? bad = e switch
+        {
+            Sort so => LevelsOk([so.Level], st) ? null : "a universe level uses a parameter the declaration does not have",
+            Const c => LevelsOk(c.Levels, st) ? null : "a universe level uses a parameter the declaration does not have",
+            App a => CheckedApp(a, T, st) ? null : "the argument's checked type is not recorded equal to the domain",
+            Binder { IsPi: false } => CheckedTelescope(e, s, steps, st) ? null : "a domain or the body was not checked",
+            Binder { IsPi: true } => CheckedTelescope(e, s, steps, st) ? null : "a domain or the body was not checked",
+            Let => CheckedLets(e, s, steps, st) ? null : "a let's type, value or body was not checked",
+            Proj p => st.CheckedTypesOf(p.Struct).Count > 0 ? null : "the structure was not checked",
+            _ => null,
+        };
+        if (bad is not null)
+        {
+            return (Verdict.Failed, bad);
+        }
+        if (e is App)
+        {
+            return (Verdict.Verified, null);   // CheckedApp already compared the type
+        }
+        return InferConclusion(s, steps, st);
+    }
+
+    private static bool LevelsOk(IEnumerable<Level> levels, DeclState st) => st.LevelParams is not Name[] ps || levels.All(l => ParamsIn(l, ps));
+
+    private static bool ParamsIn(Level l, Name[] ps) => l switch
+    {
+        LParam p => ps.Any(x => ReferenceEquals(x, p.Name)),
+        LSucc x => ParamsIn(x.Of, ps),
+        LMax m => ParamsIn(m.A, ps) && ParamsIn(m.B, ps),
+        LIMax m => ParamsIn(m.A, ps) && ParamsIn(m.B, ps),
+        _ => true,
+    };
+
+    /// <summary>f a : B[a] where f was checked to have a type that reduces to (x : D) → B, and a was checked to have a type equal to D.</summary>
+    private bool CheckedApp(App e, Expr T, DeclState st)
+    {
+        foreach (Expr fType in st.CheckedTypesOf(e.Fn))
+        {
+            foreach (Binder pi in PiForms(fType, st))
+            {
+                if (ReferenceEquals(_ops.Instantiate(pi.Body, [e.Arg]), T)
+                    && st.CheckedTypesOf(e.Arg).Any(a => Equal(a, pi.Domain, st)))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>A lambda or Pi telescope: every domain was checked to be a type, and the body was checked.</summary>
+    private bool CheckedTelescope(Expr e, Step s, IReadOnlyList<Step> steps, DeclState st)
+    {
+        bool isPi = ((Binder)e).IsPi;
+        List<Expr> fvars = TelescopeLocals(s, steps);
+        Expr body = e;
+        int n = 0;
+        while (body is Binder b && b.IsPi == isPi)
+        {
+            if (n >= fvars.Count)
+            {
+                return false;
+            }
+            Expr d = _ops.InstantiateRev(b.Domain, fvars.GetRange(0, n));
+            if (CheckedSortOf(d, st) is null)
+            {
+                return false;
+            }
+            body = b.Body;
+            n++;
+        }
+        Expr inst = _ops.InstantiateRev(body, fvars.GetRange(0, n));
+        return isPi ? CheckedSortOf(inst, st) is not null : st.CheckedTypesOf(inst).Count > 0;
+    }
+
+    private bool CheckedLets(Expr e, Step s, IReadOnlyList<Step> steps, DeclState st)
+    {
+        List<Expr> fvars = TelescopeLocals(s, steps);
+        Expr body = e;
+        int n = 0;
+        while (body is Let l)
+        {
+            if (n >= fvars.Count)
+            {
+                return false;
+            }
+            Expr type = _ops.InstantiateRev(l.Type, fvars.GetRange(0, n));
+            Expr val = _ops.InstantiateRev(l.Value, fvars.GetRange(0, n));
+            if (CheckedSortOf(type, st) is null || !st.CheckedTypesOf(val).Any(v => Equal(v, type, st)))
+            {
+                return false;
+            }
+            body = l.Body;
+            n++;
+        }
+        return st.CheckedTypesOf(_ops.InstantiateRev(body, fvars.GetRange(0, n))).Count > 0;
+    }
+
+    /// <summary>The universe of a type, from a checking-mode fact about it.</summary>
+    private Level? CheckedSortOf(Expr e, DeclState st)
+    {
+        foreach (Expr t in st.CheckedTypesOf(e))
+        {
+            foreach (Expr x in Reachable(t, st))
+            {
+                if (x is Sort so)
+                {
+                    return so.Level;
+                }
+            }
+        }
+        return null;
     }
 
     /// <summary>Some Pi type the recorded steps reduce t to (t itself if it is one).</summary>

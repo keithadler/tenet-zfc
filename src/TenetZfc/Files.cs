@@ -35,6 +35,8 @@ public sealed class ConstInfo
     public RecRule[] Rules { get; init; } = [];
 
     // inductive types
+    /// <summary>The universe parameters of every constant in this type's block (types, constructors, recursors).</summary>
+    public Name[] BlockLevelParams { get; init; } = [];
     public bool IsRec { get; init; }
     public Name[] Ctors { get; init; } = [];
 
@@ -51,7 +53,7 @@ public sealed class Environment
     internal void Add(ConstInfo c) => _consts[c.Name] = c;
 }
 
-public enum StepKind : byte { Rule, Infer, WhnfCore, Whnf, DefEq, Local }
+public enum StepKind : byte { Rule, Infer, WhnfCore, Whnf, DefEq, Local, Check }
 
 /// <summary>One step of a trace. <see cref="From"/> is the first of its premises; a step with none has From = its own index.</summary>
 public sealed record Step(int Index, StepKind Kind, string? Rule, Expr A, Expr? B, Expr? V, int From);
@@ -374,10 +376,15 @@ public sealed class Reader
         }
         else if (o.TryGetProperty("inductive", out JsonElement ind))
         {
+            // Checking a block checks its recursors too, whose motive universe is a parameter the types lack.
+            Name[] blockParams = new[] { "types", "ctors", "recs" }
+                .SelectMany(k => Arr(ind, k, k switch { "types" => "inductiveVals", "ctors" => "constructorVals", _ => "recursorVals" }).EnumerateArray())
+                .SelectMany(Params).Distinct().ToArray();
             foreach (JsonElement t in Arr(ind, "types", "inductiveVals").EnumerateArray())
             {
                 env.Add(new ConstInfo
                 {
+                    BlockLevelParams = blockParams,
                     Name = N(t.GetProperty("name")), Kind = ConstKind.Inductive, LevelParams = Params(t), Type = E(t.GetProperty("type")),
                     NumParams = t.GetProperty("numParams").GetInt32(), NumIndices = t.GetProperty("numIndices").GetInt32(),
                     IsRec = t.GetProperty("isRec").GetBoolean(), Ctors = t.GetProperty("ctors").EnumerateArray().Select(N).ToArray(),

@@ -42,7 +42,7 @@ public class ReplayTests
         { "Nat.add_succ", "IotaK" }, { "Nat.add_succ", "Proj" }, { "Nat.add_succ", "DefEqSyntactic" }, { "Nat.add_succ", "DefEqOffset" },
         { "Nat.add_succ", "DefEqApp" }, { "Nat.add_succ", "DefEqBinding" }, { "Nat.add_succ", "DefEqLazyDelta" },
         { "Nat.add_succ", "DefEqLazyDeltaProj" }, { "eta437", "DefEqProofIrrel" }, { "eta437", "DefEqEtaStruct" },
-        { "Nat.add_succ", "Infer" }, { "Nat.add_succ", "Whnf" }, { "Nat.add_succ", "WhnfCore" }, { "Nat.add_succ", "DefEq" },
+        { "Nat.add_succ", "Infer" }, { "Nat.add_succ", "Check" }, { "Nat.add_succ", "Whnf" }, { "Nat.add_succ", "WhnfCore" }, { "Nat.add_succ", "DefEq" },
     };
 
     private static bool Is(Step s, string what) =>
@@ -65,6 +65,7 @@ public class ReplayTests
     /// <summary>Each kind of step, every occurrence in the fixture, changed one at a time: all are caught.</summary>
     [Theory]
     [InlineData("Infer")]
+    [InlineData("Check")]
     [InlineData("DefEq")]
     [InlineData("WhnfCore")]
     public void EveryOccurrenceIsChecked(string what)
@@ -103,11 +104,12 @@ public class ReplayTests
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
         // Claim Nat.zero : Prop, a type that exists but is not Nat.zero's.
-        (int d, int i) = Find(traces, s => s.Kind == StepKind.Infer && s.A is Const c && c.Name.ToString() == "Nat.zero");
+        (int d, int i) = Find(traces, s => s.Kind is StepKind.Infer or StepKind.Check && s.A is Const c && c.Name.ToString() == "Nat.zero");
+        string kind = traces[d].Steps[i].Kind.ToString();
         Replace(traces, d, i, traces[d].Steps[i] with { B = t.Sort(t.Zero) });
 
         ReplayReport r = new Replayer(t, env).Replay(traces);
-        Assert.Contains(r.Failures, f => f.Step == i && f.What == "Infer");
+        Assert.Contains(r.Failures, f => f.Step == i && f.What == kind);
     }
 
     [Fact]
@@ -161,6 +163,56 @@ public class ReplayTests
         ReplayReport r = new Replayer(t, env).Replay(traces);
         Assert.Equal(r.Declarations, r.Concluded + r.BlocksNotTraced);
         Assert.True(r.Concluded > 0);
+    }
+
+    [Fact]
+    public void ADeclarationOnlyInferredNotCheckedIsNotConcluded()
+    {
+        // Infer-only facts assume the term is well typed; a declaration needs checking-mode facts.
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        int d = traces.FindIndex(x => x.Decl.ToString() == "Nat.add_succ");
+        traces[d] = traces[d] with { Steps = traces[d].Steps.Select(s => s.Kind == StepKind.Check ? s with { Kind = StepKind.Infer } : s).ToList() };
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Decl.ToString() == "Nat.add_succ" && f.Reason.Contains("does not conclude"));
+    }
+
+    [Fact]
+    public void AForeignUniverseParameterIsCaught()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        int d = traces.FindIndex(x => x.Decl.ToString() == "Nat.add_succ");
+        Level z = t.Param(t.Of("zzz"));
+        var steps = traces[d].Steps.ToList();
+        steps.Add(new Step(steps.Count, StepKind.Check, null, t.Sort(z), t.Sort(t.Succ(z)), null, steps.Count));
+        traces[d] = traces[d] with { Steps = steps };
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Step == steps.Count - 1 && f.Reason.Contains("parameter"));
+    }
+
+    [Fact]
+    public void ACheckedApplicationNeedsItsArgumentTypeEqualToTheDomain()
+    {
+        // Change one checked argument's recorded type: the application that uses it can no longer be checked.
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        for (int d = 0; d < traces.Count; d++)
+        {
+            List<Step> steps = traces[d].Steps.ToList();
+            foreach (Step app in steps.Where(s => s.Kind == StepKind.Check && s.A is App))
+            {
+                Expr arg = ((App)app.A).Arg;
+                int k = steps.FindLastIndex(app.Index, s => s.Kind == StepKind.Check && ReferenceEquals(s.A, arg));
+                if (k < 0)
+                {
+                    continue;
+                }
+                steps[k] = steps[k] with { B = t.Const(t.Of("NotAType"), []) };
+                traces[d] = traces[d] with { Steps = steps };
+                ReplayReport r = new Replayer(t, env).Replay(traces);
+                Assert.Contains(r.Failures, f => f.Step == app.Index && f.What == "Check");
+                return;
+            }
+        }
+        Assert.Fail("no checked application in the fixture");
     }
 
     [Fact]

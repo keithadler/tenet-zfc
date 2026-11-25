@@ -9,7 +9,7 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `eta437.ndjson` | 4.37.0-rc1 | lean4export 3.1.0 |
 | `acc436.ndjson` | 4.36.0 | lean4export 3.1.0 |
 
-Each `.trace.ndjson` was made from the export beside it by Tenet's main branch (commit `c75de5a` or later):
+Each `.trace.ndjson` was made from the export beside it by Tenet's `trace-check-mode` branch (commit `6b55ce9`), which records checking-mode inference as `Check`:
 
 ```bash
 tenet check Nat.add_succ.ndjson --trace Nat.add_succ.trace.ndjson

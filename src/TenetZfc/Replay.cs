@@ -128,7 +128,13 @@ public sealed partial class Replayer
             {
                 report.Failures.Add(new StepFailure(d.Decl, -1, "decl", "not declared in the export"));
             }
-            var state = new DeclState();
+            var state = new DeclState(_env.Find(d.Decl) switch
+            {
+                { Kind: ConstKind.Inductive } i => i.BlockLevelParams,
+                { Kind: ConstKind.Quot } => null,   // the quotient block's four constants carry their own parameters
+                ConstInfo c => c.LevelParams,
+                null => [],
+            });
             foreach (Step s in d.Steps)
             {
                 report.Steps++;
@@ -176,18 +182,22 @@ public sealed partial class Replayer
         {
             return null;
         }
-        if (SortOf(info.Type, st) is null)
+        // Both must come from checking-mode facts: an infer-only fact assumes the term is well typed.
+        if (CheckedSortOf(info.Type, st) is null)
         {
             return false;
         }
         Expr? value = info.Value ?? info.OpaqueValue;
-        return value is null || st.TypesOf(value).Any(v => Equal(v, info.Type, st));
+        return value is null || st.CheckedTypesOf(value).Any(v => Equal(v, info.Type, st));
     }
 
     // ---- per-declaration state ----
 
-    private sealed partial class DeclState
+    private sealed partial class DeclState(Name[]? levelParams)
     {
+        /// <summary>The universe parameters of the declaration being replayed; null when any are allowed.</summary>
+        public readonly Name[]? LevelParams = levelParams;
+
         public readonly Dictionary<ulong, (Expr Type, Expr? Value)> Locals = new();
 
         /// <summary>The locals' free variables, in the order they were introduced.</summary>
@@ -209,9 +219,13 @@ public sealed partial class Replayer
             bool reduction = s.Kind is StepKind.Whnf or StepKind.WhnfCore
                 || (s.Kind == StepKind.Rule && s.Rule is "Beta" or "Zeta" or "ZetaFVar" or "Delta" or "DeltaLazy" or "Proj" or "Iota"
                     or "IotaK" or "QuotLift" or "QuotInd" or "NatLitOp" or "NatLitPred" or "StringLitToCtor" or "UnfoldProjApp");
-            if (s.Kind == StepKind.Infer && s.B is not null)
+            if (s.Kind is StepKind.Infer or StepKind.Check && s.B is not null)
             {
                 AddType(s.A, s.B);
+                if (s.Kind == StepKind.Check)
+                {
+                    AddChecked(s.A, s.B);
+                }
                 return;
             }
             if (s.B is not null && (reduction || s.Kind == StepKind.DefEq || (s.Kind == StepKind.Rule && s.Rule!.StartsWith("DefEq", StringComparison.Ordinal))))
@@ -281,6 +295,8 @@ public sealed partial class Replayer
                 return DefEqConclusion(s, st);
             case StepKind.Infer:
                 return InferConclusion(s, steps, st);
+            case StepKind.Check:
+                return CheckConclusion(s, steps, st);
         }
         return s.Rule switch
         {

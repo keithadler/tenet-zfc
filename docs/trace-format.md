@@ -24,7 +24,8 @@ Definitional equality backtracks: lazy delta, proof irrelevance and eta are trie
 | Kind | Meaning | Lhs / Rhs |
 |---|---|---|
 | `Rule` | One kernel rule fired; `r` names it (Tenet's `Rule` enum, see [rule-map.md](rule-map.md)) | the rule's two terms, such as redex and reduct |
-| `Infer` | Γ ⊢ e : T | e, T |
+| `Infer` | Γ ⊢ e : T, computed in infer-only mode (the term is assumed well typed) | e, T |
+| `Check` | Γ ⊢ e : T, computed in checking mode (argument types against domains, domains are types, levels use only declared parameters) | e, T |
 | `WhnfCore` | e ↝* e' without unfolding definitions | e, e' |
 | `Whnf` | e ↝* e' with unfolding and literal arithmetic | e, e' |
 | `DefEq` | t ≡ s | t, s |
@@ -97,16 +98,19 @@ What is checked:
 - **Equality rules that rest on premises.** `DefEqApp`, `DefEqBinding` (walking both telescopes with the locals the step introduced), `DefEqEta`, `DefEqEtaStruct` (including Lean 4.37's partially applied constructors), `DefEqProofIrrel`, `DefEqUnitLike`, `DefEqLazyDelta`, `DefEqLazyDeltaProj` and `DefEqReflect`.
 - **Normalization.** `Whnf` and `WhnfCore`: there must be a chain from the term to its normal form through the step's direct premises. Each premise is used on the whole term or on the head of an application.
 - **Equality.** `DefEq`: the two sides must be equal by the recorded facts, or by congruence over them.
-- **Typing.** `Infer`: the type is recomputed the way the kernel computes it for every form of term: sorts, constants, locals, literals, applications, lambdas and Pis (with their locals), lets (dead lets removed), and projections.
+- **Typing.**
+  - `Infer`: the type is recomputed the way the kernel computes it for every form of term: sorts, constants, locals, literals, applications, lambdas and Pis (with their locals), lets (dead lets removed), and projections.
+  - `Check`: the same computation, from checking-mode facts about the term's parts. It also requires the checks that mode adds. An argument's checked type must be recorded equal to its domain. Every binder domain and `let` type must be checked to be a type. A `let` value must have its type. Universe levels may use only the declaration's parameters; for an inductive block, that means the parameters of any of its types, constructors or recursors.
 - **Locals.** Each must be fresh, and nothing may use a variable before its `Local` step.
-- **Each declaration.** Its trace must conclude what the kernel checks of it: its type is a type, and the value of a definition, theorem or opaque constant has that type. Without this check, a trace of valid steps that didn't add up to the declaration would pass.
+- **Each declaration.** Its trace must conclude, from checking-mode facts, what the kernel checks of it: its type is a type, and the value of a definition, theorem or opaque constant has that type. Without this check, a trace of valid steps that didn't add up to the declaration would pass. Infer-only facts don't count here, because they assume the term is well typed.
 
 Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `mk_imax`, because the kernel's reduct carries the simplified level.
 
 ## What replay does not establish yet
 
 - **Inductive and quotient blocks.** Positivity, universe constraints and recursor derivation are checked by Tenet but not traced as one conclusion. The report counts these blocks separately and never as concluded.
-- **Checking mode versus infer-only mode.** The trace doesn't say whether a type was inferred in checking mode or in infer-only mode. Both give the same type, but checking mode also checks that each argument's type matches its domain. For now, an `Infer` step verifies the type computation. The argument checks are confirmed only where the matching equality appears among the recorded facts. Recording the mode in Tenet's trace would close this.
+- **Safety flags.** Checking mode also rejects unsafe and partial constants used from safe declarations. Those flags aren't in the trace or read by the replayer.
+- **`Check` needs Tenet's `trace-check-mode` branch.** Tenet's main branch writes every inferred type as `Infer`. Traces from it replay step by step, but no declaration in them is concluded.
 - **Nat operations** are taken to mean what their names say. Tenet checks that against their definitions once per environment, and that check isn't in the trace.
 - **Rule K** is checked for the reduct only. The kernel's check on the major premise's type is a typing fact the step doesn't cite.
 - **String literals** (`StringLitToCtor`, `DefEqStringLit`) are reported as unsupported.
