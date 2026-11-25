@@ -13,7 +13,12 @@ const string Usage = """
       tenet-zfc define <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: translate definitions by the generic model,
                                                          each with its definitional equation as a theorem
-      tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
+      tenet-zfc define-all <export.ndjson> <set.mm> <outdir> [--chunk-size N] [--chunks a[-b]]
+                                                         milestone 3 at scale: every constant the model handles, with
+                                                         equations and computation rules, as chunk-NNNN.mm files that
+                                                         verify independently (scripts/verify-all); refusals are listed
+                                                         per constant in chunk-NNNN.tsv
+      tenet-zfc survey <export.ndjson>                  how many theorem statements the translator covers, and
                                                          which constants block the rest
 
     make a trace with Tenet (github.com/keithadler/tenet, main):
@@ -71,6 +76,10 @@ if (args.Length >= 5 && args[0] == "define")
     }
     File.WriteAllText(args[3], theorems.ToString());
     return status;
+}
+if (args.Length >= 4 && args[0] == "define-all")
+{
+    return DefineAllCommand(args[1], args[2], args[3], args[4..]);
 }
 if (args.Length == 3 && args[0] == "bridge")
 {
@@ -185,6 +194,71 @@ catch (Exception e) when (e is IOException or TenetZfc.FormatException or System
 {
     Console.Error.WriteLine("tenet-zfc: " + e.Message);
     return 2;
+}
+
+// Milestone 3 at scale: every constant the model handles, in chunks that verify independently (scripts/verify-all).
+static int DefineAllCommand(string export, string setmm, string outDir, string[] opts)
+{
+    int chunkSize = 100, from = 0, to = int.MaxValue - 1;
+    for (int i = 0; i < opts.Length; i++)
+    {
+        switch (opts[i])
+        {
+            case "--chunk-size" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int n) && n > 0:
+                chunkSize = n; i++; break;
+            case "--chunks" when i + 1 < opts.Length:
+                // a single chunk index, or a range a-b (inclusive)
+                string[] r = opts[++i].Split('-');
+                from = int.Parse(r[0]);
+                to = r.Length > 1 ? int.Parse(r[1]) : from;
+                break;
+            default:
+                Console.Error.WriteLine($"tenet-zfc define-all: unknown option {opts[i]}");
+                return 2;
+        }
+    }
+    var sw = Stopwatch.StartNew();
+    var terms = new Terms();
+    TenetZfc.Environment env = Reader.ReadExport(terms, export);
+    Directory.CreateDirectory(outDir);
+    var run = new DefineAll(terms, env, setmm);
+    List<ConstInfo> targets = run.Targets();
+    int chunks = (targets.Count + chunkSize - 1) / chunkSize;
+    Console.WriteLine($"read {export} in {sw.Elapsed.TotalSeconds:F0}s: {targets.Count} constants to translate, in {chunks} chunks of {chunkSize}");
+    var all = new List<DefineAll.Outcome>();
+    for (int k = Math.Max(from, 0); k < Math.Min(chunks, to + 1); k++)
+    {
+        var csw = Stopwatch.StartNew();
+        List<DefineAll.Outcome> outcomes = run.Chunk(k, targets.Skip(k * chunkSize).Take(chunkSize).ToList(), outDir);
+        all.AddRange(outcomes);
+        long size = new FileInfo(Path.Combine(outDir, $"chunk-{k:D4}.mm")).Length;
+        Console.WriteLine($"chunk-{k:D4}: {outcomes.Count(o => o.Status == "ok")} of {outcomes.Count} translated, "
+            + $"{outcomes.Count(o => o.Iota == "ok")} computation rules, {size / 1024} KiB, {csw.Elapsed.TotalSeconds:F0}s");
+    }
+    // The summary of this invocation: counts by kind and status, and the reasons for refusals.
+    var s = new System.Text.StringBuilder();
+    s.AppendLine($"constants: {all.Count}, in {Math.Min(chunks, to + 1) - Math.Max(from, 0)} chunks of {chunkSize}, {sw.Elapsed.TotalSeconds:F0}s");
+    foreach (var g in all.GroupBy(o => o.Kind).OrderByDescending(g => g.Count()))
+    {
+        s.AppendLine($"  {g.Key,-12} {g.Count(),6}: {g.Count(o => o.Status == "ok"),6} translated with their equations, "
+            + $"{g.Count(o => o.Status == "refused"),6} refused, {g.Count(o => o.Status == "error"),6} errors");
+    }
+    s.AppendLine($"computation rules: {all.Count(o => o.Iota == "ok")} proved, {all.Count(o => o.Iota == "none-needed")} none needed (into Prop), "
+        + $"{all.Count(o => o.Iota == "refused")} refused, {all.Count(o => o.Iota == "error")} errors");
+    s.AppendLine($"proof steps: {all.Sum(o => (long)o.EqSteps)} in equations, {all.Sum(o => (long)o.IotaSteps)} in computation rules");
+    s.AppendLine("why the others aren't translated (refusals, errors, and refused computation rules):");
+    foreach (var g in all.Where(o => o.Reason != "").GroupBy(o => DefineAll.Category(o.Reason)).OrderByDescending(g => g.Count()).Take(40))
+    {
+        s.AppendLine($"  {g.Count(),7}  {g.Key}  (e.g. {g.First().Name})");
+    }
+    s.AppendLine("slowest constants:");
+    foreach (var o in all.OrderByDescending(o => o.Seconds).Take(10))
+    {
+        s.AppendLine($"  {o.Seconds,8:F1}s  {o.Name} ({o.EqSteps} + {o.IotaSteps} steps)");
+    }
+    Console.Write(s);
+    File.WriteAllText(Path.Combine(outDir, "define-all.txt"), s.ToString());
+    return 0;
 }
 
 // Replay a trace, then emit set.mm theorems for the theorems whose trace replayed in full and that the emitter covers.
