@@ -94,8 +94,9 @@ jobs:
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/props.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/props.mm" Eq Eq.refl Eq.rec HEq HEq.refl HEq.rec False False.rec True True.intro And And.intro And.rec Or Or.inl Or.inr Or.rec Nonempty Nonempty.intro Nonempty.rec
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- bridge "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/bridge.mm"
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/recursive.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/rec.mm" Nat Nat.zero Nat.succ List List.nil List.cons Nat.rec List.rec
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/tree.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/tree.mm" Tree Tree.leaf Tree.node Tree.rec
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/natle.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natle.mm" Nat.le Nat.le.refl Nat.le.step Nat.le.rec Nat.lt UInt8.size
-          for g in model ind props bridge rec natle; do
+          for g in model ind props bridge rec tree natle; do
             out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read $g.mm" "verify proof *" "exit")
             echo "$out" | tail -2
             if echo "$out" | grep -q '?Error'; then exit 1; fi
@@ -107,4 +108,4 @@ jobs:
           raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
           curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
           for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
-          for g in model ind props rec natle; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+          for g in model ind props rec tree natle; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done

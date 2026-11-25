@@ -366,6 +366,52 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    public void TreeRecursionComputesOnTwoRecursiveFieldsAndVerifies()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("tree.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        var m = new Model(t, env, pr);
+        var (ls, lp, ld) = m.Iota(t.Of("Tree.leaf"));
+        var (ns, np, nd) = m.Iota(t.Of("Tree.node"));
+        output.WriteLine($"{ls} ({lp.Count} steps)\n{ns} ({np.Count} steps)");
+        // Tree.rec α motive leaf node (node l a r) = node l a r (Tree.rec … l) (Tree.rec … r): both subtrees recurse.
+        const string rec = "( ( ( ( ( lean.Tree.rec ` U ) ` A ) ` B ) ` C ) ` D )";
+        Assert.EndsWith("` ( ( lean.Tree.leaf ` U ) ` A ) ) = C )", ls.ToString());
+        Assert.EndsWith($"` ( ( ( ( ( lean.Tree.node ` U ) ` A ) ` E ) ` F ) ` G ) ) = ( ( ( ( ( D ` E ) ` F ) ` G ) ` ( {rec} ` E ) ) ` ( {rec} ` G ) ) )", ns.ToString());
+        Assert.Contains(Recursion.StageSsLabel, m.Declarations);
+
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc tree test");
+        w.Raw(m.Declarations);
+        w.Theorem("lean-test-Tree.leaf-iota", "test", ls, lp, ld);
+        w.Theorem("lean-test-Tree.node-iota", "test", ns, np, nd);
+        string file = Path.Combine(SetMm, $"tenet-zfc-tree-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mm);
+            Assert.Contains("All proofs in the database were verified", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
     public void NatLeIsALeastSetOfIndicesAndLiteralsAreShort()
     {
         var t = new Terms();
