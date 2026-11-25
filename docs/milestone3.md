@@ -277,7 +277,7 @@ lean-List.cons-iota |- ( … ) -> ( … lean.List.rec … ` ( ( ( ( lean.List.co
                              = ( ( ( D ` E ) ` F ) ` ( ( ( ( ( ( lean.List.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` F ) )
 ```
 
-Both verifiers accept them, and the definitions pass the definition check. The proofs are long: 55,000 steps for `Nat.zero`, 122,000 for `Nat.succ` and 311,000 for `List.cons`, because the text repeats every subterm. Sharing them as lemmas is the spec's size work, still to do.
+Both verifiers accept them, and the definitions pass the definition check. The proofs are long: 55,000 steps for `Nat.zero`, 122,000 for `Nat.succ` and 311,000 for `List.cons`, because the text repeats every subterm. Compressed proofs now share the repeats (see [Proof size](#proof-size-compressed-proofs-with-sharing)): `List.cons`'s rule is 5,539 steps.
 
 **The effect on `Init`:** 6,481 of 17,590 definitions now translate with everything they use, up from 5,362.
 
@@ -324,3 +324,45 @@ So a literal stays as short as its decimal digits: `UInt8.size` is `… ( lean.N
 - **Nested types** (`Lean.Syntax`), through the replayer's existing reduction to a mutual block.
 - **Strings**, as lists of characters.
 - **Axioms**, which are milestone 3's last item: `propext` holds in the model, and `Classical.choice` comes from `set.mm`'s choice.
+
+## Proof size: compressed proofs with sharing (built)
+
+The writer used to write each proof as a flat list of labels, so every repeated subterm was proved again in full. It now writes Metamath's compressed format (the Metamath book, appendix B) by default:
+
+```
+lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
+  ( c2 c4 caddc eqid 2p2e4 co eqtr4i eqtri oveq12i ) AACFZBBJJBAAAACADZKIEHBD
+  G $.
+```
+
+- **The format.** The labels in parentheses are numbered after the theorem's mandatory hypotheses. The letters are step numbers, with `A`–`T` as a last digit and `U`–`Y` as earlier digits. `Z` saves the step just made, and later steps refer to it by number.
+- **The sharing.** `CompressedProof.Compress` (in `Metamath.cs`) turns the flat proof into a tree, with equal subproofs as one node. A subproof the written proof meets twice is saved with `Z` the first time and referred to after that. A subproof that repeats only inside a saved one is written once already, so it is not saved. Single steps are not saved, since a reference costs as much as the label. The labels are ordered most-used first, so they get the shortest numbers.
+- **Where.** `emit`, `define` and `bridge` compress. `--uncompressed`, anywhere on the command line, writes flat proofs as before. Theorems inside the model's declarations, like `lean-rankfr`, are compressed by `Writer.Raw`.
+- **Checked:** both verifiers and the definition check accept every CI output in compressed form. A test checks the step numbers against the book's table and that `Expand` inverts `Compress`. Another test checks that both verifiers accept compressed proofs and reject the same file with one letter changed.
+
+**Sizes** of the CI outputs (bytes), flat and compressed:
+
+| Output | Flat | Compressed | Ratio |
+|---|---:|---:|---:|
+| `gate` | 385 | 344 | 1.1× |
+| `lenapp` | 59,251 | 3,759 | 16× |
+| `model` | 54,360 | 5,159 | 11× |
+| `ind` | 711,916 | 36,431 | 20× |
+| `props` | 624,426 | 43,748 | 14× |
+| `rec` | 2,687,598 | 66,101 | 41× |
+| `natle` | 156,074 | 16,267 | 9.6× |
+| `bridge` | 5,200 | 1,202 | 4.3× |
+
+The largest proofs gain the most, because their repeats are the longest. In `rec`, steps written (labels and references to saved steps):
+
+| Theorem | Flat steps | Compressed steps | Saved subproofs |
+|---|---:|---:|---:|
+| `lean-rankfr` | 1,307 | 296 | 42 |
+| `lean-Nat.zero-iota` | 55,416 | 2,742 | 318 |
+| `lean-Nat.succ-iota` | 121,929 | 3,935 | 453 |
+| `lean-List.nil-iota` | 98,655 | 3,771 | 428 |
+| `lean-List.cons-iota` | 310,983 | 5,539 | 623 |
+| `lean-Nat.rec-eq` | 13,332 | 1,115 | 135 |
+| `lean-List.rec-eq` | 24,459 | 1,578 | 192 |
+
+Sharing in the text makes the proofs short, but the proof search still builds the flat proof first. The next size step is to share inside the prover too: prove a repeated equality once, as a lemma or a saved step, instead of building it again.

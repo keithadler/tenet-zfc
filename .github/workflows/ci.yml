@@ -78,6 +78,15 @@ jobs:
             if echo "$out" | grep -q '?Error'; then exit 1; fi
             (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" $g.mm)
           done
+      # Proofs are compressed by default; the flat form stays available behind --uncompressed.
+      - name: Emit lenapp with flat proofs and verify it
+        run: |
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- emit tests/fixtures/lenapp.ndjson tests/fixtures/lenapp.trace.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/lenapp-flat.mm" --uncompressed
+          if grep -q '^ *( ' "$RUNNER_TEMP/mm/setmm/lenapp-flat.mm"; then echo "lenapp-flat.mm has compressed proofs"; exit 1; fi
+          out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read lenapp-flat.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" lenapp-flat.mm)
       - name: Translate definitions and inductive types by the generic model and verify (milestone 3)
         run: |
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/model.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/model.mm" id Function.comp Function.const
