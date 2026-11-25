@@ -34,10 +34,10 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("lenapp.ndjson"));
         var m = new Model(t, env, new Prover(new Database()));
-        // List.length is about List, an inductive type, and defined by its recursor: neither is in the model yet.
+        // List.length is about List, a recursive inductive type: not in the model yet.
         var e = Assert.Throws<Model.Refused>(() => m.Define(t.Of("List.length")));
         output.WriteLine(e.Message);
-        Assert.Equal("List is not a definition but an inductive type; only definitions are in the model so far", e.Message);
+        Assert.Equal("List is a recursive inductive type; only non-recursive ones are in the model so far", e.Message);
         Assert.Throws<Model.Refused>(() => m.Define(t.Of("No.such.constant")));
         Assert.Equal("", m.Declarations);   // nothing written for a refused definition
     }
@@ -130,6 +130,74 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             File.Delete(good);
             File.Delete(bad);
+        }
+    }
+
+    [Fact]
+    public void ANonRecursiveTypeIsItsTaggedTuplesAndItsConstructorsBuildThem()
+    {
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("inductives.ndjson"));
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        m.Define(t.Of("Option.rec"));
+        string decls = m.Declarations;
+        output.WriteLine(decls);
+        // Option α is none's tag, plus some's tag around each a in α; the recursor tests the first tag.
+        Assert.Contains("df-lean.Option $a |- lean.Option = ( u e. Univ |-> ( x e. u |-> ( { <. (/) , (/) >. } u. U_ y e. x { <. 1o , <. (/) , <. y , (/) >. >. >. } ) ) ) $.", decls);
+        Assert.Contains("df-lean.Option.some $a |- lean.Option.some = ( u e. Univ |-> ( x e. u |-> ( y e. x |-> <. 1o , <. (/) , <. y , (/) >. >. >. ) ) ) $.", decls);
+        Assert.Contains("if ( ( 1st ` ", decls);
+    }
+
+    [Fact]
+    public void TheComputationRulesOfBoolProdAndOptionVerify()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("inductives.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        var m = new Model(t, env, pr);
+        var rules = new List<(string, Metamath.Expr, List<string>, string[])>();
+        foreach (string c in new[] { "Bool.false", "Bool.true", "Prod.mk", "Option.none", "Option.some" })
+        {
+            var (stmt, proof, distinct) = m.Iota(t.Of(c));
+            output.WriteLine($"{c}: {stmt} ({proof.Count} steps)");
+            rules.Add(($"lean-test-{c}-iota", stmt, proof, distinct));
+        }
+        // Each reduces to its own minor premise: Bool.rec motive B C false = B, … true = C.
+        Assert.EndsWith("` ( lean.Bool.false ` U ) ) = B )", rules[0].Item2.ToString());
+        Assert.EndsWith("` ( lean.Bool.true ` U ) ) = C )", rules[1].Item2.ToString());
+        Assert.EndsWith(") = ( ( D ` E ) ` F ) )", rules[2].Item2.ToString());   // Prod.rec … (Prod.mk a b) = minor a b
+        Assert.EndsWith(") = C )", rules[3].Item2.ToString());
+        Assert.EndsWith(") = ( D ` E ) )", rules[4].Item2.ToString());
+
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc inductive types test");
+        w.Raw(m.Declarations);
+        foreach (var (label, stmt, proof, distinct) in rules)
+        {
+            w.Theorem(label, "test", stmt, proof, distinct);
+        }
+        string file = Path.Combine(SetMm, $"tenet-zfc-ind-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mm);
+            Assert.Contains("All proofs in the database were verified", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
         }
     }
 

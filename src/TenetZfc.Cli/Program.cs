@@ -41,8 +41,15 @@ if (args.Length >= 5 && args[0] == "define")
         try
         {
             var (stmt, proof, distinct) = model.Equation(dt.Of(name));
-            proved.Add(($"lean-{name}-eq", stmt, proof, distinct, name));
+            proved.Add(($"lean-{name}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
             Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps)");
+            if (denv.Find(dt.Of(name))?.Kind == ConstKind.Constructor)
+            {
+                // A constructor also has its computation rule: the recursor on it reduces to its minor premise.
+                var (istmt, iproof, idistinct) = model.Iota(dt.Of(name));
+                proved.Add(($"lean-{name}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {name}."));
+                Console.WriteLine($"{name} (computation rule): {istmt} ({iproof.Count} proof steps)");
+            }
         }
         catch (Model.Refused e)
         {
@@ -53,10 +60,56 @@ if (args.Length >= 5 && args[0] == "define")
     theorems.Raw(model.Declarations);
     foreach (var p in proved)
     {
-        theorems.Theorem(p.Label, $"The definitional equation of {p.Name}.", p.Statement, p.Proof, p.Distinct);
+        theorems.Theorem(p.Label, p.Name, p.Statement, p.Proof, p.Distinct);
     }
     File.WriteAllText(args[3], theorems.ToString());
     return status;
+}
+if (args.Length == 2 && args[0] == "model-survey")
+{
+    // Milestone 3: which definitions the generic model translates, and the first thing that stops each of the others.
+    var mt = new Terms();
+    TenetZfc.Environment menv = Reader.ReadExport(mt, args[1]);
+    var reasons = new Dictionary<string, int>();
+    var blockers = new Dictionary<string, int>();
+    int ok = 0, total = 0;
+    foreach (ConstInfo c in menv.All.Where(c => c.Kind == ConstKind.Definition))
+    {
+        total++;
+        try
+        {
+            // A fresh model per definition: each counts on its own, dependencies included.
+            new Model(mt, menv, new TenetZfc.Metamath.Prover(new TenetZfc.Metamath.Database()), dryRun: true).Define(c.Name);
+            ok++;
+        }
+        catch (Model.Refused e)
+        {
+            string first = e.Message.Split(' ')[0];
+            if (e.Message.Contains("an inductive type")) blockers[first] = blockers.GetValueOrDefault(first) + 1;
+            string why = System.Text.RegularExpressions.Regex.Replace(e.Message, @"^\S+ is not", "X is not");
+            why = System.Text.RegularExpressions.Regex.Replace(why, @"\(.*\)$", "");
+            reasons[why] = reasons.GetValueOrDefault(why) + 1;
+        }
+    }
+    // The inductive types, by shape: what the model must handle, and in what order.
+    var shapes = new Dictionary<string, int>();
+    foreach (ConstInfo c in menv.All.Where(c => c.Kind == ConstKind.Inductive))
+    {
+        Expr ty = c.Type;
+        while (ty is Binder { IsPi: true } pb) ty = pb.Body;
+        bool prop = ty is Sort { Level: LZero };
+        int types = c.BlockMembers.Count(m => menv.Find(m)?.Kind == ConstKind.Inductive);
+        string shape = string.Join(", ", new[] { prop ? "Prop" : "Type", c.NumIndices > 0 ? "indexed" : "", types > 1 ? "mutual" : "",
+            c.NumNested > 0 ? "nested" : "", c.IsRec ? "recursive" : "" }.Where(x => x != ""));
+        shapes[shape] = shapes.GetValueOrDefault(shape) + 1;
+    }
+    Console.WriteLine("inductive types by shape:");
+    foreach (var kv in shapes.OrderByDescending(kv => kv.Value)) Console.WriteLine($"  {kv.Value,7}  {kv.Key}");
+    Console.WriteLine($"definitions: {total}, translated with all they use: {ok}");
+    foreach (var kv in reasons.OrderByDescending(kv => kv.Value).Take(25)) Console.WriteLine($"  {kv.Value,7}  {kv.Key}");
+    Console.WriteLine("the inductive type that stops each definition first:");
+    foreach (var kv in blockers.OrderByDescending(kv => kv.Value).Take(25)) Console.WriteLine($"  {kv.Value,7}  {kv.Key}");
+    return 0;
 }
 if (args.Length == 2 && args[0] == "survey")
 {

@@ -1,6 +1,6 @@
 # Milestone 3: from a definition table to the whole kernel
 
-Milestone 3's gate is that all of Lean core translates and verifies. This document measures how far the milestone 2 translator is from that, and says what has to change. Step 1 of the order of work is built, and so is step 2's definition checker (see the end). The rest isn't yet.
+Milestone 3's gate is that all of Lean core translates and verifies. This document measures how far the milestone 2 translator is from that, and says what has to change. Step 1 of the order of work is built, so is step 2's definition checker, and step 3 has begun with non-recursive inductive types (see the end). The rest isn't yet.
 
 ## The survey
 
@@ -129,3 +129,57 @@ A test repeats the first of these, together with the translator's real output, w
 With this, what an output asks you to trust is the two verifiers, `set.mm`, and mmj2's definition checker. Beyond those, a translated theorem means what its Lean statement means only through the definitions, and those are now computed from Lean's own definitions rather than written by hand.
 
 **Still to do for step 2's gate:** every non-recursive definition in `Init.Prelude` translates. That needs Π-types into `Prop` and projections at least, and it needs inductive types for most definitions, which use them.
+
+## Step 3, first part: non-recursive inductive types (built)
+
+`tenet-zfc model-survey` tries the model on every definition in an export and reports the first thing that stops each one. On `Init`, before this part, 48 of 17,590 definitions translated with everything they use. 13,999 stopped first at an inductive type and 1,998 at a constructor.
+
+`Init`'s 606 inductive types break down like this:
+
+| Shape | Count |
+|---|---|
+| Non-recursive, unindexed types (structures, enumerations, classes) | 392 |
+| Non-recursive propositions | 140 |
+| Indexed propositions (40 of them recursive) | 55 |
+| Recursive types | 18 |
+| Nested types | 1 |
+
+So the first class built is the 392.
+
+**The encoding.** A value of such a type is a tagged tuple:
+- **Fields:** `a1 … ak` become nested pairs, `<. a1 , <. a2 , … <. ak , (/) >. … >. >.`.
+- **Tag:** constructor *i* puts `<. 1o , … >.` around that *i* times, then `<. (/) , … >.`. Two constructors are then told apart by `1o =/= (/)` alone.
+- **The type:** the union over its constructors of `U_ a1 e. T1 … { tag(a1, …) }`. It is a set by `iunexg` and `snex`, with no universe closure lemmas.
+- **The recursor:** case analysis on the tag, `if ( ( 1st ` t ) = (/) , minor0 fields , if ( … ) )`, with fields read back by `1st` and `2nd`.
+
+```
+df-lean.Option $a |- lean.Option = ( u e. Univ |-> ( x e. u |->
+    ( { <. (/) , (/) >. } u. U_ y e. x { <. 1o , <. (/) , <. y , (/) >. >. >. } ) ) ) $.
+df-lean.Option.some $a |- lean.Option.some = ( u e. Univ |-> ( x e. u |-> ( y e. x |->
+    <. 1o , <. (/) , <. y , (/) >. >. >. ) ) ) $.
+```
+
+**The computation rules.** Each constructor's computation rule (Lean's iota reduction) is a theorem: `I.rec params motive minors (c params fields) = minor_c fields`. It is proved in four steps:
+1. unfold the recursor and the constructor;
+2. show the constructor's tagged tuple is in the type, through the union with `elun1`/`elun2` and down its indexed unions with `ssiun2s` and `snidg`;
+3. evaluate the case analysis with a small simplifier: `1st` and `2nd` of an explicit pair by `op1stg` and `op2ndg`, and an `if` on a tag by `iftrued`, or by `iffalsed` with `1n0`;
+4. check that the result is exactly the minor premise applied to the fields.
+
+For `Bool`, `Prod` and `Option`, the type, constructor and recursor definitions pass mmj2's definition check, and both verifiers accept all five computation rules and every definitional equation. CI checks them on every push.
+
+**A `$d` problem the verifiers caught.** The first version substituted under the theorem's hypotheses. A hypothesis like `D e. X_ w e. A …` mentions the bound variable `w`, and rewriting inside a value that binds `w` needs `w` disjoint from the context. Both verifiers rejected it. Substitution now goes through `fvmptd3`, whose substitution hypothesis is closed (`x = A` alone). Sethood is proved under only the hypotheses the term uses.
+
+**The effect.** On `Init`, 1,468 definitions now translate with everything they use, up from 48. That is translation only; proofs are made and checked per theorem.
+
+| What stops a definition next | Definitions |
+|---|---|
+| `Nat` (recursive) | 5,190 |
+| `List` (recursive) | 3,243 |
+| `Eq` (indexed proposition) | 758 |
+| `Lean.Syntax` (recursive) | 674 |
+| projections | 649 |
+| `Lean.ParserDescr` (recursive) | 647 |
+| a structure field whose type binds a variable (`Functor.mk`) | 476 |
+| `False` (proposition) | 304 |
+
+**Next:** recursive types (`Nat`, `List`), with the type as a least fixed point and the recursor by well-founded recursion. Then inductive propositions and projections. Fields whose types bind variables are refused for now, because the computation rule matches hypotheses as text; they need matching up to renaming of bound variables.

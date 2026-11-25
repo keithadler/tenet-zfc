@@ -59,6 +59,9 @@ public sealed class Deduction(Prover pr)
     /// <summary>|- ( H -> A = A ).</summary>
     public Proof Refl(string h, string a) => pr.Apply("eqidd", S(("ph", h), ("A", a)));
 
+    /// <summary>|- ( H -> ( P <-> P ) ).</summary>
+    public Proof BiRefl(string h, string p) => pr.Apply("biidd", S(("ph", h), ("ps", p)));
+
     /// <summary>From |- ( H -> A = B ): |- ( H -> B = A ).</summary>
     public Proof Symm(Proof ab)
     {
@@ -159,6 +162,34 @@ public sealed class Deduction(Prover pr)
                 {
                     Proof pa = Sub("A") ?? Refl(h, L("A")), pb = Sub("B") ?? Refl(h, L("B"));
                     return pr.Apply("mpteq12dv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", L("B")), ("C", R("A")), ("D", R("B"))), pa, pb);
+                }
+            case "cop":  // <. A , B >.
+                return pr.Apply("opeq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
+            case "cun":  // ( A u. B )
+                return pr.Apply("uneq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
+            case "csn":  // { A }
+                return pr.Apply("sneqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
+            case "cif":  // if ( ph , A , B )
+                return pr.Apply("ifbieq12d", S(("ph", h), ("ps", L("ph")), ("ch", R("ph")), ("A", L("A")), ("B", L("B")), ("C", R("A")), ("D", R("B"))),
+                    Sub("ph") ?? BiRefl(h, L("ph")), Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
+            case "cixp": // X_ x e. A B ($d x ph)
+                return pr.Apply("ixpeq12dv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
+            case "wrex": // E. x e. A ph ($d x ph)
+                return pr.Apply("rexeqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
+            case "ciun": // U_ x e. A B: the domain by iuneq1d, the body by iuneq2dv
+                {
+                    string x = L("x");
+                    Proof? pa = Sub("A"), pb = Sub("B");
+                    Proof? dom = pa is Proof da ? pr.Apply("iuneq1d", S(("ph", h), ("x", x), ("A", L("A")), ("B", R("A")), ("C", L("B"))), da) : null;
+                    Proof? body = pb is Proof db
+                        ? pr.Apply("iuneq2dv", S(("ph", h), ("x", x), ("A", R("A")), ("B", L("B")), ("C", R("B"))),
+                            pr.Apply("adantr", S(("ph", h), ("ps", Split(db.Proves).X), ("ch", $"{x} e. {R("A")}")), db))
+                        : null;
+                    return dom is Proof d1 && body is Proof b1 ? Trans(d1, b1) : (dom ?? body!.Value);
                 }
             case "cs1":  // <" A ">
                 return pr.Apply("s1eqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
