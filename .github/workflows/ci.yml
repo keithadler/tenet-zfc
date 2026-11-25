@@ -24,6 +24,50 @@ jobs:
       - name: Replay the fixture traces
         shell: bash
         run: |
-          for f in Nat.add_succ Nat.add_succ.v3.0 eta437 acc436 quot syntax; do
+          for f in Nat.add_succ Nat.add_succ.v3.0 eta437 acc436 quot syntax gate; do
             dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll replay tests/fixtures/$f.ndjson tests/fixtures/$f.trace.ndjson
           done
+
+  # Emit set.mm proofs and check them with both Metamath verifiers. The tools and set.mm are pinned, so a run
+  # verifies against exactly the database the proofs were written for.
+  emit-and-verify:
+    runs-on: ubuntu-latest
+    env:
+      SETMM_COMMIT: 6315535f37e5e58d14ece8c34ddb204926446264
+      METAMATH_EXE_COMMIT: 580b4bd5ae6f2a0d746398b0033cddccba1b418b
+      MMVERIFY_COMMIT: 63a2aa3815cd5bf67892dbfc7f2048cbb177524c
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Fetch set.mm and the verifiers
+        run: |
+          mkdir -p "$RUNNER_TEMP/mm/setmm"
+          curl -fsSL -o "$RUNNER_TEMP/mm/setmm/set.mm" "https://raw.githubusercontent.com/metamath/set.mm/$SETMM_COMMIT/set.mm"
+          git clone -q https://github.com/metamath/metamath-exe "$RUNNER_TEMP/mm/metamath-exe"
+          git -C "$RUNNER_TEMP/mm/metamath-exe" checkout -q "$METAMATH_EXE_COMMIT"
+          cc -O2 -w -o "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP"/mm/metamath-exe/src/*.c
+          git clone -q https://github.com/david-a-wheeler/mmverify.py "$RUNNER_TEMP/mm/mmverify"
+          git -C "$RUNNER_TEMP/mm/mmverify" checkout -q "$MMVERIFY_COMMIT"
+      - name: Both verifiers accept set.mm itself
+        working-directory: ${{ runner.temp }}/mm/setmm
+        run: |
+          out=$("$RUNNER_TEMP/mm/metamath" "read set.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" set.mm
+      - name: Tests, with emitted proofs checked by both verifiers
+        env:
+          TENET_ZFC_SETMM: ${{ runner.temp }}/mm/setmm
+          TENET_ZFC_METAMATH: ${{ runner.temp }}/mm/metamath
+          TENET_ZFC_MMVERIFY: ${{ runner.temp }}/mm/mmverify/mmverify.py
+        run: dotnet test tests/TenetZfc.Tests -c Release -f net10.0
+      - name: Emit the gate theorem and verify it
+        run: |
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- emit tests/fixtures/gate.ndjson tests/fixtures/gate.trace.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/gate.mm"
+          cd "$RUNNER_TEMP/mm/setmm"
+          out=$("$RUNNER_TEMP/mm/metamath" "read gate.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" gate.mm

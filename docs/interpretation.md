@@ -63,6 +63,10 @@ Writing `set.mm` proofs mechanically needs one more piece of infrastructure: eve
 
 1. **Syntax.** Parse `set.mm`'s syntax axioms and turn any class or wff term into its syntax proof. Gate: a generated theorem with a non-trivial statement passes both verifiers.
 2. **Arithmetic bridge.** `|- ( A e. _om -> ( A +o (/) ) = A )` and the successor case, already `nna0` and `nnasuc`. Lemmas computing `suc`-numerals, so a `NatLitOp` step `2 + 2 ↝ 4` becomes a short chain.
-3. **Instance plumbing.** `OfNat.ofNat Nat n _ ↝ n` and `HAdd.hAdd … instHAdd a b ↝ Nat.add a b` are delta and projection steps. Their bridge is equality by unfolding, inside the shallow translation.
-4. **The gate theorem.** `2 + 2 = 4` from its trace, end to end, accepted by both verifiers.
+3. **Instance plumbing. Done, through the definition table.** The trace unfolds `HAdd.hAdd Nat Nat Nat (instHAdd Nat instAddNat)` through `Add.add Nat instAddNat` to `Nat.add`, and `OfNat.ofNat Nat n (instOfNatNat n)` to the literal `n`. The emitter's table maps each of those forms to the same class term, `+o` and the numeral.
+4. **The gate theorem. Done.** `tenet-zfc emit` replays the trace of `theorem two_add_two : 2 + 2 = 4 := rfl` (`tests/fixtures/Gate.lean`, compiled by Lean 4.36.0, exported by leanout, traced by Tenet) and writes
+   `lean-two_add_two $p |- ( suc suc (/) +o suc suc (/) ) = suc suc suc suc (/)`
+   with a 369-step proof. Both verifiers accept it, and CI checks it again on every push against pinned versions of `set.mm` and both verifiers.
+   - **The trace is the licence.** The proof evaluates both sides, and every addition it uses must be a `NatLitOp` step of the declaration's replayed trace. Remove that step and the emitter refuses. Change the statement to `2 + 2 = 5` and it refuses.
+   - **What the translation trusts:** the definition table. It's the single place the statement's meaning comes from, and it's small and checkable by hand. The same trace also carries Tenet's check of `Nat.add`'s defining equations over variables, `x + 0 ≡ x` and `x + succ y ≡ succ (x + y)`. Those are `set.mm`'s `nna0` and `nnasuc`, which is why `Nat.add` ↦ `+o` is the right entry.
 5. **`List.length_append`.** This needs `List` as an inductive, `List.rec`, and the first induction proof: the start of milestone 3's fixed-point encoding.

@@ -13,7 +13,7 @@ public class ReplayTests
 {
     private static string Fixture(string name) => Path.Combine(AppContext.BaseDirectory, "fixtures", name);
 
-    public static TheoryData<string> Exports => new() { "Nat.add_succ", "Nat.add_succ.v3.0", "eta437", "acc436", "quot", "syntax" };
+    public static TheoryData<string> Exports => new() { "Nat.add_succ", "Nat.add_succ.v3.0", "eta437", "acc436", "quot", "syntax", "gate" };
 
     private static (Terms T, Env Env, List<DeclTrace> Traces) Load(string name)
     {

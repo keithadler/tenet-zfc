@@ -6,7 +6,7 @@ Lean's foundation is a type theory, chosen because it is pleasant to work in. Th
 
 It is built on [Tenet](https://github.com/keithadler/tenet), an independent Lean 4 kernel that already re-checks all of Mathlib. Tenet does the checking; this project records each step it takes and prints the step as set theory.
 
-> **Status: milestone 1 met.** Tenet records the derivation behind each declaration it accepts. This repository replays those traces without Tenet. On all of Lean 4.36.0's `Init` (64,045 declarations, 86 million steps), every step re-derives with 0 failures. Every definition and theorem is concluded by its trace, and every inductive block, including the nested `Lean.Syntax`, has its structure and recursors rechecked. Two stated assumptions remain (the meaning of the Nat operations, and rule K's typing side condition). No ZFC output exists yet: that is milestone 2. See [docs/trace-format.md](docs/trace-format.md#results).
+> **Status: milestone 1 met; milestone 2 half met.** Tenet records the derivation behind each declaration it accepts, and this repository replays those traces without Tenet. On all of Lean 4.36.0's `Init` (64,045 declarations, 86 million steps), every step re-derives, with 0 failures. The first ZFC output exists: the Lean theorem `2 + 2 = 4` is emitted from its trace as a `set.mm` theorem that both `metamath-exe` and `mmverify.py` accept, rechecked in CI. Next is `List.length_append`, the other half of the milestone 2 gate. See [docs/interpretation.md](docs/interpretation.md) and [docs/trace-format.md](docs/trace-format.md#results).
 
 ## Why
 
@@ -35,7 +35,10 @@ The core translator uses no AI. AI may draft bridge lemmas, shrink proofs or loo
 ```bash
 tenet check Foo.ndjson --trace Foo.trace.ndjson                   # Tenet, from its main branch
 dotnet run --project src/TenetZfc.Cli -- replay Foo.ndjson Foo.trace.ndjson
+dotnet run --project src/TenetZfc.Cli -- emit Foo.ndjson Foo.trace.ndjson set.mm out.mm
 ```
+
+`emit` writes a `.mm` file that includes `set.mm` and adds a theorem for each Lean theorem it covers. Check the file with a Metamath verifier, such as `metamath "read out.mm" "verify proof *"`.
 
 ## Documents
 
