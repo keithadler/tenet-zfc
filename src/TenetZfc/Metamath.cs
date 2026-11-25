@@ -40,6 +40,7 @@ public sealed class Database
     private readonly Dictionary<string, Statement> _byLabel = new();
     private readonly HashSet<string> _constants = new();
     private readonly Dictionary<string, Statement> _floatOf = new();   // variable → its (last) $f
+    private readonly List<List<Statement>> _scopes = [new()];          // the hypotheses active at each nesting level
 
     public IReadOnlyDictionary<string, Statement> Statements => _byLabel;
     public Dictionary<string, List<Statement>> SyntaxByType { get; } = new();
@@ -54,6 +55,9 @@ public sealed class Database
         db.Parse(Tokens(File.ReadAllText(path)));
         return db;
     }
+
+    /// <summary>Read more statements into the database, as if they followed what it has read: the translator's own definitions.</summary>
+    public void Extend(string text) => Parse(Tokens(text));
 
     private static IEnumerable<string> Tokens(string text)
     {
@@ -85,8 +89,7 @@ public sealed class Database
 
     private void Parse(IEnumerable<string> tokens)
     {
-        // Scope: the hypotheses active at each nesting level, in order of appearance.
-        var scopes = new List<List<Statement>> { new() };
+        List<List<Statement>> scopes = _scopes;
         using IEnumerator<string> it = tokens.GetEnumerator();
         string? label = null;
         List<string> Until(string end)
@@ -189,6 +192,9 @@ public sealed class Prover
 {
     private readonly Database _db;
     public Prover(Database db) => _db = db;
+
+    /// <summary>The database the prover parses and applies against.</summary>
+    public Database Database => _db;
 
     /// <summary>The syntax tree of an expression of this typecode, or null if it does not parse.</summary>
     public SyntaxTree? Parse(string type, IReadOnlyList<string> syms)
@@ -453,6 +459,9 @@ public sealed class Writer
         _sb.AppendLine("  $}");
         _sb.AppendLine();
     }
+
+    /// <summary>Text written as it is: declarations and definitions.</summary>
+    public void Raw(string text) => _sb.AppendLine(text);
 
     public override string ToString() => _sb.ToString();
 }

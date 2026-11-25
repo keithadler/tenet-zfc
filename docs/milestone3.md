@@ -1,6 +1,6 @@
 # Milestone 3: from a definition table to the whole kernel
 
-Milestone 3's gate is that all of Lean core translates and verifies. This document measures how far the milestone 2 translator is from that, and says what has to change. Nothing below the survey is built yet.
+Milestone 3's gate is that all of Lean core translates and verifies. This document measures how far the milestone 2 translator is from that, and says what has to change. Step 1 of the order of work is built (see the end); the rest isn't yet.
 
 ## The survey
 
@@ -71,3 +71,42 @@ The plan is therefore to add a third check to the pipeline: every `$a` the trans
 5. Quotients, choice, literals and `String`. Gate: the milestone's own, all of `Init`.
 
 `survey` is rerun after each step and its counts recorded here.
+
+## Step 1: the model (built)
+
+`src/TenetZfc/Model.cs` translates any Lean term built from λ, Π, application, sorts, `let` and constants:
+
+| Lean | `set.mm` |
+|---|---|
+| `fun x : A => b` | `( x e. ⟦A⟧ |-> ⟦b⟧ )` |
+| `f a` | `( ⟦f⟧ ` ⟦a⟧ )` |
+| `A → B` (non-dependent) | `( ⟦B⟧ ^m ⟦A⟧ )`, the functions from `⟦A⟧` to `⟦B⟧` |
+| `(x : A) → B` | `X_ x e. ⟦A⟧ ⟦B⟧` |
+| `Prop` | `2o` |
+| any other sort | the universe `U` |
+| a constant `c` | `( lean.c ` U )` |
+
+Each definition becomes a new constant, with a syntax axiom and a definition that makes it a function of the universe:
+
+```
+$c lean.Function.comp $.
+clean.Function.comp $a class lean.Function.comp $.
+df-lean.Function.comp $a |- lean.Function.comp = ( u e. Univ |-> ( x e. u |-> ( y e. u |-> ( z e. u |->
+    ( w e. ( z ^m y ) |-> ( v e. ( y ^m x ) |-> ( t e. x |-> ( w ` ( v ` t ) ) ) ) ) ) ) ) ) $.
+```
+
+The constants a definition uses are defined before it. Each binder gets its own set variable, so substitution never captures one, and the definition's set variables are declared distinct.
+
+Each definition also gets its **definitional equation**, proved by one `fvmptd` step per argument. The rewriting inside a map uses the congruence prover, which now handles `|->` and functions under application (`mpteq12dv`, `fveq1d`, `fveq12d`). `tenet-zfc define` writes the definitions and their equations:
+
+- `id`: `|- ( ( ( U e. Univ /\ A e. U ) /\ B e. A ) -> ( ( ( lean.id ` U ) ` A ) ` B ) = B )`, 716 steps;
+- `Function.comp`: `( ( ( ( ( ( ( lean.Function.comp ` U ) ` A ) ` B ) ` C ) ` D ) ` E ) ` F ) = ( D ` ( E ` F ) )`, for `D e. ( C ^m B )`, `E e. ( B ^m A )` and `F e. A`, 8,274 steps;
+- `Function.const`: `( ( ( ( ( lean.Function.const ` U ) ` A ) ` B ) ` C ) ` D ) = C`, 2,741 steps.
+
+Both verifiers accept all three, and CI translates and verifies them again on every push. That meets step 1's gate.
+
+**What step 1 leaves open:**
+- **The definitions are not yet checked.** The `df-lean.*` axioms are new `$a` statements. Until step 2 puts a definition checker in the pipeline, a mistake in one would go unnoticed by both verifiers, which take every `$a` on trust. Step 2 is what makes them safe.
+- **One universe for every level.** Every sort but `Prop` is the same `U`. That's sound for definitional equations, which only apply functions to their arguments. It can't state `Type u : Type (u+1)`, which needs `U e. U`; milestone 4 separates the levels.
+- **What the theorems assume.** The equations assume `U e. Univ`: they hold in every Grothendieck universe, as hypotheses, with no new axiom. ZFC proves such universes exist, for example `( R1 ` om )`, the hereditarily finite sets (`set.mm`'s `omina` with `inagrud`). ZFC doesn't prove that one containing `ω` exists, so a theorem about `Nat` will need the bounded universes of milestone 4.
+- **Not yet in the model:** inductive types, recursors, projections, literals, and Π-types into `Prop`, which should be propositions rather than sets of functions. Each of these is refused with its reason.

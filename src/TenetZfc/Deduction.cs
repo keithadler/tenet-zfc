@@ -150,7 +150,16 @@ public sealed class Deduction(Prover pr)
                 {
                     return pr.Apply("fveq2d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("F", L("F"))), Sub("A")!.Value);
                 }
-                break;
+                if (!Has(Child("A"), hole))
+                {
+                    return pr.Apply("fveq1d", S(("ph", h), ("A", L("A")), ("F", L("F")), ("G", R("F"))), Sub("F")!.Value);
+                }
+                return pr.Apply("fveq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("F", L("F")), ("G", R("F"))), Sub("F")!.Value, Sub("A")!.Value);
+            case "cmpt": // ( x e. A |-> B ): the bound variable must not occur in the hypotheses ($d x ph)
+                {
+                    Proof pa = Sub("A") ?? Refl(h, L("A")), pb = Sub("B") ?? Refl(h, L("B"));
+                    return pr.Apply("mpteq12dv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", L("B")), ("C", R("A")), ("D", R("B"))), pa, pb);
+                }
             case "cs1":  // <" A ">
                 return pr.Apply("s1eqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
             case "wceq": // A = B

@@ -10,6 +10,9 @@ const string Usage = """
                                                          replay, then write set.mm theorems for the theorems the
                                                          emitter covers (Nat arithmetic equations, and induction
                                                          on lists like List.length_append)
+      tenet-zfc define <export.ndjson> <set.mm> <out.mm> <name>...
+                                                         milestone 3: translate definitions by the generic model,
+                                                         each with its definitional equation as a theorem
       tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
                                                          which constants block the rest
 
@@ -22,6 +25,38 @@ const string Usage = """
 if (args.Length == 5 && args[0] == "emit")
 {
     return Emit(args[1], args[2], args[3], args[4]);
+}
+if (args.Length >= 5 && args[0] == "define")
+{
+    // Milestone 3: definitions through the generic model, each with its definitional equation.
+    var dt = new Terms();
+    TenetZfc.Environment denv = Reader.ReadExport(dt, args[1]);
+    var dpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
+    var model = new Model(dt, denv, dpr);
+    var theorems = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean definitions translated by tenet-zfc's model (docs/milestone3.md)");
+    var proved = new List<(string Label, TenetZfc.Metamath.Expr Statement, List<string> Proof, string[] Distinct, string Name)>();
+    int status = 0;
+    foreach (string name in args[4..])
+    {
+        try
+        {
+            var (stmt, proof, distinct) = model.Equation(dt.Of(name));
+            proved.Add(($"lean-{name}-eq", stmt, proof, distinct, name));
+            Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps)");
+        }
+        catch (Model.Refused e)
+        {
+            Console.WriteLine($"{name}: refused: {e.Message}");
+            status = 1;
+        }
+    }
+    theorems.Raw(model.Declarations);
+    foreach (var p in proved)
+    {
+        theorems.Theorem(p.Label, $"The definitional equation of {p.Name}.", p.Statement, p.Proof, p.Distinct);
+    }
+    File.WriteAllText(args[3], theorems.ToString());
+    return status;
 }
 if (args.Length == 2 && args[0] == "survey")
 {
