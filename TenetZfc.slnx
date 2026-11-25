@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TenetZfc.Cli/TenetZfc.Cli.csproj" />
+    <Project Path="src/TenetZfc/TenetZfc.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TenetZfc.Tests/TenetZfc.Tests.csproj" />
+  </Folder>
+</Solution>

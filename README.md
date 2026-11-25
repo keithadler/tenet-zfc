@@ -6,7 +6,7 @@ Lean's foundation is a type theory, chosen because it is pleasant to work in. Th
 
 It is built on [Tenet](https://github.com/keithadler/tenet), an independent Lean 4 kernel that already re-checks all of Mathlib. Tenet does the checking; this project records each step it takes and prints the step as set theory.
 
-> **Status: design.** Nothing is implemented yet. This repository holds the specification and the first design notes. Milestone 1 (tracing in Tenet) is next.
+> **Status: milestone 1, in progress.** Tenet records the derivation behind each declaration it accepts (`tenet check --trace`, on Tenet's main branch). This repository replays those traces without Tenet: every single-rule step (beta, delta, iota, projections, quotients, literal arithmetic, and the equality rules that need no premises) is re-derived and checked. Conclusions over many steps aren't replayed yet, and no ZFC output exists yet. See [docs/trace-format.md](docs/trace-format.md#replay).
 
 ## Why
 
@@ -30,11 +30,18 @@ The translator doesn't need anyone to write the Riemann Hypothesis in ZFC's lang
 
 The core translator uses no AI. AI may draft bridge lemmas, shrink proofs or look for universe-free arguments, but anything it produces goes through the verifiers.
 
+## Try it
+
+```bash
+tenet check Foo.ndjson --trace Foo.trace.ndjson                   # Tenet, from its main branch
+dotnet run --project src/TenetZfc.Cli -- replay Foo.ndjson Foo.trace.ndjson
+```
+
 ## Documents
 
 - [docs/spec.md](docs/spec.md): the full specification, including goals, milestones and risks
 - [docs/rule-map.md](docs/rule-map.md): each of Tenet's kernel rules and the bridge lemma it needs
-- [docs/trace-format.md](docs/trace-format.md): draft certificate format for milestone 1
+- [docs/trace-format.md](docs/trace-format.md): the trace format, and what replay checks so far
 
 ## Milestones
 

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>TenetZfc</RootNamespace>
+    <Description>Replays Tenet's derivation traces of Lean 4 declarations, without Tenet.</Description>
+  </PropertyGroup>
+</Project>

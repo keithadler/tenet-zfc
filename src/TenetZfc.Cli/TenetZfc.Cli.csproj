@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>tenet-zfc</AssemblyName>
+    <RootNamespace>TenetZfc.Cli</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../TenetZfc/TenetZfc.csproj" />
+  </ItemGroup>
+</Project>

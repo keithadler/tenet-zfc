@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet build -c Release
+      - run: dotnet test -c Release --no-build
+      # Replay every committed trace through the command-line tool as well, so the exit status is exercised.
+      - name: Replay the fixture traces
+        shell: bash
+        run: |
+          for f in Nat.add_succ Nat.add_succ.v3.0 eta437 acc436; do
+            dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll replay tests/fixtures/$f.ndjson tests/fixtures/$f.trace.ndjson
+          done
