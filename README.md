@@ -6,7 +6,7 @@ Lean's foundation is a type theory, chosen because it is pleasant to work in. Th
 
 It is built on [Tenet](https://github.com/keithadler/tenet), an independent Lean 4 kernel that already re-checks all of Mathlib. Tenet does the checking; this project records each step it takes and prints the step as set theory.
 
-> **Status: milestone 1 met; milestone 2 half met.** Tenet records the derivation behind each declaration it accepts, and this repository replays those traces without Tenet. On all of Lean 4.36.0's `Init` (64,045 declarations, 86 million steps), every step re-derives, with 0 failures. The first ZFC output exists: the Lean theorem `2 + 2 = 4` is emitted from its trace as a `set.mm` theorem that both `metamath-exe` and `mmverify.py` accept, rechecked in CI. Next is `List.length_append`, the other half of the milestone 2 gate. See [docs/interpretation.md](docs/interpretation.md) and [docs/trace-format.md](docs/trace-format.md#results).
+> **Status: milestone 1 met; milestone 2 half met.** Tenet records the derivation behind each declaration it accepts, and this repository replays those traces without Tenet. On all of Lean 4.36.0's `Init` (64,045 declarations, 86 million steps), every step re-derives, with 0 failures. The first ZFC output exists: the Lean theorem `2 + 2 = 4` is emitted from its trace as the `set.mm` theorem `|- ( 2 + 2 ) = 4`, which both `metamath-exe` and `mmverify.py` accept and CI rechecks on every push. Next is `List.length_append`, the other half of the milestone 2 gate. See [docs/interpretation.md](docs/interpretation.md) and [docs/trace-format.md](docs/trace-format.md#results).
 
 ## Why
 

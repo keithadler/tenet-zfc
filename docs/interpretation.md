@@ -27,26 +27,35 @@ Milestone 2's gate theorems (`2 + 2 = 4`, `List.length_append`) need only the fi
 
 | Lean | `set.mm` | Labels |
 |---|---|---|
-| `Prop` | `2o`, which is `{ (/) , 1o }` | `df-2o`, `df2o3` |
-| a proposition `p` | `1o` if `p` holds, `(/)` if not | |
+| `Prop` | `2o`, which is `{ (/) , 1o }`, when a proposition is used as a value | `df-2o`, `df2o3` |
+| a proposition `p` in a statement | a wff (see step 5 of the plan) | |
 | any proof of a proposition | `(/)` (proof irrelevance holds by construction) | |
-| `Nat` | `_om` | `df-om`, `omex` |
-| `Nat.zero` | `(/)` | `peano1` |
-| `Nat.succ n` | `suc ⟦n⟧` | `df-suc`, `peano2` |
-| a literal `n` | `suc` applied n times to `(/)` (the decimal library later) | |
-| `Nat.add a b` | `( ⟦a⟧ +o ⟦b⟧ )` | `df-oadd`, `nna0`, `nnasuc` |
-| `Nat.rec` with a constant motive | finite recursion | `df-rdg`, `fr0g`, `frsuc` |
+| `Nat` | `NN0`, the natural numbers inside the complex numbers | `df-n0`, `nn0ind` |
+| `Nat.zero` | `0` | |
+| `Nat.succ n` | `( ⟦n⟧ + 1 )` | |
+| a literal `n` | a decimal numeral: a digit, or `; A B` for 10A + B | `df-dec` |
+| `Nat.add a b` | `( ⟦a⟧ + ⟦b⟧ )` | `2p2e4` and the digit table, `decadd` |
+| `Nat.rec` | recursion on `NN0` | `seq`, `om2uzrdg` |
+| `List α` | `Word ⟦α⟧`, finite sequences | `df-word` |
+| `List.nil` | `(/)` | `ccatlid` |
+| `List.cons a l` | `( <" ⟦a⟧ "> ++ ⟦l⟧ )` | `df-s1`, `df-concat` |
+| `List.length l` | `( # ` ⟦l⟧ )` | `lencl`, `hashs1` |
+| `l ++ m` | `( ⟦l⟧ ++ ⟦m⟧ )` | `ccatlen`, `ccatass` |
 | `(x : A) → B` | `X_ x e. ⟦A⟧ ⟦B⟧` | `df-ixp`, `elixp` |
 | `fun x : A => b` | `( x e. ⟦A⟧ |-> ⟦b⟧ )` | `df-mpt`, `fvmpt` |
 | `f a` | `( ⟦f⟧ ` ⟦a⟧ )` | `df-fv` |
 | `@Eq α a b` | `if ( ⟦a⟧ = ⟦b⟧ , 1o , (/) )` | `df-if` |
 | `Type u` where needed | `( R1 ` A )` for a large enough limit `A`, or a Grothendieck universe | `df-r1`, `df-gru`, `ax-groth` |
 
-`Nat.add` is mapped to `+o`, not to `Nat.add`'s compiled body unfolded into recursors. Tenet already treats `Nat.add` as a primitive that satisfies `x + 0 = x` and `x + succ y = succ (x + y)`, and `nna0` and `nnasuc` are exactly those equations in `set.mm`. That correspondence is a lemma to prove once, per primitive, and it is also where the replay's "Nat operations mean what their names say" assumption gets discharged.
+**Why `NN0` and not `ω`.** The first version mapped `Nat` to the finite ordinals `ω`, with `+o` for addition, because `nna0` and `nnasuc` are exactly `Nat.add`'s defining equations. Two things favour `set.mm`'s `NN0` instead:
+- **Lists.** `set.mm`'s theory of finite sequences (`Word`, `++`, `#`) measures lengths in `NN0`, so `List.length` lands there anyway.
+- **Numerals.** `NN0` has decimal numerals and a decimal-arithmetic toolkit, which the spec otherwise had to build. With `ω`, `7 + 5` took 1,924 proof steps over iterated `suc`; on `NN0` it is the table theorem `7p5e12`.
+
+`Nat.add` is mapped to `+`, not to its compiled body unfolded into recursors. Tenet checks, once per environment, that `Nat.add` satisfies `x + 0 = x` and `x + succ y = succ (x + y)`, and those equations hold of `+` on `NN0` (`addrid`, `addass`). That correspondence is a lemma to prove once per primitive, and it is where the replay's "Nat operations mean what their names say" assumption gets discharged.
 
 ## What a translated theorem says
 
-For a Lean theorem `t : P` with `P : Prop`, the output is a `set.mm` theorem `|- ⟦P⟧ = 1o`. If `P` mentions locals, it is guarded by their hypotheses. For `P` an equation `@Eq α a b`, that simplifies to `|- ⟦a⟧ = ⟦b⟧`. For `2 + 2 = 4` the output is `|- ( 2 +o 2 ) = 4`, with numerals as iterated `suc`. Whether that is the statement a mathematician means is the job of the definition table (spec, "Testing and trust"). Here the table entry is `HAdd.hAdd Nat Nat Nat instHAdd ↦ +o`, justified by unfolding the instance to `Nat.add`.
+For a Lean theorem `t : P` with `P : Prop`, the output is a `set.mm` theorem `|- ⟦P⟧ = 1o`. If `P` mentions locals, it is guarded by their hypotheses. For `P` an equation `@Eq α a b`, that simplifies to `|- ⟦a⟧ = ⟦b⟧`. For `2 + 2 = 4` the output is `|- ( 2 + 2 ) = 4`. That is word for word `set.mm`'s own theorem `2p2e4`, the kind of cross-check the spec asks for. Whether a translated statement means what a mathematician means is the job of the definition table (spec, "Testing and trust"). Here the table entry is `HAdd.hAdd Nat Nat Nat (instHAdd Nat instAddNat) ↦ +`, justified by the trace unfolding the instance to `Nat.add`.
 
 ## Emission
 
@@ -61,12 +70,17 @@ Writing `set.mm` proofs mechanically needs one more piece of infrastructure: eve
 
 ## Plan for the milestone 2 gate
 
-1. **Syntax.** Parse `set.mm`'s syntax axioms and turn any class or wff term into its syntax proof. Gate: a generated theorem with a non-trivial statement passes both verifiers.
-2. **Arithmetic bridge.** `|- ( A e. _om -> ( A +o (/) ) = A )` and the successor case, already `nna0` and `nnasuc`. Lemmas computing `suc`-numerals, so a `NatLitOp` step `2 + 2 ↝ 4` becomes a short chain.
+1. **Syntax. Done.** `src/TenetZfc/Metamath.cs` reads `set.mm` (121,309 statements and 1,485 syntax axioms, in 0.9 s), parses any class or wff expression with the syntax axioms, and assembles a proof from an assertion, a substitution and the proofs of its hypotheses, filling in every syntax subproof. It refuses a hypothesis that doesn't match before any verifier sees it.
+2. **Arithmetic bridge. Done for single digits.** `Bridge.Add(a, b)` proves `|- ( ⟦a⟧ + ⟦b⟧ ) = ⟦a + b⟧` from `set.mm`'s addition table (`2p2e4`, `7p5e12`, …). The other order comes through `addcomi`, and the zero cases through `addrid` and `addlid`. Multi-digit sums need `set.mm`'s `decadd` toolkit, which isn't wired in yet; until then the emitter says so and emits nothing. (An earlier version on `ω` proved `( a +o b ) = a+b` by iterated `nnasuc`, which took 1,924 steps for `7 + 5`.)
 3. **Instance plumbing. Done, through the definition table.** The trace unfolds `HAdd.hAdd Nat Nat Nat (instHAdd Nat instAddNat)` through `Add.add Nat instAddNat` to `Nat.add`, and `OfNat.ofNat Nat n (instOfNatNat n)` to the literal `n`. The emitter's table maps each of those forms to the same class term, `+o` and the numeral.
 4. **The gate theorem. Done.** `tenet-zfc emit` replays the trace of `theorem two_add_two : 2 + 2 = 4 := rfl` (`tests/fixtures/Gate.lean`, compiled by Lean 4.36.0, exported by leanout, traced by Tenet) and writes
-   `lean-two_add_two $p |- ( suc suc (/) +o suc suc (/) ) = suc suc suc suc (/)`
-   with a 369-step proof. Both verifiers accept it, and CI checks it again on every push against pinned versions of `set.mm` and both verifiers.
+   `lean-two_add_two $p |- ( 2 + 2 ) = 4`
+   with a 30-step proof. On the earlier `ω` encoding it was `( suc suc (/) +o suc suc (/) ) = suc suc suc suc (/)` in 369 steps. Both verifiers accept it, and CI checks it again on every push against pinned versions of `set.mm` and both verifiers.
    - **The trace is the licence.** The proof evaluates both sides, and every addition it uses must be a `NatLitOp` step of the declaration's replayed trace. Remove that step and the emitter refuses. Change the statement to `2 + 2 = 5` and it refuses.
-   - **What the translation trusts:** the definition table. It's the single place the statement's meaning comes from, and it's small and checkable by hand. The same trace also carries Tenet's check of `Nat.add`'s defining equations over variables, `x + 0 ≡ x` and `x + succ y ≡ succ (x + y)`. Those are `set.mm`'s `nna0` and `nnasuc`, which is why `Nat.add` ↦ `+o` is the right entry.
-5. **`List.length_append`.** This needs `List` as an inductive, `List.rec`, and the first induction proof: the start of milestone 3's fixed-point encoding.
+   - **What the translation trusts:** the definition table. It's the single place the statement's meaning comes from, and it's small and checkable by hand. The same trace also carries Tenet's check of `Nat.add`'s defining equations over variables, `x + 0 ≡ x` and `x + succ y ≡ succ (x + y)`. Those hold of `+` on `NN0`, which is why `Nat.add` ↦ `+` is the right entry.
+5. **`List.length_append`. Designed, not built.** Its proof term (Lean 4.36, `Init.Data.List.Basic`) is an induction, `List.rec` into `Prop`, whose cases rewrite with `Nat.zero_add` and `Nat.succ_add` through `congrArg`, `congr`, `Eq.trans`, `eq_self` and `of_eq_true`. The export has 12 theorems, each with its own proof term. Emitting it takes three new pieces:
+   - **Propositions as wffs.** A `Prop` in a statement is translated as a `set.mm` wff: `@Eq α a b` becomes `⟦a⟧ = ⟦b⟧`, `∀ x : A, P` becomes `A. x ( x e. ⟦A⟧ -> ⟦P⟧ )`, `True` becomes `T.`, `P → Q` becomes `( ⟦P⟧ -> ⟦Q⟧ )`. A type variable `α : Sort u` becomes a class variable.
+   - **Proof terms as deductions.** Natural deduction maps onto `set.mm` directly: `fun x => p` is ∀-introduction, an application `h a` is ∀-elimination with `a`'s typing fact, `Eq.refl` is `eqid`, `Eq.trans` is `eqtr`, `congrArg f` is the equality congruence for `f`'s translation, and `of_eq_true`/`eq_self` relate a wff to `T.`. Each step's typing and definitional equalities come from the replayed trace. A conversion between definitionally equal propositions needs `⟦P⟧ <-> ⟦P'⟧`, assembled from the trace's reduction steps.
+   - **Induction on lists.** `List.rec` into `Prop` becomes induction on `Word`. `set.mm`'s `wrdind` adds at the end of a word, while `List.rec` adds at the front, so a cons-style induction lemma is one bridge lemma to prove once.
+
+   `set.mm` already proves `ccatlen`, the translated statement, so the result can be cross-checked as `2 + 2 = 4` was.
