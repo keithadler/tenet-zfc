@@ -68,6 +68,129 @@ public sealed class Ops(Terms t)
         return r;
     }
 
+    /// <summary>Lean's instantiate_rev: bound variable i becomes subst[n - 1 - i], so subst is in binder order.</summary>
+    public Expr InstantiateRev(Expr e, IReadOnlyList<Expr> subst)
+    {
+        var rev = new List<Expr>(subst.Count);
+        for (int i = subst.Count - 1; i >= 0; i--)
+        {
+            rev.Add(subst[i]);
+        }
+        return Instantiate(e, rev);
+    }
+
+    /// <summary>Replace free variable fvars[i] by the bound variable that a binder telescope over fvars gives it.</summary>
+    public Expr Abstract(Expr e, IReadOnlyList<Expr> fvars)
+    {
+        if (!e.HasFVar || fvars.Count == 0)
+        {
+            return e;
+        }
+        var index = new Dictionary<Expr, int>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < fvars.Count; i++)
+        {
+            index[fvars[i]] = i;
+        }
+        var memo = new Dictionary<(Expr, int), Expr>();
+        return Abs(e, 0, index, fvars.Count, memo);
+    }
+
+    private Expr Abs(Expr e, int depth, Dictionary<Expr, int> index, int n, Dictionary<(Expr, int), Expr> memo)
+    {
+        if (!e.HasFVar)
+        {
+            return e;
+        }
+        if (memo.TryGetValue((e, depth), out Expr? hit))
+        {
+            return hit;
+        }
+        Expr r = e switch
+        {
+            FVar => index.TryGetValue(e, out int i) ? _t.BVar(depth + n - 1 - i) : e,
+            App a => _t.App(Abs(a.Fn, depth, index, n, memo), Abs(a.Arg, depth, index, n, memo)),
+            Binder b => _t.Binding(b.IsPi, b.BinderName, b.Info, Abs(b.Domain, depth, index, n, memo), Abs(b.Body, depth + 1, index, n, memo)),
+            Let l => _t.Let(l.BinderName, Abs(l.Type, depth, index, n, memo), Abs(l.Value, depth, index, n, memo), Abs(l.Body, depth + 1, index, n, memo)),
+            Proj p => _t.Proj(p.StructName, p.Idx, Abs(p.Struct, depth, index, n, memo)),
+            _ => e,
+        };
+        memo[(e, depth)] = r;
+        return r;
+    }
+
+    /// <summary>Whether bound variable <paramref name="idx"/> occurs loose.</summary>
+    public static bool HasLooseBVar(Expr e, int idx)
+    {
+        if (e.LooseBVarRange <= idx)
+        {
+            return false;
+        }
+        return e switch
+        {
+            BVar b => b.Idx == idx,
+            App a => HasLooseBVar(a.Fn, idx) || HasLooseBVar(a.Arg, idx),
+            Binder b => HasLooseBVar(b.Domain, idx) || HasLooseBVar(b.Body, idx + 1),
+            Let l => HasLooseBVar(l.Type, idx) || HasLooseBVar(l.Value, idx) || HasLooseBVar(l.Body, idx + 1),
+            Proj p => HasLooseBVar(p.Struct, idx),
+            _ => false,
+        };
+    }
+
+    /// <summary>Lower every loose bound variable at or above <paramref name="start"/> by <paramref name="by"/>.</summary>
+    public Expr LowerLooseBVars(Expr e, int start, int by) => Lower(e, start, by, new Dictionary<(Expr, int), Expr>());
+
+    private Expr Lower(Expr e, int start, int by, Dictionary<(Expr, int), Expr> memo)
+    {
+        if (e.LooseBVarRange <= start)
+        {
+            return e;
+        }
+        if (memo.TryGetValue((e, start), out Expr? hit))
+        {
+            return hit;
+        }
+        Expr r = e switch
+        {
+            BVar b => b.Idx >= start ? _t.BVar(b.Idx - by) : e,
+            App a => _t.App(Lower(a.Fn, start, by, memo), Lower(a.Arg, start, by, memo)),
+            Binder b => _t.Binding(b.IsPi, b.BinderName, b.Info, Lower(b.Domain, start, by, memo), Lower(b.Body, start + 1, by, memo)),
+            Let l => _t.Let(l.BinderName, Lower(l.Type, start, by, memo), Lower(l.Value, start, by, memo), Lower(l.Body, start + 1, by, memo)),
+            Proj p => _t.Proj(p.StructName, p.Idx, Lower(p.Struct, start, by, memo)),
+            _ => e,
+        };
+        memo[(e, start)] = r;
+        return r;
+    }
+
+    /// <summary>Lean's cheap_beta_reduce: beta only when the result is immediate.</summary>
+    public Expr CheapBetaReduce(Expr e)
+    {
+        if (e is not App)
+        {
+            return e;
+        }
+        Expr fn = Spine(e, out List<Expr> args);
+        if (fn is not Binder { IsPi: false })
+        {
+            return e;
+        }
+        int i = 0;
+        while (fn is Binder { IsPi: false } l && i < args.Count)
+        {
+            i++;
+            fn = l.Body;
+        }
+        if (fn.LooseBVarRange == 0)
+        {
+            return _t.MkApp(fn, args.Skip(i));
+        }
+        if (fn is BVar b)
+        {
+            return _t.MkApp(args[i - b.Idx - 1], args.Skip(i));
+        }
+        return e;
+    }
+
     /// <summary>Raise every loose bound variable of <paramref name="e"/> by <paramref name="by"/>.</summary>
     public Expr Lift(Expr e, int by) => by == 0 || e.LooseBVarRange == 0 ? e : LiftAt(e, 0, by, new Dictionary<(Expr, int), Expr>());
 

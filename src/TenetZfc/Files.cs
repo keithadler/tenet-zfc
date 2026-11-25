@@ -19,6 +19,9 @@ public sealed class ConstInfo
     /// <summary>The body, for a definition or theorem: the constants delta reduction may unfold.</summary>
     public Expr? Value { get; init; }
 
+    /// <summary>The body of an opaque constant: type-checked, never unfolded.</summary>
+    public Expr? OpaqueValue { get; init; }
+
     // constructors
     public Name? Induct { get; init; }
     public int NumParams { get; init; }
@@ -30,6 +33,10 @@ public sealed class ConstInfo
     public int NumIndices { get; init; }
     public bool K { get; init; }
     public RecRule[] Rules { get; init; } = [];
+
+    // inductive types
+    public bool IsRec { get; init; }
+    public Name[] Ctors { get; init; } = [];
 
     public int MajorIdx => NumParams + NumMotives + NumMinors + NumIndices;
 }
@@ -354,7 +361,12 @@ public sealed class Reader
         }
         else if (o.TryGetProperty("opaque", out JsonElement op))
         {
-            foreach (JsonElement x in Each(op)) { env.Add(Simple(x, ConstKind.Opaque, null)); }
+            // An opaque constant's value is checked but never unfolded, so it is kept apart from Value.
+            foreach (JsonElement x in Each(op))
+            {
+                ConstInfo c = Simple(x, ConstKind.Opaque, null);
+                env.Add(new ConstInfo { Name = c.Name, Kind = c.Kind, LevelParams = c.LevelParams, Type = c.Type, OpaqueValue = E(x.GetProperty("value")) });
+            }
         }
         else if (o.TryGetProperty("quot", out JsonElement q))
         {
@@ -364,7 +376,12 @@ public sealed class Reader
         {
             foreach (JsonElement t in Arr(ind, "types", "inductiveVals").EnumerateArray())
             {
-                env.Add(Simple(t, ConstKind.Inductive, null));
+                env.Add(new ConstInfo
+                {
+                    Name = N(t.GetProperty("name")), Kind = ConstKind.Inductive, LevelParams = Params(t), Type = E(t.GetProperty("type")),
+                    NumParams = t.GetProperty("numParams").GetInt32(), NumIndices = t.GetProperty("numIndices").GetInt32(),
+                    IsRec = t.GetProperty("isRec").GetBoolean(), Ctors = t.GetProperty("ctors").EnumerateArray().Select(N).ToArray(),
+                });
             }
             foreach (JsonElement c in Arr(ind, "ctors", "constructorVals").EnumerateArray())
             {

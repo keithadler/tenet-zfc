@@ -31,29 +31,83 @@ public class ReplayTests
         ReplayReport r = new Replayer(t, env).Replay(traces);
         Assert.True(r.Ok, r.Format());
         Assert.Empty(r.Unsupported);
-        Assert.True(r.Count(Verdict.Verified) > 0);
-        Assert.Equal(r.Steps, r.Count(Verdict.Verified) + r.Count(Verdict.NotYet));
+        // Every step is re-derived: nothing left unsupported or not yet replayed.
+        Assert.Equal(r.Steps, r.Count(Verdict.Verified));
     }
 
-    /// <summary>The rules this replayer checks, each found in the Nat.add_succ trace.</summary>
-    public static TheoryData<string> CheckedRules => new()
+    /// <summary>Every kind of step the replayer checks, with a fixture whose trace has one.</summary>
+    public static TheoryData<string, string> CheckedSteps => new()
     {
-        "Beta", "Delta", "DeltaLazy", "Iota", "IotaK", "Proj", "DefEqSyntactic", "DefEqOffset",
+        { "Nat.add_succ", "Beta" }, { "Nat.add_succ", "Delta" }, { "Nat.add_succ", "DeltaLazy" }, { "Nat.add_succ", "Iota" },
+        { "Nat.add_succ", "IotaK" }, { "Nat.add_succ", "Proj" }, { "Nat.add_succ", "DefEqSyntactic" }, { "Nat.add_succ", "DefEqOffset" },
+        { "Nat.add_succ", "DefEqApp" }, { "Nat.add_succ", "DefEqBinding" }, { "Nat.add_succ", "DefEqLazyDelta" },
+        { "Nat.add_succ", "DefEqLazyDeltaProj" }, { "eta437", "DefEqProofIrrel" }, { "eta437", "DefEqEtaStruct" },
+        { "Nat.add_succ", "Infer" }, { "Nat.add_succ", "Whnf" }, { "Nat.add_succ", "WhnfCore" }, { "Nat.add_succ", "DefEq" },
     };
 
+    private static bool Is(Step s, string what) =>
+        s.Kind == StepKind.Rule ? s.Rule == what : s.Kind.ToString() == what;
+
     [Theory]
-    [MemberData(nameof(CheckedRules))]
-    public void ChangingARecordedResultIsCaught(string rule)
+    [MemberData(nameof(CheckedSteps))]
+    public void ChangingARecordedResultIsCaught(string fixture, string what)
     {
-        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
-        (int d, int i) = Find(traces, s => s.Kind == StepKind.Rule && s.Rule == rule);
-        Step s = traces[d].Steps[i];
-        // A literal no step in these files produces: wrong for every rule.
-        Replace(traces, d, i, s with { B = t.Nat(424242) });
+        (Terms t, Env env, List<DeclTrace> traces) = Load(fixture);
+        (int d, int i) = Find(traces, s => Is(s, what));
+        // A literal no step in these files produces: wrong for every kind of step.
+        Replace(traces, d, i, traces[d].Steps[i] with { B = t.Nat(424242) });
 
         ReplayReport r = new Replayer(t, env).Replay(traces);
         Assert.False(r.Ok);
-        Assert.Contains(r.Failures, f => f.Step == i && f.What == rule);
+        Assert.Contains(r.Failures, f => f.Step == i && f.What == what);
+    }
+
+    /// <summary>Each kind of step, every occurrence in the fixture, changed one at a time: all are caught.</summary>
+    [Theory]
+    [InlineData("Infer")]
+    [InlineData("DefEq")]
+    [InlineData("WhnfCore")]
+    public void EveryOccurrenceIsChecked(string what)
+    {
+        (Terms t, Env env, List<DeclTrace> pristine) = Load("Nat.add_succ");
+        int tried = 0;
+        for (int d = 0; d < pristine.Count; d++)
+        {
+            foreach (Step s in pristine[d].Steps.Where(s => Is(s, what)).Take(25))
+            {
+                var traces = pristine.ToList();
+                Replace(traces, d, s.Index, s with { B = t.Nat(424242) });
+                ReplayReport r = new Replayer(t, env).Replay(traces);
+                Assert.Contains(r.Failures, f => f.Step == s.Index && f.What == what);
+                tried++;
+            }
+        }
+        Assert.True(tried > 25);
+    }
+
+    [Fact]
+    public void AFalseEqualityBetweenRealTermsIsCaught()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        (int d, int i) = Find(traces, s => s.Kind == StepKind.DefEq);
+        Expr zero = t.Const(t.Of("Nat.zero"), []);
+        Expr one = t.App(t.Const(t.Of("Nat.succ"), []), zero);
+        Replace(traces, d, i, traces[d].Steps[i] with { A = zero, B = one });
+
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Step == i && f.What == "DefEq");
+    }
+
+    [Fact]
+    public void AWrongButRealTypeIsCaught()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        // Claim Nat.zero : Prop, a type that exists but is not Nat.zero's.
+        (int d, int i) = Find(traces, s => s.Kind == StepKind.Infer && s.A is Const c && c.Name.ToString() == "Nat.zero");
+        Replace(traces, d, i, traces[d].Steps[i] with { B = t.Sort(t.Zero) });
+
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Step == i && f.What == "Infer");
     }
 
     [Fact]
@@ -89,6 +143,27 @@ public class ReplayTests
     }
 
     [Fact]
+    public void ATraceThatDoesNotConcludeItsDeclarationIsCaught()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        int d = traces.FindIndex(x => x.Decl.ToString() == "Nat.add_succ");
+        // Every step valid, but the steps no longer show the theorem has its type: an empty derivation.
+        traces[d] = traces[d] with { Steps = [] };
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Decl.ToString() == "Nat.add_succ" && f.Reason.Contains("does not conclude"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Exports))]
+    public void EveryDeclarationThatIsNotABlockIsConcluded(string name)
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load(name);
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Equal(r.Declarations, r.Concluded + r.BlocksNotTraced);
+        Assert.True(r.Concluded > 0);
+    }
+
+    [Fact]
     public void AStepAboutAnUndeclaredDeclarationIsCaught()
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
@@ -111,9 +186,10 @@ public class ReplayTests
         ]);
         var bad = new DeclTrace(t.Of("Nat.add"), [new Step(0, StepKind.Rule, "NatLitOp", redex, t.Nat(6), null, 0)]);
 
-        Assert.True(new Replayer(t, env).Replay([good]).Ok);
+        // These two-step traces are not derivations of Nat.add, so only the steps' own verdicts matter here.
+        Assert.DoesNotContain(new Replayer(t, env).Replay([good]).Failures, f => f.Step >= 0);
         ReplayReport r = new Replayer(t, env).Replay([bad]);
-        Assert.Single(r.Failures);
+        Assert.Single(r.Failures, f => f.Step >= 0);
     }
 
     private static (int Decl, int Step) Find(List<DeclTrace> traces, Func<Step, bool> p)

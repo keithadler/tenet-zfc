@@ -27,7 +27,10 @@ try
     ReplayReport report = new Replayer(terms, env).Replay(traces);
     Console.Write(report.Format());
     Console.WriteLine();
-    Console.WriteLine($"{(report.Ok ? "OK" : "FAILED")} in {sw.Elapsed.TotalSeconds:F1}s. Conclusions and premise-based rules are not replayed yet; see docs/trace-format.md.");
+    int open = report.Count(Verdict.Unsupported) + report.Count(Verdict.NotYet);
+    Console.WriteLine($"{(report.Ok ? "OK" : "FAILED")} in {sw.Elapsed.TotalSeconds:F1}s. "
+        + (report.Ok && open == 0 ? "Every step replayed." : $"{open} steps not replayed; see docs/trace-format.md.")
+        + (report.BlocksNotTraced > 0 ? $" {report.BlocksNotTraced} inductive or quotient blocks are not concluded by their trace." : ""));
     return report.Ok ? 0 : 1;
 }
 catch (Exception e) when (e is IOException or TenetZfc.FormatException or System.Text.Json.JsonException)

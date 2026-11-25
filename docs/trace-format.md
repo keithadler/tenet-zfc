@@ -77,41 +77,57 @@ These gaps are for the replayer to settle:
 tenet-zfc replay Foo.ndjson Foo.trace.ndjson
 ```
 
-The replayer (`src/TenetZfc`) reads the export and the trace and re-derives each step from the definition of its rule. It shares no code with Tenet: it has its own terms, substitution, universe-level arithmetic and reduction rules. Each step is checked locally, using the export's declarations and the steps recorded before it.
+The replayer (`src/TenetZfc`) reads the export and the trace and re-derives every step from the definition of its rule. It shares no code with Tenet: it has its own terms, substitution, universe-level arithmetic, reduction rules and type inference. Each step is checked against the export's declarations and the facts recorded before it in the same declaration: reductions, equalities and typings. Each of those facts is a step with its own verdict, so a declaration is replayed in full only when every one of its steps is verified.
 
 Every step gets one of four verdicts:
 
 | Verdict | Meaning |
 |---|---|
-| verified | The rule applies to the recorded terms and gives the recorded result |
+| verified | Re-derived: the rule applies to the recorded terms and gives the recorded result |
 | failed | It doesn't, or the step is malformed (for example, it uses a free variable no step introduced) |
 | unsupported | A kind of step the replayer checks, in a case it doesn't handle yet |
 | not yet replayed | A kind of step the replayer doesn't check yet |
 
-Checked so far:
+What is checked:
 
-- **Reductions:** `Beta`, `Zeta`, `ZetaFVar`, `Delta`, `DeltaLazy`, `Proj`, `Iota`, `IotaK`, `QuotLift`, `QuotInd`, `UnfoldProjApp`.
-- **Literal arithmetic:** `NatLitOp` and `NatLitPred`, recomputed with big integers.
-- **Equality rules that need no premises:** `DefEqSyntactic`, `DefEqFVar`, `DefEqSort`, `DefEqConst` (universe levels are compared by case-splitting each parameter on zero or successor), and `DefEqOffset`.
-- **Locals:** each must be fresh, and nothing may use a variable before its `Local` step.
+- **Single rules.**
+  - Reductions: `Beta`, `Zeta`, `ZetaFVar`, `Delta`, `DeltaLazy`, `Proj`, `Iota` (including literal and structure-eta major premises), `IotaK`, `QuotLift`, `QuotInd`, `UnfoldProjApp`.
+  - Literal arithmetic: `NatLitOp` and `NatLitPred`.
+  - Equality rules that need no premises: `DefEqSyntactic`, `DefEqFVar`, `DefEqSort`, `DefEqConst` (universe levels are compared by case-splitting each parameter on zero or successor) and `DefEqOffset`.
+- **Equality rules that rest on premises.** `DefEqApp`, `DefEqBinding` (walking both telescopes with the locals the step introduced), `DefEqEta`, `DefEqEtaStruct` (including Lean 4.37's partially applied constructors), `DefEqProofIrrel`, `DefEqUnitLike`, `DefEqLazyDelta`, `DefEqLazyDeltaProj` and `DefEqReflect`.
+- **Normalization.** `Whnf` and `WhnfCore`: there must be a chain from the term to its normal form through the step's direct premises. Each premise is used on the whole term or on the head of an application.
+- **Equality.** `DefEq`: the two sides must be equal by the recorded facts, or by congruence over them.
+- **Typing.** `Infer`: the type is recomputed the way the kernel computes it for every form of term: sorts, constants, locals, literals, applications, lambdas and Pis (with their locals), lets (dead lets removed), and projections.
+- **Locals.** Each must be fresh, and nothing may use a variable before its `Local` step.
+- **Each declaration.** Its trace must conclude what the kernel checks of it: its type is a type, and the value of a definition, theorem or opaque constant has that type. Without this check, a trace of valid steps that didn't add up to the declaration would pass.
 
 Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `mk_imax`, because the kernel's reduct carries the simplified level.
 
-Not yet replayed: the `Infer`, `Whnf`, `WhnfCore` and `DefEq` conclusions, and the equality rules that rest on their premises (`DefEqApp`, `DefEqBinding`, `DefEqEta`, `DefEqEtaStruct`, `DefEqProofIrrel`, `DefEqUnitLike`, `DefEqLazyDelta`, `DefEqLazyDeltaProj`, `DefEqReflect`, `DefEqStringLit`). `StringLitToCtor` is reported as unsupported. The report never counts these as passed.
+## What replay does not establish yet
 
-Two assumptions are made explicitly:
+- **Inductive and quotient blocks.** Positivity, universe constraints and recursor derivation are checked by Tenet but not traced as one conclusion. The report counts these blocks separately and never as concluded.
+- **Checking mode versus infer-only mode.** The trace doesn't say whether a type was inferred in checking mode or in infer-only mode. Both give the same type, but checking mode also checks that each argument's type matches its domain. For now, an `Infer` step verifies the type computation. The argument checks are confirmed only where the matching equality appears among the recorded facts. Recording the mode in Tenet's trace would close this.
 - **Nat operations** are taken to mean what their names say. Tenet checks that against their definitions once per environment, and that check isn't in the trace.
-- **Rule K** is checked for the reduct only. The kernel also checks the major premise's type, which is a typing fact.
+- **Rule K** is checked for the reduct only. The kernel's check on the major premise's type is a typing fact the step doesn't cite.
+- **String literals** (`StringLitToCtor`, `DefEqStringLit`) are reported as unsupported.
 
-Results on the four committed fixtures (`tests/fixtures`):
+## Results
 
-| Export | Steps | Verified | Failed | Unsupported | Not yet |
-|---|---|---|---|---|---|
-| `Nat.add_succ` | 2,200 | 747 | 0 | 0 | 1,453 |
-| `Nat.add_succ.v3.0` | 2,178 | 740 | 0 | 0 | 1,438 |
-| `eta437` | 1,257 | 397 | 0 | 0 | 860 |
-| `acc436` | 1,082 | 388 | 0 | 0 | 694 |
+On the four committed fixtures (`tests/fixtures`), every step is verified, and every declaration that isn't an inductive or quotient block is concluded:
 
-The tests also change the recorded result of each checked rule and require the replayer to fail that step. A replayer that accepted everything would pass the clean fixtures too, so the clean results mean little without these.
+| Export | Steps | Verified | Declarations concluded | Blocks not traced |
+|---|---|---|---|---|
+| `Nat.add_succ` | 2,200 | 2,200 | 14 | 6 |
+| `Nat.add_succ.v3.0` | 2,178 | 2,178 | 13 | 6 |
+| `eta437` | 1,257 | 1,257 | 8 | 6 |
+| `acc436` | 1,082 | 1,082 | 7 | 5 |
 
-The milestone 1 gate (every step re-derived on all of Lean core) is not met. Two things are left: replaying the conclusions, and running on a full `Init` export. The replayer is also the template for the emitter: where replay checks a step, emission will print the `set.mm` proof step for it.
+The tests change recorded results, the results of every kind of step the replayer checks, and require the change to be caught:
+- for `Infer`, `DefEq` and `WhnfCore`, the first 25 occurrences of each are changed one at a time;
+- a false `Nat.zero ≡ Nat.succ Nat.zero` is caught;
+- a wrong but well-formed type is caught;
+- a theorem whose trace is emptied is caught.
+
+A replayer that accepted everything would also pass the clean fixtures, so the clean results mean little without these tests.
+
+The milestone 1 gate (every step re-derived on all of Lean core) is not met yet. Two things remain: running on a full `Init` export, and closing the gaps above. The replayer is also the template for the emitter: where replay checks a step, emission will print the `set.mm` proof step for it.

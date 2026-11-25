@@ -27,6 +27,12 @@ public sealed class ReplayReport
     public List<StepFailure> Failures { get; } = new();
     public List<StepFailure> Unsupported { get; } = new();
     public int Declarations { get; internal set; }
+
+    /// <summary>Declarations whose trace concludes what the kernel checks of them (their type is a type; their value has it).</summary>
+    public int Concluded { get; internal set; }
+
+    /// <summary>Inductive and quotient blocks: their well-formedness is checked by Tenet but not traced as one conclusion.</summary>
+    public int BlocksNotTraced { get; internal set; }
     public int Steps { get; internal set; }
 
     public int Count(Verdict v) => ByKind.Values.Sum(c => c[(int)v]);
@@ -45,6 +51,7 @@ public sealed class ReplayReport
     {
         var sb = new StringBuilder();
         sb.AppendLine($"{Declarations} declarations, {Steps} steps");
+        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksNotTraced} inductive or quotient blocks, whose well-formedness is not traced");
         sb.AppendLine($"  verified {Count(Verdict.Verified)}, failed {Count(Verdict.Failed)}, unsupported {Count(Verdict.Unsupported)}, not yet replayed {Count(Verdict.NotYet)}");
         sb.AppendLine();
         sb.AppendLine($"  {"step",-24}{"verified",10}{"failed",8}{"unsupp.",9}{"not yet",9}");
@@ -81,7 +88,7 @@ public sealed class ReplayReport
 /// premises), each assuming the earlier steps it relies on. Conclusions over many steps (typing, normalization,
 /// equality) and the equality rules justified by their premises are counted as not yet replayed, never as passed.
 /// </summary>
-public sealed class Replayer
+public sealed partial class Replayer
 {
     private readonly Terms _t;
     private readonly Ops _ops;
@@ -138,15 +145,53 @@ public sealed class Replayer
                 }
                 state.Record(s);
             }
+            switch (Concludes(d.Decl, state))
+            {
+                case true:
+                    report.Concluded++;
+                    break;
+                case false:
+                    report.Failures.Add(new StepFailure(d.Decl, -1, "decl", "the trace does not conclude that the declaration has its declared type"));
+                    break;
+                case null:
+                    report.BlocksNotTraced++;
+                    break;
+            }
         }
         return report;
     }
 
+    /// <summary>
+    /// Whether the trace concludes what the kernel checks of the declaration: its type is a type, and for a
+    /// definition, theorem or opaque constant, its value's type equals the declared type. Null for an inductive or
+    /// quotient block, whose checks (positivity, universe constraints, recursor derivation) are not one conclusion.
+    /// </summary>
+    private bool? Concludes(Name decl, DeclState st)
+    {
+        if (_env.Find(decl) is not ConstInfo info)
+        {
+            return false;
+        }
+        if (info.Kind is ConstKind.Inductive or ConstKind.Quot or ConstKind.Constructor or ConstKind.Recursor)
+        {
+            return null;
+        }
+        if (SortOf(info.Type, st) is null)
+        {
+            return false;
+        }
+        Expr? value = info.Value ?? info.OpaqueValue;
+        return value is null || st.TypesOf(value).Any(v => Equal(v, info.Type, st));
+    }
+
     // ---- per-declaration state ----
 
-    private sealed class DeclState
+    private sealed partial class DeclState
     {
         public readonly Dictionary<ulong, (Expr Type, Expr? Value)> Locals = new();
+
+        /// <summary>The locals' free variables, in the order they were introduced.</summary>
+        public readonly List<Expr> LocalOrder = new();
 
         /// <summary>Every recorded a ↝ b: single reduction steps and normalization conclusions.</summary>
         public readonly Dictionary<Expr, List<Expr>> Reductions = new(ReferenceEqualityComparer.Instance);
@@ -155,12 +200,24 @@ public sealed class Replayer
         {
             if (s.Kind == StepKind.Local)
             {
-                Locals.TryAdd(((FVar)s.A).Id, (s.B!, s.V));
+                if (Locals.TryAdd(((FVar)s.A).Id, (s.B!, s.V)))
+                {
+                    LocalOrder.Add(s.A);
+                }
                 return;
             }
             bool reduction = s.Kind is StepKind.Whnf or StepKind.WhnfCore
                 || (s.Kind == StepKind.Rule && s.Rule is "Beta" or "Zeta" or "ZetaFVar" or "Delta" or "DeltaLazy" or "Proj" or "Iota"
                     or "IotaK" or "QuotLift" or "QuotInd" or "NatLitOp" or "NatLitPred" or "StringLitToCtor" or "UnfoldProjApp");
+            if (s.Kind == StepKind.Infer && s.B is not null)
+            {
+                AddType(s.A, s.B);
+                return;
+            }
+            if (s.B is not null && (reduction || s.Kind == StepKind.DefEq || (s.Kind == StepKind.Rule && s.Rule!.StartsWith("DefEq", StringComparison.Ordinal))))
+            {
+                Union(s.A, s.B);
+            }
             if (reduction && s.B is not null)
             {
                 if (!Reductions.TryGetValue(s.A, out List<Expr>? l))
@@ -210,12 +267,20 @@ public sealed class Replayer
                     : (Verdict.Failed, "a local must be a fresh free variable with a type");
             case StepKind.Rule:
                 break;
-            default:
-                return (Verdict.NotYet, null);
         }
         if (s.B is null)
         {
-            return (Verdict.Failed, "a rule step needs two terms");
+            return (Verdict.Failed, "this step needs two terms");
+        }
+        switch (s.Kind)
+        {
+            case StepKind.Whnf:
+            case StepKind.WhnfCore:
+                return Reduction(s, steps);
+            case StepKind.DefEq:
+                return DefEqConclusion(s, st);
+            case StepKind.Infer:
+                return InferConclusion(s, steps, st);
         }
         return s.Rule switch
         {
@@ -237,7 +302,7 @@ public sealed class Replayer
             "DefEqConst" => ConstEq(s.A, s.B),
             "DefEqOffset" => Offset(s, steps),
             "NativeReduce" or "InferBVar" => (Verdict.Failed, "this rule never appears in a successful check"),
-            _ => (Verdict.NotYet, null),
+            _ => PremiseRule(s, steps, st),
         };
     }
 
