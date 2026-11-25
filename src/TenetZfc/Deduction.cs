@@ -204,6 +204,9 @@ public sealed class Deduction(Prover pr)
                 return Syl(pr.Apply("3jca", S(("ph", h), ("ps", $"{L("R")} = {R("R")}"), ("ch", $"{L("A")} = {R("A")}"), ("th", $"{L("X")} = {R("X")}")),
                         Sub("R") ?? Refl(h, L("R")), Sub("A") ?? Refl(h, L("A")), Sub("X") ?? Refl(h, L("X"))),
                     pr.Apply("predeq123", S(("R", L("R")), ("S", R("R")), ("A", L("A")), ("B", R("A")), ("X", L("X")), ("Y", R("X")))));
+            case "cima": // ( A " B )
+                return pr.Apply("imaeq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
             case "cres": // ( A |` B )
                 return pr.Apply("reseq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
                     Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
@@ -275,8 +278,6 @@ public sealed class Deduction(Prover pr)
                 return Pair("eqeq1d", "eqeq2d", "eqeq12d", "A", "B");
             case "wcel": // A e. B
                 return Pair("eleq1d", "eleq2d", "eleq12d", "A", "B");
-            case "wss":  // A C_ B
-                return Pair("sseq1d", "sseq2d", "sseq12d", "A", "B");
             case "wi":   // ( ph -> ps )
                 return PairWff("imbi1d", "imbi2d", "imbi12d", "ph", "ps");
             case "wa":   // ( ph /\ ps )
