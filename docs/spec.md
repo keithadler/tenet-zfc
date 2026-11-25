@@ -60,7 +60,7 @@ Every feature of Lean's kernel has a fixed set-theoretic meaning. The bridge lib
 
 | Lean feature | Meaning in ZFC | Difficulty |
 |---|---|---|
-| `Sort u` / `Type u` | The u-th universe set (Vω at level 0, or a Grothendieck universe above it) | Low |
+| `Sort u` / `Type u` | `Prop` is {∅, {∅}}. `Type u` is a set large enough for what the proof builds: `R1` up to a limit ordinal chosen per theorem, or a Grothendieck universe when no bound exists. Not `Vω`, which doesn't contain ℕ. See [interpretation.md](interpretation.md) | Medium |
 | `Prop` | {∅, {∅}}: false and true | Low |
 | Proofs (inhabitants of a `Prop`) | All identified with ∅, which gives proof irrelevance for free | Low |
 | Dependent functions (Π types) | Sets of set-theoretic functions | Low |
