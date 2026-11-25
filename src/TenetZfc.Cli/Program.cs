@@ -20,6 +20,18 @@ if (args.Length == 5 && args[0] == "emit")
 {
     return Emit(args[1], args[2], args[3], args[4]);
 }
+if (args.Length >= 4 && args[0] == "mm-parse")
+{
+    // Diagnostics: how long set.mm takes to read, and to parse one expression into its syntax proof.
+    var sw0 = Stopwatch.StartNew();
+    var db0 = TenetZfc.Metamath.Database.Read(args[1]);
+    Console.WriteLine($"read set.mm in {sw0.Elapsed.TotalSeconds:F2}s");
+    var pr0 = new TenetZfc.Metamath.Prover(db0);
+    sw0.Restart();
+    var proof0 = pr0.SyntaxProof(new TenetZfc.Metamath.Expr(args[2], args[3..].SelectMany(x => x.Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToList()));
+    Console.WriteLine($"parsed in {sw0.Elapsed.TotalMilliseconds:F0}ms: {string.Join(' ', proof0)}");
+    return 0;
+}
 if (args.Length != 3 || args[0] != "replay")
 {
     Console.Error.WriteLine(Usage);

@@ -1,0 +1,193 @@
+using TenetZfc.Metamath;
+using MmExpr = TenetZfc.Metamath.Expr;
+using Proof = (System.Collections.Generic.List<string> Proof, TenetZfc.Metamath.Expr Proves);
+
+namespace TenetZfc;
+
+/// <summary>
+/// Proofs in set.mm's deduction form, |- ( H -> X ), where H gathers a theorem's hypotheses. Proof-term translation
+/// builds on these: a Lean proof under its binders becomes a deduction under H. The congruence prover derives
+/// |- ( H -> C[A] = C[B] ) (or <-> for a formula) from |- ( H -> A = B ) for any context C built from the
+/// constructs below, which is what Lean's congrArg, congr, Eq.mpr and Eq.rec into Prop amount to.
+/// </summary>
+public sealed class Deduction(Prover pr)
+{
+    private static Dictionary<string, string> S(params (string Var, string Value)[] xs) => xs.ToDictionary(x => x.Var, x => x.Value);
+
+    /// <summary>The two sides of |- ( H -> X ).</summary>
+    public (string H, string X) Split(MmExpr proves)
+    {
+        SyntaxTree t = pr.Parse("wff", proves.Symbols) ?? throw new InvalidOperationException($"not a formula: {proves}");
+        if (t.Rule.Label != "wi")
+        {
+            throw new InvalidOperationException($"not an implication: {proves}");
+        }
+        return (pr.Render(t.Children[0]), pr.Render(t.Children[1]));
+    }
+
+    /// <summary>The two sides of an equation or a biconditional.</summary>
+    public (string L, string R, bool IsBi) Sides(string x)
+    {
+        SyntaxTree t = pr.Parse("wff", x.Split(' ')) ?? throw new InvalidOperationException($"not a formula: {x}");
+        return t.Rule.Label switch
+        {
+            "wceq" => (pr.Render(t.Children[0]), pr.Render(t.Children[1]), false),
+            "wb" => (pr.Render(t.Children[0]), pr.Render(t.Children[1]), true),
+            _ => throw new InvalidOperationException($"not an equation or biconditional: {x}"),
+        };
+    }
+
+    /// <summary>|- X, weakened to |- ( H -> X ).</summary>
+    public Proof Lift(string h, Proof closed) => pr.Apply("a1i", S(("ph", Strip(closed.Proves)), ("ps", h)), closed);
+
+    /// <summary>From |- ( H -> P ) and a closed |- ( P -> Q ): |- ( H -> Q ).</summary>
+    public Proof Syl(Proof hp, Proof pq)
+    {
+        (string h, string p) = Split(hp.Proves);
+        (_, string q) = Split(pq.Proves);
+        return pr.Apply("syl", S(("ph", h), ("ps", p), ("ch", q)), hp, pq);
+    }
+
+    /// <summary>From |- ( H -> P ) and |- ( H -> Q ): |- ( H -> ( P /\ Q ) ).</summary>
+    public Proof Jca(Proof a, Proof b)
+    {
+        (string h, string p) = Split(a.Proves);
+        (_, string q) = Split(b.Proves);
+        return pr.Apply("jca", S(("ph", h), ("ps", p), ("ch", q)), a, b);
+    }
+
+    /// <summary>|- ( H -> A = A ).</summary>
+    public Proof Refl(string h, string a) => pr.Apply("eqidd", S(("ph", h), ("A", a)));
+
+    /// <summary>From |- ( H -> A = B ): |- ( H -> B = A ).</summary>
+    public Proof Symm(Proof ab)
+    {
+        (string h, string x) = Split(ab.Proves);
+        (string a, string b, _) = Sides(x);
+        return pr.Apply("eqcomd", S(("ph", h), ("A", a), ("B", b)), ab);
+    }
+
+    /// <summary>From |- ( H -> A = B ) and |- ( H -> B = C ): |- ( H -> A = C ).</summary>
+    public Proof Trans(Proof ab, Proof bc)
+    {
+        (string h, string x) = Split(ab.Proves);
+        (string a, string b, _) = Sides(x);
+        (_, string c, _) = Sides(Split(bc.Proves).X);
+        return pr.Apply("eqtrd", S(("ph", h), ("A", a), ("B", b), ("C", c)), ab, bc);
+    }
+
+    /// <summary>From |- ( H -> P ) and |- ( H -> ( P <-> Q ) ): |- ( H -> Q ).</summary>
+    public Proof Transport(Proof p, Proof pq)
+    {
+        (string h, string x) = Split(pq.Proves);
+        (string a, string b, _) = Sides(x);
+        return pr.Apply("mpbid", S(("ph", h), ("ps", a), ("ch", b)), p, pq);
+    }
+
+    private static string Strip(MmExpr e) => string.Join(' ', e.Symbols);
+
+    /// <summary>
+    /// From |- ( H -> A = B ): |- ( H -> C[A] = C[B] ) when the context is a class, or |- ( H -> ( C[A] <-> C[B] ) )
+    /// when it is a formula. The context is written with the variable <paramref name="hole"/> where A and B go.
+    /// </summary>
+    public Proof Congruence(string type, string context, string hole, Proof ab)
+    {
+        SyntaxTree c = pr.Parse(type, context.Split(' ')) ?? throw new InvalidOperationException($"does not parse: {context}");
+        (string h, string x) = Split(ab.Proves);
+        (string a, string b, _) = Sides(x);
+        return Go(c, hole, h, a, b, ab) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
+    }
+
+    private string Render(SyntaxTree n, string hole, string with)
+    {
+        if (n.Rule.Kind == 'f')
+        {
+            return n.Rule.Var == hole ? with : n.Rule.Var!;
+        }
+        var vars = n.Rule.Hyps.Where(x => x.Kind == 'f').Select(x => x.Var!).ToList();
+        return string.Join(' ', n.Rule.Expr.Symbols.Select(s => vars.IndexOf(s) is int i and >= 0 ? Render(n.Children[i], hole, with) : s));
+    }
+
+    private bool Has(SyntaxTree n, string hole) => n.Rule.Kind == 'f' ? n.Rule.Var == hole : n.Children.Any(k => Has(k, hole));
+
+    /// <summary>The congruence proof for one node, or null when the hole is not inside it.</summary>
+    private Proof? Go(SyntaxTree n, string hole, string h, string a, string b, Proof ab)
+    {
+        if (n.Rule.Kind == 'f')
+        {
+            return n.Rule.Var == hole ? ab : null;
+        }
+        if (!Has(n, hole))
+        {
+            return null;
+        }
+        var vars = n.Rule.Hyps.Where(x => x.Kind == 'f').Select(x => x.Var!).ToList();
+        SyntaxTree Child(string v) => n.Children[vars.IndexOf(v)];
+        string L(string v) => Render(Child(v), hole, a);
+        string R(string v) => Render(Child(v), hole, b);
+        Proof? Sub(string v) => Go(Child(v), hole, h, a, b, ab);
+
+        switch (n.Rule.Label)
+        {
+            case "co":   // ( A F B )
+                {
+                    if (Has(Child("F"), hole))
+                    {
+                        break;
+                    }
+                    Proof? pa = Sub("A"), pb = Sub("B");
+                    string f = L("F");
+                    if (pa is Proof x && pb is Proof y)
+                    {
+                        return pr.Apply("oveq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B")), ("F", f)), x, y);
+                    }
+                    return pa is Proof only
+                        ? pr.Apply("oveq1d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("F", f)), only)
+                        : pr.Apply("oveq2d", S(("ph", h), ("A", L("B")), ("B", R("B")), ("C", L("A")), ("F", f)), pb!.Value);
+                }
+            case "cfv":  // ( F ` A )
+                if (!Has(Child("F"), hole))
+                {
+                    return pr.Apply("fveq2d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("F", L("F"))), Sub("A")!.Value);
+                }
+                break;
+            case "cs1":  // <" A ">
+                return pr.Apply("s1eqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
+            case "wceq": // A = B
+                return Pair("eqeq1d", "eqeq2d", "eqeq12d", "A", "B");
+            case "wcel": // A e. B
+                return Pair("eleq1d", "eleq2d", "eleq12d", "A", "B");
+            case "wi":   // ( ph -> ps )
+                return PairWff("imbi1d", "imbi2d", "imbi12d", "ph", "ps");
+            case "wa":   // ( ph /\ ps )
+                return PairWff("anbi1d", "anbi2d", "anbi12d", "ph", "ps");
+        }
+        throw new InvalidOperationException($"no congruence rule for {n.Rule.Label} (in {Render(n, hole, a)})");
+
+        // A binary class relation: rewrite the left, the right, or both.
+        Proof Pair(string left, string right, string both, string lv, string rv)
+        {
+            Proof? pl = Sub(lv), prr = Sub(rv);
+            if (pl is Proof x && prr is Proof y)
+            {
+                return pr.Apply(both, S(("ph", h), ("A", L(lv)), ("B", R(lv)), ("C", L(rv)), ("D", R(rv))), x, y);
+            }
+            return pl is Proof only
+                ? pr.Apply(left, S(("ph", h), ("A", L(lv)), ("B", R(lv)), ("C", L(rv))), only)
+                : pr.Apply(right, S(("ph", h), ("A", L(rv)), ("B", R(rv)), ("C", L(lv))), prr!.Value);
+        }
+
+        // A binary connective: the children's proofs are biconditionals.
+        Proof PairWff(string left, string right, string both, string lv, string rv)
+        {
+            Proof? pl = Sub(lv), prr = Sub(rv);
+            if (pl is Proof x && prr is Proof y)
+            {
+                return pr.Apply(both, S(("ph", h), ("ps", L(lv)), ("ch", R(lv)), ("th", L(rv)), ("ta", R(rv))), x, y);
+            }
+            return pl is Proof only
+                ? pr.Apply(left, S(("ph", h), ("ps", L(lv)), ("ch", R(lv)), ("th", L(rv))), only)
+                : pr.Apply(right, S(("ph", h), ("ps", L(rv)), ("ch", R(rv)), ("th", L(lv))), prr!.Value);
+        }
+    }
+}
