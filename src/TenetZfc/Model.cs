@@ -835,7 +835,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     /// <summary>A set variable fresh in the whole definition and outside frr2's and exse's reserved names.</summary>
     private static string PickRecursionVar(Scope sc)
     {
-        foreach (string v in RecursionPool.Reverse())
+        foreach (string v in Enumerable.Reverse(RecursionPool))   // not the span Reverse, which returns void
         {
             if (!sc.Bound.Contains(v))
             {
