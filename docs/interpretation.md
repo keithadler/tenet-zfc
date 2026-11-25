@@ -84,3 +84,25 @@ Writing `set.mm` proofs mechanically needs one more piece of infrastructure: eve
    - **Induction on lists.** `List.rec` into `Prop` becomes induction on `Word`. `set.mm`'s `wrdind` adds at the end of a word, while `List.rec` adds at the front, so a cons-style induction lemma is one bridge lemma to prove once.
 
    `set.mm` already proves `ccatlen`, the translated statement, so the result can be cross-checked as `2 + 2 = 4` was.
+
+### Statement cross-check (built)
+
+`StatementTranslator` translates a theorem's statement into a `set.mm` statement:
+- a bound variable becomes a class variable;
+- a variable of type T becomes a hypothesis `x e. ⟦T⟧`;
+- a type variable becomes a class variable with no hypothesis;
+- a propositional premise becomes an antecedent.
+
+`Prover.FindInstance` then searches `set.mm` for a theorem whose statement becomes the translated one under a substitution of its variables. It filters on constant symbols, then matches syntax trees, and never substitutes a term for a set variable. When it finds one, `emit` writes the translated statement with that theorem's proof. The comment says **CROSS-CHECK: the proof is set.mm's …, not a translation of Lean's proof**, and the summary counts these apart from theorems proved from their traces.
+
+On `List.length_append` and its dependencies:
+
+| Lean theorem | Translated statement | Found in `set.mm` |
+|---|---|---|
+| `List.length_append` | `( ( B e. Word A /\ C e. Word A ) -> ( # ` ( B ++ C ) ) = ( ( # ` B ) + ( # ` C ) ) )` | `ccatlen` |
+| `trivial` | `T.` | `tru` |
+| `Nat.zero_add` | `( A e. NN0 -> ( 0 + A ) = A )` | no (`addlid` says it over `CC`) |
+| `Nat.succ_add` | `( ( A e. NN0 /\ B e. NN0 ) -> ( ( A + 1 ) + B ) = ( ( A + B ) + 1 ) )` | no |
+| `Eq.symm`, `Eq.trans` | with membership hypotheses for their type variable | no (`set.mm` has no such hypotheses) |
+
+Both verifiers accept the two cross-checked theorems. A cross-check shows the translation turns `List.length_append` into the statement a set theorist would write. Its proof is `set.mm`'s, so it says nothing about translating Lean's proof. That is still the next step: proof-term translation, which would also cover the four rows `set.mm` doesn't state in exactly this form.

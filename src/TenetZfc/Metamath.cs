@@ -270,6 +270,103 @@ public sealed class Prover
         }
     }
 
+    /// <summary>The symbols a syntax tree stands for.</summary>
+    public string Render(SyntaxTree n)
+    {
+        if (n.Rule.Kind == 'f')
+        {
+            return n.Rule.Var!;
+        }
+        var vars = n.Rule.Hyps.Where(h => h.Kind == 'f').Select(h => h.Var!).ToList();
+        return string.Join(' ', n.Rule.Expr.Symbols.Select(s => vars.IndexOf(s) is int i and >= 0 ? Render(n.Children[i]) : s));
+    }
+
+    private List<(Statement Thm, Dictionary<string, int> Consts)>? _theorems;
+
+    /// <summary>
+    /// A set.mm theorem (a $p with no essential hypotheses) whose statement becomes the target under some substitution
+    /// of its variables: the theorem's label and that substitution. Null when there is none.
+    /// </summary>
+    public (string Label, Dictionary<string, string> Subst)? FindInstance(Expr target)
+    {
+        _theorems ??= _db.Statements.Values
+            .Where(s => s.Kind == 'p' && s.Expr.Type == "|-" && s.Hyps.All(h => h.Kind == 'f'))
+            .Select(s => (s, Bag(s.Expr.Symbols)))
+            .ToList();
+        SyntaxTree? goal = Parse("wff", target.Symbols);
+        if (goal is null)
+        {
+            return null;
+        }
+        Dictionary<string, int> have = Bag(target.Symbols);
+        foreach ((Statement thm, Dictionary<string, int> need) in _theorems)
+        {
+            // Every constant of the theorem survives substitution, so the target must have at least as many of each.
+            if (need.Any(kv => !have.TryGetValue(kv.Key, out int n) || n < kv.Value))
+            {
+                continue;
+            }
+            if (Parse("wff", thm.Expr.Symbols) is not SyntaxTree pattern)
+            {
+                continue;
+            }
+            var binds = new Dictionary<string, SyntaxTree>();
+            if (Match(pattern, goal, binds))
+            {
+                return (thm.Label, binds.ToDictionary(kv => kv.Key, kv => Render(kv.Value)));
+            }
+        }
+        return null;
+    }
+
+    private Dictionary<string, int> Bag(IEnumerable<string> syms)
+    {
+        var d = new Dictionary<string, int>();
+        foreach (string s in syms.Where(_db.IsConstant))
+        {
+            d[s] = d.TryGetValue(s, out int n) ? n + 1 : 1;
+        }
+        return d;
+    }
+
+    private bool Match(SyntaxTree pattern, SyntaxTree target, Dictionary<string, SyntaxTree> binds)
+    {
+        if (pattern.Rule.Kind == 'f')
+        {
+            // A variable matches any subtree of its type, the same subtree at each occurrence. A setvar must stay a
+            // setvar: substituting a term for it is not an instance.
+            string v = pattern.Rule.Var!;
+            if (pattern.Rule.Expr.Type == "setvar" && target.Rule.Kind != 'f')
+            {
+                return false;
+            }
+            if (binds.TryGetValue(v, out SyntaxTree? bound))
+            {
+                return Render(bound) == Render(target);
+            }
+            if (!ReferenceEquals(TypeOf(target), pattern.Rule.Expr.Type) && TypeOf(target) != pattern.Rule.Expr.Type)
+            {
+                return false;
+            }
+            binds[v] = target;
+            return true;
+        }
+        if (pattern.Rule.Label != target.Rule.Label || pattern.Children.Count != target.Children.Count)
+        {
+            return false;
+        }
+        for (int i = 0; i < pattern.Children.Count; i++)
+        {
+            if (!Match(pattern.Children[i], target.Children[i], binds))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static string TypeOf(SyntaxTree n) => n.Rule.Expr.Type;
+
     /// <summary>The proof (labels in reverse Polish order) that builds an expression's syntax.</summary>
     public List<string> SyntaxProof(Expr e)
     {
