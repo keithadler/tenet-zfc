@@ -24,6 +24,10 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
         .ToList();
 
     private string? _setmm;
+    private readonly object _read = new();
+
+    /// <summary>Constants slower than this are listed as the run goes.</summary>
+    public double SlowSeconds { get; init; } = 5;
 
     /// <summary>
     /// Write one chunk: chunk-NNNN.mm, and chunk-NNNN.tsv with one line per constant. Returns the outcomes.
@@ -31,7 +35,10 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
     /// </summary>
     public List<Outcome> Chunk(int index, IReadOnlyList<ConstInfo> constants, string outDir)
     {
-        _setmm ??= File.ReadAllText(setmmPath);
+        lock (_read)
+        {
+            _setmm ??= File.ReadAllText(setmmPath);
+        }
         var db = new Database();
         db.Extend(_setmm);
         var pr = new Prover(db);
@@ -46,6 +53,8 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
         {
             var sw = Stopwatch.StartNew();
             string kind = c.Kind.ToString().ToLowerInvariant();
+            // What is running now, for watching a long run: chunk-NNNN.progress names the constant in hand.
+            File.WriteAllText(Path.Combine(outDir, name + ".progress"), $"{outcomes.Count + 1}/{constants.Count} {c.Name}\n");
             try
             {
                 var (stmt, proof, distinct) = model.Equation(c.Name);
@@ -78,6 +87,10 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
                 outcomes.Add(new($"{c.Name}", kind, e is Model.Refused ? "refused" : "error", 0, "-", 0, Why(e), sw.Elapsed.TotalSeconds));
             }
         }
+        foreach (Outcome o in outcomes.Where(o => o.Seconds > SlowSeconds))
+        {
+            Console.WriteLine($"  {name} slow: {o.Name} {o.Seconds:F0}s ({o.EqSteps} + {o.IotaSteps} steps, {o.Status})");
+        }
         theorems.Raw(model.Declarations);
         foreach (var p in proved)
         {
@@ -90,6 +103,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
             tsv.Append($"{o.Name}\t{o.Kind}\t{o.Status}\t{o.EqSteps}\t{o.Iota}\t{o.IotaSteps}\t{o.Seconds:F2}\t{o.Reason}\n");
         }
         File.WriteAllText(Path.Combine(outDir, name + ".tsv"), tsv.ToString());
+        File.Delete(Path.Combine(outDir, name + ".progress"));
         return outcomes;
     }
 

@@ -13,7 +13,7 @@ const string Usage = """
       tenet-zfc define <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: translate definitions by the generic model,
                                                          each with its definitional equation as a theorem
-      tenet-zfc define-all <export.ndjson> <set.mm> <outdir> [--chunk-size N] [--chunks a[-b]]
+      tenet-zfc define-all <export.ndjson> <set.mm> <outdir> [--chunk-size N] [--chunks a[-b]] [--jobs N]
                                                          milestone 3 at scale: every constant the model handles, with
                                                          equations and computation rules, as chunk-NNNN.mm files that
                                                          verify independently (scripts/verify-all); refusals are listed
@@ -209,13 +209,16 @@ catch (Exception e) when (e is IOException or TenetZfc.FormatException or System
 // Milestone 3 at scale: every constant the model handles, in chunks that verify independently (scripts/verify-all).
 static int DefineAllCommand(string export, string setmm, string outDir, string[] opts, bool uncompressed)
 {
-    int chunkSize = 100, from = 0, to = int.MaxValue - 1;
+    int chunkSize = 100, from = 0, to = int.MaxValue - 1, jobs = 1;
     for (int i = 0; i < opts.Length; i++)
     {
         switch (opts[i])
         {
             case "--chunk-size" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int n) && n > 0:
                 chunkSize = n; i++; break;
+            case "--jobs" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int j) && j > 0:
+                // chunks translated in parallel: they share the export (read once) but each has its own model and database
+                jobs = j; i++; break;
             case "--chunks" when i + 1 < opts.Length:
                 // a single chunk index, or a range a-b (inclusive)
                 string[] r = opts[++i].Split('-');
@@ -235,19 +238,21 @@ static int DefineAllCommand(string export, string setmm, string outDir, string[]
     List<ConstInfo> targets = run.Targets();
     int chunks = (targets.Count + chunkSize - 1) / chunkSize;
     Console.WriteLine($"read {export} in {sw.Elapsed.TotalSeconds:F0}s: {targets.Count} constants to translate, in {chunks} chunks of {chunkSize}");
-    var all = new List<DefineAll.Outcome>();
-    for (int k = Math.Max(from, 0); k < Math.Min(chunks, to + 1); k++)
+    int lo = Math.Max(from, 0), hi = Math.Min(chunks, to + 1);
+    var results = new List<DefineAll.Outcome>[Math.Max(hi - lo, 0)];
+    Parallel.For(lo, hi, new ParallelOptions { MaxDegreeOfParallelism = jobs }, k =>
     {
         var csw = Stopwatch.StartNew();
         List<DefineAll.Outcome> outcomes = run.Chunk(k, targets.Skip(k * chunkSize).Take(chunkSize).ToList(), outDir);
-        all.AddRange(outcomes);
+        results[k - lo] = outcomes;
         long size = new FileInfo(Path.Combine(outDir, $"chunk-{k:D4}.mm")).Length;
         Console.WriteLine($"chunk-{k:D4}: {outcomes.Count(o => o.Status == "ok")} of {outcomes.Count} translated, "
             + $"{outcomes.Count(o => o.Iota == "ok")} computation rules, {size / 1024} KiB, {csw.Elapsed.TotalSeconds:F0}s");
-    }
+    });
+    List<DefineAll.Outcome> all = results.SelectMany(r => r).ToList();
     // The summary of this invocation: counts by kind and status, and the reasons for refusals.
     var s = new System.Text.StringBuilder();
-    s.AppendLine($"constants: {all.Count}, in {Math.Min(chunks, to + 1) - Math.Max(from, 0)} chunks of {chunkSize}, {sw.Elapsed.TotalSeconds:F0}s");
+    s.AppendLine($"constants: {all.Count}, in {hi - lo} chunks of {chunkSize}, {jobs} at a time, {sw.Elapsed.TotalSeconds:F0}s");
     foreach (var g in all.GroupBy(o => o.Kind).OrderByDescending(g => g.Count()))
     {
         s.AppendLine($"  {g.Key,-12} {g.Count(),6}: {g.Count(o => o.Status == "ok"),6} translated with their equations, "
