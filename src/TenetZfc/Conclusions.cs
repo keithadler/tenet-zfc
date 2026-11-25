@@ -258,7 +258,12 @@ public sealed partial class Replayer
             case "DefEqUnitLike":
                 return UnitLike(a, b, st) ? (Verdict.Verified, null) : (Verdict.Failed, "not two elements of one recorded unit-like structure");
             case "DefEqStringLit":
-                return (Verdict.Unsupported, "string literals are not replayed yet");
+                {
+                    // A literal against a String constructor application: the literal's expansion, normalized, equals it.
+                    (Expr? lit, Expr other) = a is StrLit ? (a, b) : b is StrLit ? (b, a) : (null, a);
+                    return lit is StrLit l && Reachable(StringToCtor(l), st).Any(x => Equal(x, other, st))
+                        ? (Verdict.Verified, null) : (Verdict.Failed, "the literal's expansion is not recorded equal to the other side");
+                }
             default:
                 return (Verdict.NotYet, null);
         }

@@ -263,6 +263,10 @@ public sealed partial class Replayer
             return false;
         }
         Expr? value = info.Value ?? info.OpaqueValue;
+        if (!SafetyOk(info, value))
+        {
+            return false;
+        }
         return value is null || st.CheckedTypesOf(value).Any(v => Equal(v, info.Type, st));
     }
 
@@ -390,7 +394,7 @@ public sealed partial class Replayer
             "NatLitOp" or "NatLitPred" => NatLit(s.A, s.B, st),
             "UnfoldProjApp" => Reachable(s.A, st).Contains(s.B)
                 ? (Verdict.Verified, null) : (Verdict.Unsupported, "no recorded normalization gives this result"),
-            "StringLitToCtor" => (Verdict.Unsupported, "string literals are not replayed yet"),
+            "StringLitToCtor" => s.A is StrLit lit ? Same(StringToCtor(lit), s.B) : (Verdict.Failed, "not a string literal"),
             "DefEqSyntactic" => Same(s.A, s.B),
             "DefEqFVar" => s.A is FVar && ReferenceEquals(s.A, s.B) ? (Verdict.Verified, null) : (Verdict.Failed, "not the same free variable"),
             "DefEqSort" => SortEq(s.A, s.B),
@@ -409,6 +413,71 @@ public sealed partial class Replayer
             && (ReferenceEquals(o.A, s.A) && ReferenceEquals(o.B, s.B)
                 || (s.Kind == StepKind.DefEq && ReferenceEquals(o.A, s.B) && ReferenceEquals(o.B, s.A)));
         return same ? (Verdict.Verified, null) : (Verdict.Failed, $"recalls step {s.Of}, which concludes something else");
+    }
+
+    /// <summary>
+    /// The kernel's safety rule, which checking mode applies to every constant a declaration mentions: a safe
+    /// declaration uses no unsafe or partial constant, a partial one no unsafe constant.
+    /// </summary>
+    private bool SafetyOk(ConstInfo info, Expr? value)
+    {
+        if (info.Unsafe)
+        {
+            return true;
+        }
+        foreach (Expr e in value is null ? [info.Type] : new[] { info.Type, value })
+        {
+            foreach (Name n in Constants(e))
+            {
+                if (_env.Find(n) is ConstInfo c && (c.Unsafe || (c.Partial && !info.Partial)))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static IEnumerable<Name> Constants(Expr e)
+    {
+        var seen = new HashSet<Expr>(ReferenceEqualityComparer.Instance);
+        var stack = new Stack<Expr>();
+        stack.Push(e);
+        while (stack.Count > 0)
+        {
+            Expr x = stack.Pop();
+            if (!seen.Add(x))
+            {
+                continue;
+            }
+            switch (x)
+            {
+                case Const c: yield return c.Name; break;
+                case App a: stack.Push(a.Fn); stack.Push(a.Arg); break;
+                case Binder b: stack.Push(b.Domain); stack.Push(b.Body); break;
+                case Let l: stack.Push(l.Type); stack.Push(l.Value); stack.Push(l.Body); break;
+                case Proj p: stack.Push(p.Struct); break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A string literal as Lean's kernel expands it: String.ofList (String.mk before String.ofList existed) applied
+    /// to the list of its characters, each Char.ofNat of its code point.
+    /// </summary>
+    private Expr StringToCtor(StrLit lit)
+    {
+        Expr ch = _t.Const(_t.Of("Char"), []);
+        Expr cons = _t.App(_t.Const(_t.Of("List.cons"), [_t.Zero]), ch);
+        Expr list = _t.App(_t.Const(_t.Of("List.nil"), [_t.Zero]), ch);
+        Expr ofNat = _t.Const(_t.Of("Char.ofNat"), []);
+        int[] codes = lit.Value.EnumerateRunes().Select(r => r.Value).ToArray();
+        for (int i = codes.Length - 1; i >= 0; i--)
+        {
+            list = _t.MkApp(cons, [_t.App(ofNat, _t.Nat(codes[i])), list]);
+        }
+        Name mk = _env.Find(_t.Of("String.ofList")) is not null ? _t.Of("String.ofList") : _t.Of("String.mk");
+        return _t.App(_t.Const(mk, []), list);
     }
 
     private static (Verdict, string?) Same(Expr expected, Expr recorded) =>

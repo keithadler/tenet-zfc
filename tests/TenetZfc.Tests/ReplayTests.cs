@@ -293,6 +293,33 @@ public class ReplayTests
     }
 
     [Fact]
+    public void StringLiteralsExpandAsLeanDefinesThem()
+    {
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("Nat.add_succ.ndjson"));
+        Expr ch = t.Const(t.Of("Char"), []);
+        Expr Cons(int c, Expr rest) => t.MkApp(t.App(t.Const(t.Of("List.cons"), [t.Zero]), ch), [t.App(t.Const(t.Of("Char.ofNat"), []), t.Nat(c)), rest]);
+        Expr nil = t.App(t.Const(t.Of("List.nil"), [t.Zero]), ch);
+        // This export has no String.ofList, so the older String.mk is the constructor. "é" is one code point, 233.
+        Expr right = t.App(t.Const(t.Of("String.mk"), []), Cons('a', Cons(233, nil)));
+        Expr wrong = t.App(t.Const(t.Of("String.mk"), []), Cons('a', nil));
+        DeclTrace Trace(Expr b) => new(t.Of("Nat.add"), [new Step(0, StepKind.Rule, "StringLitToCtor", t.Str("aé"), b, null, 0)]);
+
+        Assert.DoesNotContain(new Replayer(t, env).Replay([Trace(right)]).Failures, f => f.Step >= 0);
+        Assert.Contains(new Replayer(t, env).Replay([Trace(wrong)]).Failures, f => f.Step == 0);
+    }
+
+    [Fact]
+    public void ASafeDeclarationUsingAnUnsafeConstantIsNotConcluded()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        ConstInfo nat = env.Find(t.Of("Nat"))!;
+        typeof(ConstInfo).GetProperty(nameof(ConstInfo.Unsafe))!.SetValue(nat, true);
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Decl.ToString() == "Nat.add_succ" && f.Reason.Contains("does not conclude"));
+    }
+
+    [Fact]
     public void AStepAboutAnUndeclaredDeclarationIsCaught()
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");

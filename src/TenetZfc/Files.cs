@@ -19,6 +19,12 @@ public sealed class ConstInfo
     /// <summary>The body, for a definition or theorem: the constants delta reduction may unfold.</summary>
     public Expr? Value { get; init; }
 
+    /// <summary>Unsafe: may not be used by a safe or partial declaration.</summary>
+    public bool Unsafe { get; init; }
+
+    /// <summary>A partial definition: may not be used by a safe declaration.</summary>
+    public bool Partial { get; init; }
+
     /// <summary>The body of an opaque constant: type-checked, never unfolded.</summary>
     public Expr? OpaqueValue { get; init; }
 
@@ -382,7 +388,7 @@ public sealed class Reader
             foreach (JsonElement x in Each(op))
             {
                 ConstInfo c = Simple(x, ConstKind.Opaque, null);
-                env.Add(new ConstInfo { Name = c.Name, Kind = c.Kind, LevelParams = c.LevelParams, Type = c.Type, OpaqueValue = E(x.GetProperty("value")) });
+                env.Add(new ConstInfo { Name = c.Name, Kind = c.Kind, LevelParams = c.LevelParams, Type = c.Type, OpaqueValue = E(x.GetProperty("value")), Unsafe = c.Unsafe });
             }
         }
         else if (o.TryGetProperty("quot", out JsonElement q))
@@ -404,7 +410,7 @@ public sealed class Reader
                 {
                     BlockLevelParams = blockParams,
                     BlockMembers = members,
-                    Name = N(t.GetProperty("name")), Kind = ConstKind.Inductive, LevelParams = Params(t), Type = E(t.GetProperty("type")),
+                    Name = N(t.GetProperty("name")), Kind = ConstKind.Inductive, LevelParams = Params(t), Type = E(t.GetProperty("type")), Unsafe = Unsafe(t),
                     NumParams = t.GetProperty("numParams").GetInt32(), NumIndices = t.GetProperty("numIndices").GetInt32(),
                     IsRec = t.GetProperty("isRec").GetBoolean(),
                     NumNested = t.TryGetProperty("numNested", out JsonElement nn) ? nn.GetInt32() : 0, Ctors = t.GetProperty("ctors").EnumerateArray().Select(N).ToArray(),
@@ -414,7 +420,7 @@ public sealed class Reader
             {
                 env.Add(new ConstInfo
                 {
-                    Name = N(c.GetProperty("name")), Kind = ConstKind.Constructor, LevelParams = Params(c), Type = E(c.GetProperty("type")),
+                    Name = N(c.GetProperty("name")), Kind = ConstKind.Constructor, LevelParams = Params(c), Type = E(c.GetProperty("type")), Unsafe = Unsafe(c),
                     Induct = N(c.GetProperty("induct")), NumParams = c.GetProperty("numParams").GetInt32(), NumFields = c.GetProperty("numFields").GetInt32(),
                 });
             }
@@ -422,7 +428,7 @@ public sealed class Reader
             {
                 env.Add(new ConstInfo
                 {
-                    Name = N(r.GetProperty("name")), Kind = ConstKind.Recursor, LevelParams = Params(r), Type = E(r.GetProperty("type")),
+                    Name = N(r.GetProperty("name")), Kind = ConstKind.Recursor, LevelParams = Params(r), Type = E(r.GetProperty("type")), Unsafe = Unsafe(r),
                     NumParams = r.GetProperty("numParams").GetInt32(), NumMotives = r.GetProperty("numMotives").GetInt32(),
                     NumMinors = r.GetProperty("numMinors").GetInt32(), NumIndices = r.GetProperty("numIndices").GetInt32(),
                     K = r.GetProperty("k").GetBoolean(),
@@ -449,5 +455,10 @@ public sealed class Reader
     private ConstInfo Simple(JsonElement o, ConstKind kind, Expr? value) => new()
     {
         Name = N(o.GetProperty("name")), Kind = kind, LevelParams = Params(o), Type = E(o.GetProperty("type")), Value = value,
+        Unsafe = Unsafe(o), Partial = o.TryGetProperty("safety", out JsonElement sf) && sf.GetString() == "partial",
     };
+
+    private static bool Unsafe(JsonElement o) =>
+        (o.TryGetProperty("isUnsafe", out JsonElement u) && u.GetBoolean())
+        || (o.TryGetProperty("safety", out JsonElement s) && s.GetString() == "unsafe");
 }
