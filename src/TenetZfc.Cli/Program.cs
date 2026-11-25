@@ -10,7 +10,7 @@ const string Usage = """
                                                          replay, then write set.mm theorems for the theorems the
                                                          emitter covers (Nat arithmetic equations, and induction
                                                          on lists like List.length_append)
-      tenet-zfc define <export.ndjson> <set.mm> <out.mm> <name>...
+      tenet-zfc define [--tower] <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: translate definitions by the generic model,
                                                          each with its definitional equation as a theorem
       tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
@@ -26,20 +26,40 @@ if (args.Length == 5 && args[0] == "emit")
 {
     return Emit(args[1], args[2], args[3], args[4]);
 }
+bool towerMode = args.Length >= 2 && args[0] == "define" && args[1] == "--tower";
+if (towerMode)
+{
+    args = args.Where((_, i) => i != 1).ToArray();
+}
 if (args.Length >= 5 && args[0] == "define")
 {
-    // Milestone 3: definitions through the generic model, each with its definitional equation.
+    // Milestone 3: definitions through the generic model, each with its definitional equation. With --tower, the
+    // universe argument is a tower of universes and constants are monomorphized first (docs/milestone3.md).
     var dt = new Terms();
     TenetZfc.Environment denv = Reader.ReadExport(dt, args[1]);
+    Monomorph? mono = null;
+    if (towerMode)
+    {
+        mono = new Monomorph(dt, denv);
+        denv = mono.Env;
+    }
     var dpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
-    var model = new Model(dt, denv, dpr);
+    var model = new Model(dt, denv, dpr, tower: towerMode);
     var theorems = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean definitions translated by tenet-zfc's model (docs/milestone3.md)");
     var proved = new List<(string Label, TenetZfc.Metamath.Expr Statement, List<string> Proof, string[] Distinct, string Name)>();
     int status = 0;
-    foreach (string name in args[4..])
+    foreach (string given in args[4..])
     {
+        string name = given;
         try
         {
+            if (mono is not null)
+            {
+                // Each universe parameter at level 0, written c.{0,…}; a recursor keeps its motive level.
+                ConstInfo gc = denv.Find(dt.Of(given)) ?? throw new Model.Refused($"{given} is not in the export");
+                Name inst = mono.Instance(gc.Name, gc.LevelParams.Select(_ => dt.Zero).ToArray());
+                name = $"{inst}";
+            }
             var (stmt, proof, distinct) = model.Equation(dt.Of(name));
             proved.Add(($"lean-{name}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
             Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps)");
@@ -144,6 +164,19 @@ if (args.Length == 2 && args[0] == "survey")
     Console.WriteLine("theorems whose constants are all covered, after adding the top k of that ranking:");
     Console.WriteLine("        k  statements  with proofs");
     foreach ((int k, int s, int f) in r.Curve) Console.WriteLine($"  {k,7}  {s,10}  {f,11}");
+    return 0;
+}
+if (args.Length >= 3 && args[0] == "show")
+{
+    // Diagnostics: a constant's kind, type and value, as the export has them.
+    var sht = new Terms();
+    TenetZfc.Environment shenv = Reader.ReadExport(sht, args[1]);
+    foreach (string name in args[2..])
+    {
+        ConstInfo? c = shenv.Find(sht.Of(name));
+        Console.WriteLine(c is null ? $"{name}: not in the export"
+            : $"{name} ({c.Kind}, params {c.NumParams}, fields {c.NumFields})\n  type:  {c.Type}\n  value: {c.Value ?? c.OpaqueValue}\n");
+    }
     return 0;
 }
 if (args.Length >= 4 && args[0] == "mm-parse")

@@ -19,7 +19,7 @@ namespace TenetZfc;
 /// Each translated definition comes with its definitional equation as a theorem: lean.c applied to arguments of the
 /// right types equals its body with them substituted, by one fvmptd step per argument.
 /// </summary>
-public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = false)
+public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryRun = false, bool tower = false)
 {
     private const string UniverseVar = "u";
     private static readonly string[] SetVars = "x y z w v t s r q p o n m k j i h g f e d c b a".Split(' ');
@@ -38,7 +38,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     public static string? Token(Name n)
     {
         string s = $"{n}";
-        return s.Length > 0 && s.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '.' or '\'') && !s.Contains('\'') ? "lean." + s : null;
+        return s.Length > 0 && s.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '.' or '\'' or '{' or '}' or ',') && !s.Contains('\'') ? "lean." + s : null;
     }
 
     /// <summary>What this model has written so far: declarations and definitions, in dependency order.</summary>
@@ -81,12 +81,14 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             case FVar f:
                 return sc.Vars.TryGetValue(f.Id, out string? v) ? v : throw new Refused("a free variable with no translation");
             case Sort s:
-                return IsZero(s.Level) ? "2o" : sc.Universe;
+                return tower ? TowerSort(s.Level, sc.Universe) : IsZero(s.Level) ? "2o" : sc.Universe;
             case Const c:
                 Define(c.Name);
                 return $"( {Token(c.Name)} ` {sc.Universe} )";
             case App a:
                 return $"( {Tr(a.Fn, sc)} ` {Tr(a.Arg, sc)} )";
+            case Binder { IsPi: true } pp when tower && _typing.IsProposition(pp, sc.Types) == true:
+                return PropPi(pp, sc);
             case Binder b:
                 {
                     string dom = Tr(b.Domain, sc);
@@ -195,13 +197,14 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
 
     private void Emit(Name n, string tok, string body, Scope sc, string what)
     {
+        EnsureTower();
         string text = $"""
             $( The Lean {what} {n}, translated by the model of docs/milestone3.md. $)
             $c {tok} $.
             c{tok} $a class {tok} $.
             {"${"}
               {(sc.Bound.Count > 1 ? $"$d {string.Join(' ', sc.Bound)} $." : "")}
-              df-{tok} $a |- {tok} = ( {UniverseVar} e. Univ |-> {body} ) $.
+              df-{tok} $a |- {tok} = ( {UniverseVar} e. {UniverseDomain} |-> {body} ) $.
             {"$}"}
 
             """;
@@ -870,7 +873,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         Statement dfa = pr.Database["df-" + tok];
         // The definition, its own variables substituted by themselves (a citation still pushes their syntax).
         Proof df = pr.Apply(dfa.Label, dfa.Hyps.Where(h => h.Kind == 'f').ToDictionary(h => h.Var!, h => h.Var!));
-        Proof cur = Beta(ph, df, UniverseVar, "Univ", valueu, "U", Hyp(ph, "U e. Univ")!.Value, tok);
+        Proof cur = Beta(ph, df, UniverseVar, UniverseDomain, valueu, "U", Hyp(ph, UHyp)!.Value, tok);
         string app = $"( {tok} ` U )", val = valueU, lastVar = UniverseVar, lastBody = valueu;
         for (int i = 0; i < args.Count; i++)
         {
@@ -947,7 +950,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         }
         var args = ClassVars.Take(arity).ToList();
         List<string> doms = Domains(tok, args, arity);
-        var hyps = new List<string> { "U e. Univ" };
+        var hyps = new List<string> { UHyp };
         hyps.AddRange(args.Select((a, i) => $"{a} e. {doms[i]}"));
         string ph = Conj(hyps);
         (Proof eq, _, _) = Unfold(ph, tok, args, (i, dom) => Hyp(ph, $"{args[i]} e. {dom}") ?? throw new Refused($"no hypothesis {args[i]} e. {dom}"));
@@ -989,7 +992,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         string v = ctorArgs.Aggregate($"( {ctok} ` U )", (acc, a) => $"( {acc} ` {a} )");
 
         // Hypotheses: the recursor's arguments, then the fields, each in its domain.
-        var hyps = new List<string> { "U e. Univ" };
+        var hyps = new List<string> { UHyp };
         List<string> rdoms = Domains(rtok, recArgs, nrec);
         hyps.AddRange(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}"));
         List<string> cdoms = Domains(ctok, ctorArgs, np + nf);
@@ -1058,7 +1061,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         List<string> ctorArgs = ps.Concat(fields).ToList();
         string v = ctorArgs.Aggregate($"( {ctok} ` U )", (acc, a) => $"( {acc} ` {a} )");
 
-        var hyps = new List<string> { "U e. Univ" };
+        var hyps = new List<string> { UHyp };
         List<string> rdoms = Domains(rtok, recArgs, nrec);
         hyps.AddRange(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}"));
         List<string> cdoms = Domains(ctok, ctorArgs, np + nf);
@@ -1069,7 +1072,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         Proof Pick(string ctx, string h) => Hyp(ctx, h) ?? throw new Refused($"no hypothesis {h}");
 
         // 1. Membership, under the parameters' and fields' hypotheses only.
-        string small = Conj(new[] { "U e. Univ" }.Concat(ps.Select((a, i) => $"{a} e. {rdoms[i]}")).Concat(fieldHyps));
+        string small = Conj(new[] { UHyp }.Concat(ps.Select((a, i) => $"{a} e. {rdoms[i]}")).Concat(fieldHyps));
         (Proof eqV0, _, _) = Unfold(small, ctok, ctorArgs, (i, dom) => Pick(small, $"{ctorArgs[i]} e. {dom}"));
         string tag = Rhs(eqV0);
         (Proof eqT0, _, _) = Unfold(small, itok, ps, (i, dom) => Pick(small, $"{ps[i]} e. {dom}"));
@@ -1406,7 +1409,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         List<string> indices = result.Skip(np).Select(e => Tr(e, sc)).ToList();
         List<string> fieldProps = fieldTypes.Select(ft => Tr(ft, sc)).ToList();   // ⟦T⟧ for each field, each in 2o
 
-        var hyps = new List<string> { "U e. Univ" };
+        var hyps = new List<string> { UHyp };
         List<string> rdoms = Domains(rtok, recArgs, nrec);
         hyps.AddRange(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}"));
         hyps.AddRange(fieldProps.Select(p => $"(/) e. {p}"));
@@ -1698,6 +1701,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 return _d.Lift(ph, pr.Apply("opex", S(("A", C(0)), ("B", C(1)))));
             case "csn":
                 return _d.Lift(ph, pr.Apply("snex", S(("A", C(0)))));
+            case "cuni":
+                return pr.Apply("uniexd", S(("ph", ph), ("A", C(0)), ("V", "_V")), ExistsIn(ph, C(0)));
+            case "crn":
+                return pr.Apply("rnexd", S(("ph", ph), ("A", C(0)), ("V", "_V")), ExistsIn(ph, C(0)));
             case "cv":
                 return _d.Lift(ph, pr.Apply("vex", S(("x", C(0)))));
             case "cun":

@@ -177,6 +177,13 @@ public sealed class Deduction(Prover pr)
             case "cixp": // X_ x e. A B ($d x ph)
                 return pr.Apply("ixpeq12dv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
                     Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
+            case "cuni": // U. A
+                return pr.Apply("unieqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
+            case "crn":  // ran A
+                return pr.Apply("rneqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
+            case "wral": // A. x e. A ph ($d x ph)
+                return pr.Apply("raleqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
             case "wrex": // E. x e. A ph ($d x ph)
                 return pr.Apply("rexeqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
                     Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
