@@ -191,6 +191,26 @@ public sealed class Deduction(Prover pr)
                         : null;
                     return dom is Proof d1 && body is Proof b1 ? Trans(d1, b1) : (dom ?? body!.Value);
                 }
+            case "crdg": // rec ( F , I )
+                return Syl(Jca(Sub("F") ?? Refl(h, L("F")), Sub("I") ?? Refl(h, L("I"))),
+                    pr.Apply("rdgeq12", S(("F", L("F")), ("G", R("F")), ("A", L("I")), ("B", R("I")))));
+            case "cfrecs": // frecs ( R , A , F )
+                return Syl(pr.Apply("3jca", S(("ph", h), ("ps", $"{L("R")} = {R("R")}"), ("ch", $"{L("A")} = {R("A")}"), ("th", $"{L("F")} = {R("F")}")),
+                        Sub("R") ?? Refl(h, L("R")), Sub("A") ?? Refl(h, L("A")), Sub("F") ?? Refl(h, L("F"))),
+                    pr.Apply("frecseq123", S(("R", L("R")), ("S", R("R")), ("A", L("A")), ("B", R("A")), ("F", L("F")), ("G", R("F")))));
+            case "cpred": // Pred ( R , A , X )
+                return Syl(pr.Apply("3jca", S(("ph", h), ("ps", $"{L("R")} = {R("R")}"), ("ch", $"{L("A")} = {R("A")}"), ("th", $"{L("X")} = {R("X")}")),
+                        Sub("R") ?? Refl(h, L("R")), Sub("A") ?? Refl(h, L("A")), Sub("X") ?? Refl(h, L("X"))),
+                    pr.Apply("predeq123", S(("R", L("R")), ("S", R("R")), ("A", L("A")), ("B", R("A")), ("X", L("X")), ("Y", R("X")))));
+            case "cres": // ( A |` B )
+                return pr.Apply("reseq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
+            case "cmpo": // ( x e. A , y e. B |-> C ) ($d x y ph)
+                return pr.Apply("mpoeq123dv", S(("ph", h), ("x", L("x")), ("y", L("y")), ("A", L("A")), ("D", R("A")), ("B", L("B")), ("E", R("B")), ("C", L("C")), ("F", R("C"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")), Sub("C") ?? Refl(h, L("C")));
+            case "wbr":  // A R B
+                return pr.Apply("breq123d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("R", L("R")), ("S", R("R")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("R") ?? Refl(h, L("R")), Sub("B") ?? Refl(h, L("B")));
             case "cs1":  // <" A ">
                 return pr.Apply("s1eqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
             case "wceq": // A = B

@@ -270,13 +270,22 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     {
         Name n = ind.Name;
         string itok = Token(n) ?? throw new Refused($"{n}: the name has characters a set.mm token can't");
-        if (ind.IsRec)
-        {
-            throw new Refused($"{n} is a recursive inductive type; only non-recursive ones are in the model so far");
-        }
         if (ind.NumNested > 0 || ind.BlockMembers.Count(m => env.Find(m)?.Kind == ConstKind.Inductive) > 1)
         {
             throw new Refused($"{n} is a mutual or nested inductive type; not in the model yet");
+        }
+        if (ind.IsRec)
+        {
+            if (IsProposition(ind))
+            {
+                throw new Refused($"{n} is a recursive inductive proposition; not in the model yet");
+            }
+            if (ind.NumIndices > 0)
+            {
+                throw new Refused($"{n} is a recursive indexed inductive type; not in the model yet");
+            }
+            DefineRecursive(ind, itok);
+            return;
         }
         Expr target = ind.Type;
         while (target is Binder { IsPi: true } pb)
@@ -434,6 +443,234 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         }
     }
 
+    // ---- recursive types ------------------------------------------------------------------------------------------
+
+    /// <summary>Set variables frr2 and exse reserve for their own proofs: the recursion's binders must avoid them.</summary>
+    private static readonly string[] RecursionPool = "d e i j k m n o p q r s t w".Split(' ');
+
+    private sealed record RecursiveInfo(string StepTok, string CaseTok, List<List<int>> RecFields);
+    private readonly Dictionary<string, RecursiveInfo> _recursive = new();   // by the type's token
+
+    /// <summary>
+    /// A recursive inductive type with no indices, alone in its block, in Type, whose recursive fields are the type
+    /// itself at its own parameters (finitary).
+    /// - The type is the union of an ω-chain of stages, U_ n e. _om ( rec ( step , (/) ) ` n ), where the step
+    ///   lean.I.-step = ( X e. _V |-> ( X u. F ( X ) ) ) adds every constructor's tagged tuple whose recursive fields
+    ///   are in X. The step is a constant of its own so that a stage, substituted into it, doesn't carry the step's
+    ///   bound variables into their own scope ($d). Lean names can't contain "-", so its name can't clash.
+    /// - Constructors build tagged tuples as for non-recursive types.
+    /// - The recursor is well-founded recursion over smaller rank: ( frecs ( RankLt , ⟦I params⟧ , H ) ` t ), where
+    ///   H = ( a e. _V , f e. _V |-> case analysis on a, each minor premise given the fields and f at each recursive
+    ///   field ). frr2 gives its computation rules (see <see cref="Iota"/>).
+    /// </summary>
+    private void DefineRecursive(ConstInfo ind, string itok)
+    {
+        Name n = ind.Name;
+        List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
+        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        foreach (ConstInfo c in ctors.Append(rec))
+        {
+            _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
+        }
+        if (ctors.Count == 0)
+        {
+            throw new Refused($"{n} has no constructors");
+        }
+        string steptok = itok + ".-step";
+
+        // Which fields are recursive: exactly I at the parameters. Anything else mentioning I isn't finitary.
+        bool IsSelf(Expr ty, List<Expr> ps) => Ops.Spine(ty, out List<Expr> a) is Const h && ReferenceEquals(h.Name, n)
+            && a.Count == ps.Count && a.Zip(ps).All(z => ReferenceEquals(z.First, z.Second));
+        bool Mentions(Expr e) => e switch
+        {
+            Const c => ReferenceEquals(c.Name, n),
+            App a => Mentions(a.Fn) || Mentions(a.Arg),
+            Binder b => Mentions(b.Domain) || Mentions(b.Body),
+            Let l => Mentions(l.Type) || Mentions(l.Value) || Mentions(l.Body),
+            Proj p => Mentions(p.Struct),
+            _ => false,
+        };
+
+        // The step, over a packed argument w = <. <. u , params >. , X >.: ( w e. _V |-> ( X u. F ( X ) ) ), with u, the
+        // parameters and X read from w. A single map over _V, with no universe layer: a definition may be a proper
+        // class, but a function value can't, so the step can't be the value of a constant at u and the parameters.
+        var recFields = new List<List<int>>();
+        var stepBound = new List<string>();
+        {
+            var sc = NewScope();
+            var pfv = new List<Expr>();
+            Expr ty = ind.Type;
+            var ps = Telescope(ref ty, ind.NumParams, sc, pfv);
+            const string hole = "ZZX";
+            var parts = new List<string>();
+            for (int j = 0; j < ctors.Count; j++)
+            {
+                Expr cty = ctors[j].Type;
+                Telescope(ref cty, ind.NumParams, sc, reuse: pfv);
+                var fs = new List<(string Var, string Dom)>();
+                var rf = new List<int>();
+                for (int k = 0; k < ctors[j].NumFields; k++)
+                {
+                    var b = (Binder)cty;
+                    string dom;
+                    if (IsSelf(b.Domain, pfv))
+                    {
+                        dom = hole;
+                        rf.Add(k);
+                    }
+                    else if (Mentions(b.Domain))
+                    {
+                        throw new Refused($"{ctors[j].Name} has a recursive field that isn't {n} itself (not finitary); not in the model yet");
+                    }
+                    else
+                    {
+                        dom = Tr(b.Domain, sc);
+                    }
+                    string v = Fresh(sc, dom);
+                    Expr fv = t.FVar(_fresh++);
+                    sc.Vars[((FVar)fv).Id] = v;
+                    sc.Types[((FVar)fv).Id] = b.Domain;
+                    if (!sc.Bound.Contains(v))
+                    {
+                        sc.Bound.Add(v);
+                    }
+                    sc.Active.Add(v);
+                    fs.Add((v, dom));
+                    cty = _ops.Instantiate(b.Body, [fv]);
+                }
+                foreach (var f in fs)
+                {
+                    sc.Active.Remove(f.Var);
+                }
+                recFields.Add(rf);
+                string part = $"{{ {Tag(j, Tuple(fs.Select(f => f.Var).ToList()))} }}";
+                parts.Add(fs.AsEnumerable().Reverse().Aggregate(part, (acc, f) => $"U_ {f.Var} e. {f.Dom} {acc}"));
+            }
+            string set = parts.Skip(1).Aggregate(parts[0], (acc, p) => $"( {acc} u. {p} )");
+            string body = $"( {hole} u. {set} )";
+            string w = SetVars.First(x => !sc.Bound.Contains(x) && !body.Split(' ').Contains(x) && !ps.Any(q => q.Var == x));
+            var packed = new[] { UniverseVar }.Concat(ps.Select(q => q.Var)).ToList();
+            body = Unpack(body, packed, $"( 1st ` {w} )");
+            body = Subst(body, hole, $"( 2nd ` {w} )");
+            stepBound.AddRange(sc.Bound.Where(x => x != UniverseVar && !ps.Any(q => q.Var == x)));
+            stepBound.Add(w);
+            EmitRaw(t.Of($"{n}.-step"), steptok, $"( {w} e. _V |-> {body} )", stepBound, "inductive type's stage step, over a packed argument");
+        }
+
+        // The type: ( params |-> U_ k e. _om ( rec ( ( X e. _V |-> ( step ` <. <. u , params >. , X >. ) ) , (/) ) ` k ) ).
+        {
+            var sc = NewScope();
+            Expr ty = ind.Type;
+            var ps = Telescope(ref ty, ind.NumParams, sc);
+            string pack = Tuple(new[] { UniverseVar }.Concat(ps.Select(q => q.Var)).ToList());
+            string x = SetVars.First(v => !sc.Bound.Contains(v) && !stepBound.Contains(v));
+            sc.Bound.Add(x);
+            string k = SetVars.First(v => !sc.Bound.Contains(v));
+            sc.Bound.Add(k);
+            string stepf = $"( {x} e. _V |-> ( {steptok} ` <. {pack} , {x} >. ) )";
+            _defined.Add(n);
+            Emit(n, itok, Maps(ps, $"U_ {k} e. _om ( rec ( {stepf} , (/) ) ` {k} )"), sc, "recursive inductive type");
+        }
+
+        // The constructors, as for non-recursive types.
+        for (int j = 0; j < ctors.Count; j++)
+        {
+            var sc = NewScope();
+            Expr cty = ctors[j].Type;
+            var ps = Telescope(ref cty, ind.NumParams, sc);
+            var fs = Telescope(ref cty, ctors[j].NumFields, sc);
+            _defined.Add(ctors[j].Name);
+            Emit(ctors[j].Name, Token(ctors[j].Name)!, Maps(ps.Concat(fs), Tag(j, Tuple(fs.Select(f => f.Var).ToList()))), sc, "constructor");
+        }
+
+        // The case analysis, over a packed argument w = <. <. <. u , params , motive , minors >. , a >. , f >.:
+        // ( w e. _V |-> if ( ( 1st ` a ) = (/) , minor0 fields ( f at recursive fields ) , … ) ).
+        string casetok = itok + ".-case";
+        int nb = ind.NumParams + rec.NumMotives + rec.NumMinors;
+        {
+            var sc = NewScope();
+            Expr rty = rec.Type;
+            var bs = Telescope(ref rty, nb, sc);
+            const string ha = "ZZA", hf = "ZZF";
+            List<string> minors = bs.Skip(ind.NumParams + rec.NumMotives).Select(b => b.Var).ToList();
+            string Minor(int j, string x) =>
+                recFields[j].Aggregate(
+                    Enumerable.Range(0, ctors[j].NumFields).Aggregate(minors[j], (acc, k) => $"( {acc} ` {Field(x, k)} )"),
+                    (acc, k) => $"( {acc} ` ( {hf} ` {Field(x, k)} ) )");
+            string Case(int j, string x) => j == ctors.Count - 1
+                ? Minor(j, $"( 2nd ` {x} )")
+                : $"if ( ( 1st ` {x} ) = (/) , {Minor(j, $"( 2nd ` {x} )")} , {Case(j + 1, $"( 2nd ` {x} )")} )";
+            string body = Case(0, ha);
+            string w = SetVars.First(x => !body.Split(' ').Contains(x) && !bs.Any(q => q.Var == x) && x != UniverseVar);
+            var packed = new[] { UniverseVar }.Concat(bs.Select(q => q.Var)).ToList();
+            body = Unpack(body, packed, $"( 1st ` ( 1st ` {w} ) )");
+            body = Subst(Subst(body, ha, $"( 2nd ` ( 1st ` {w} ) )"), hf, $"( 2nd ` {w} )");
+            EmitRaw(t.Of($"{n}.-case"), casetok, $"( {w} e. _V |-> {body} )", [w], "recursor's case analysis, over a packed argument");
+        }
+
+        // The recursor: ( params |-> motive |-> minors |-> ( t e. ⟦I params⟧ |->
+        //   ( frecs ( RankLt , ⟦I params⟧ , ( a e. _V , f e. _V |-> ( case ` <. <. Q , a >. , f >. ) ) ) ` t ) ) ).
+        {
+            var sc = NewScope();
+            Expr rty = rec.Type;
+            var bs = Telescope(ref rty, nb + 1, sc);
+            string major = bs[^1].Var, dom = bs[^1].Dom;
+            string q = Tuple(new[] { UniverseVar }.Concat(bs.Take(nb).Select(b => b.Var)).ToList());
+            string a = PickRecursionVar(sc), f = PickRecursionVar(sc), rx = PickRecursionVar(sc), ry = PickRecursionVar(sc);
+            string rel = $"{{ <. {rx} , {ry} >. | ( rank ` {rx} ) e. ( rank ` {ry} ) }}";
+            string g = $"( {a} e. _V , {f} e. _V |-> ( {casetok} ` <. <. {q} , {a} >. , {f} >. ) )";
+            _defined.Add(rec.Name);
+            _recursive[itok] = new RecursiveInfo(steptok, casetok, recFields);
+            Emit(rec.Name, Token(rec.Name)!, Maps(bs, $"( frecs ( {rel} , {dom} , {g} ) ` {major} )"), sc, "recursor");
+        }
+    }
+
+    /// <summary>Replace each packed variable by its projection from the tuple: the i-th of a Tuple is Field(tuple, i).</summary>
+    private static string Unpack(string body, List<string> packed, string tuple)
+    {
+        for (int i = 0; i < packed.Count; i++)
+        {
+            body = Subst(body, packed[i], Field(tuple, i));
+        }
+        return body;
+    }
+
+    /// <summary>A definition with no universe layer: df-tok $a |- tok = definiens $. (a map over a packed argument).</summary>
+    private void EmitRaw(Name n, string tok, string definiens, IEnumerable<string> bound, string what)
+    {
+        var b = bound.Distinct().ToList();
+        string text = $"""
+            $( The {what} of {n}, for the model of docs/milestone3.md. $)
+            $c {tok} $.
+            c{tok} $a class {tok} $.
+            {"${"}
+              {(b.Count > 1 ? $"$d {string.Join(' ', b)} $." : "")}
+              df-{tok} $a |- {tok} = {definiens} $.
+            {"$}"}
+
+            """;
+        _out.AppendLine(text);
+        _values[tok] = definiens;
+        if (!dryRun)
+        {
+            pr.Database.Extend(text);
+        }
+    }
+
+    /// <summary>A set variable fresh in the whole definition and outside frr2's and exse's reserved names.</summary>
+    private static string PickRecursionVar(Scope sc)
+    {
+        foreach (string v in RecursionPool.Reverse())
+        {
+            if (!sc.Bound.Contains(v))
+            {
+                sc.Bound.Add(v);
+                return v;
+            }
+        }
+        throw new Refused("no set variable left for the recursion");
+    }
+
     private static void RefuseBinders(List<(string Var, string Dom)> fields, Name ctor)
     {
         // A field whose type binds variables would be written with different bound names in the type, the constructor
@@ -561,6 +798,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             return PropositionIota(ctor, ind, rec);
         }
         string itok = Token(ind.Name)!, ctok = Token(ctorName)!, rtok = Token(rec.Name)!;
+        if (_recursive.ContainsKey(itok))
+        {
+            return RecursiveIota(ctor, ind, rec);
+        }
         int j = Array.FindIndex(ind.Ctors, c => ReferenceEquals(c, ctorName));
         int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors, nf = ctor.NumFields;
         if (nrec + nf > ClassVars.Length)
@@ -610,6 +851,326 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             throw new InvalidOperationException($"the computation rule came out as {Rhs(cur)}, not {want}");
         }
         return (cur.Proves, cur.Proof, DistinctFor([itok, ctok, rtok], recArgs.Concat(fields)));
+    }
+
+    /// <summary>
+    /// The computation rule of a constructor of a recursive type:
+    /// I.rec params motive minors (c params fields) = minor fields (I.rec params motive minors r) for each recursive r.
+    /// 1. The constructor's value is in the type: through the stages (eliun, the step's equation, rdgsuc, ssiun2s),
+    ///    proved under only the parameters' and fields' hypotheses (the others mention bound variables).
+    /// 2. frr2 unfolds the recursion once, with lean-rankfr for Fr and exse for Se.
+    /// 3. The case analysis is evaluated on the tag (ovmpog, then the simplifier).
+    /// 4. The recursion at each recursive field r is the recursor at r: r is a predecessor of the value, since it has
+    ///    smaller rank (elpredg, brabga, and the rank of a pair's components), so fvres applies.
+    /// </summary>
+    private (MmExpr Statement, List<string> Proof, string[] Distinct) RecursiveIota(ConstInfo ctor, ConstInfo ind, ConstInfo rec)
+    {
+        string itok = Token(ind.Name)!, ctok = Token(ctor.Name)!, rtok = Token(rec.Name)!;
+        RecursiveInfo info = _recursive[itok];
+        int j = Array.FindIndex(ind.Ctors, c => ReferenceEquals(c, ctor.Name));
+        int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors, nf = ctor.NumFields;
+        List<int> rf = info.RecFields[j];
+        if (rf.Count > 1)
+        {
+            throw new Refused($"{ctor.Name} has more than one recursive field; not in the model yet");
+        }
+        if (nrec + nf > ClassVars.Length)
+        {
+            throw new Refused("more arguments than class variables");
+        }
+        List<string> recArgs = ClassVars.Take(nrec).ToList(), ps = recArgs.Take(np).ToList();
+        List<string> fields = ClassVars.Skip(nrec).Take(nf).ToList();
+        List<string> ctorArgs = ps.Concat(fields).ToList();
+        string v = ctorArgs.Aggregate($"( {ctok} ` U )", (acc, a) => $"( {acc} ` {a} )");
+
+        var hyps = new List<string> { "U e. Univ" };
+        List<string> rdoms = Domains(rtok, recArgs, nrec);
+        hyps.AddRange(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}"));
+        List<string> cdoms = Domains(ctok, ctorArgs, np + nf);
+        RefuseBinders(cdoms.Skip(np).Select(d => ("", d)).ToList(), ctor.Name);
+        List<string> fieldHyps = fields.Select((a, i) => $"{a} e. {cdoms[np + i]}").ToList();
+        hyps.AddRange(fieldHyps);
+        string ph = Conj(hyps);
+        Proof Pick(string ctx, string h) => Hyp(ctx, h) ?? throw new Refused($"no hypothesis {h}");
+
+        // 1. Membership, under the parameters' and fields' hypotheses only.
+        string small = Conj(new[] { "U e. Univ" }.Concat(ps.Select((a, i) => $"{a} e. {rdoms[i]}")).Concat(fieldHyps));
+        (Proof eqV0, _, _) = Unfold(small, ctok, ctorArgs, (i, dom) => Pick(small, $"{ctorArgs[i]} e. {dom}"));
+        string tag = Rhs(eqV0);
+        (Proof eqT0, _, _) = Unfold(small, itok, ps, (i, dom) => Pick(small, $"{ps[i]} e. {dom}"));
+        string iapp = Lhs(eqT0), set = Rhs(eqT0);
+        string k = Part(set, "x"), stageBody = Part(set, "B");
+        string Stage(string b) => Subst(stageBody, k, b);
+        // rec ( stepf , (/) ) ` k: the stage function stepf = ( X e. _V |-> ( step ` <. P , X >. ) )
+        string stepApp = Part(Part(Stage("(/)"), "F"), "F");
+        string sx = Part(stepApp, "x"), sBody = Part(stepApp, "B");
+        var extraVars = new List<string>();
+
+        // ( ctx -> ( stepf ` sb ) = ( sb u. F ( sb ) ) ): rename stepf's variable away from sb (which contains it),
+        // apply it, unfold the step at the packed argument, and read the packed parts back.
+        Proof StepAt(string ctx, string sb)
+        {
+            string y = SetVars.First(x => x != sx && !sb.Split(' ').Contains(x) && !sBody.Split(' ').Contains(x) && !ctx.Split(' ').Contains(x));
+            extraVars.Add(y);
+            string bodyY = Subst(sBody, sx, y), stepY = $"( {y} e. _V |-> {bodyY} )";
+            Proof ren = pr.Apply("cbvmptv", S(("x", sx), ("y", y), ("A", "_V"), ("B", sBody), ("C", bodyY)),
+                _d.Congruence("class", Subst(sBody, sx, "Z"), "Z", pr.Apply("id", S(("ph", $"{sx} = {y}")))));
+            Proof e1 = pr.Apply("fveq1d", S(("ph", ctx), ("A", sb), ("F", stepApp), ("G", stepY)), _d.Lift(ctx, ren));
+            Proof e2 = Beta(ctx, pr.Apply("eqid", S(("A", stepY))), y, "_V", bodyY, sb, Exists(ctx, sb), stepY);
+            string arg = Subst(bodyY, y, sb);   // ( step ` <. P , sb >. )
+            string packedArg = Part(arg, "A");
+            Proof e3 = UnfoldRaw(ctx, info.StepTok, packedArg);
+            Proof cur2 = _d.Trans(_d.Trans(e1, e2), e3);
+            return Simp(ctx, Rhs(cur2)) is Proof sp ? _d.Trans(cur2, sp) : cur2;
+        }
+
+        Proof TagInStage(string ctx, string b, Proof bInOm, Proof? rIn)
+        {
+            string sb = Stage(b);
+            Proof eqStep = StepAt(ctx, sb);
+            string un = Rhs(eqStep);
+            string fsb = Part(un, "B");
+            Proof inF = MemberUnion(ctx, tag, fsb, ind.Ctors.Length, j, fields,
+                (kk, h) => rf.Contains(kk) ? rIn!.Value : Pick(ctx, h));
+            Proof inUn = _d.Syl(inF, pr.Apply("elun2", S(("A", tag), ("B", fsb), ("C", sb))));
+            Proof inStep = pr.Apply("eleqtrrd", S(("ph", ctx), ("A", tag), ("B", un), ("C", Lhs(eqStep))), inUn, eqStep);
+            Proof rdg = _d.Syl(_d.Syl(bInOm, pr.Apply("nnon", S(("A", b)))), pr.Apply("rdgsuc", S(("B", b), ("F", stepApp), ("A", "(/)"))));
+            string sucStage = Stage($"suc {b}");
+            Proof inSuc = pr.Apply("eleqtrrd", S(("ph", ctx), ("A", tag), ("B", Lhs(eqStep)), ("C", sucStage)), inStep, rdg);
+            Proof sub = _d.Congruence("class", Subst(stageBody, k, "Z"), "Z", pr.Apply("id", S(("ph", $"{k} = suc {b}"))));
+            Proof incl = pr.Apply("ssiun2s", S(("x", k), ("A", "_om"), ("B", stageBody), ("C", $"suc {b}"), ("D", sucStage)), sub);
+            Proof sub2 = _d.Syl(_d.Syl(bInOm, pr.Apply("peano2", S(("A", b)))), incl);
+            Proof imp = pr.Apply("sseld", S(("ph", ctx), ("A", sucStage), ("B", set), ("C", tag)), sub2);
+            Proof inSet = pr.Apply("mpd", S(("ph", ctx), ("ps", $"{tag} e. {sucStage}"), ("ch", $"{tag} e. {set}")), inSuc, imp);
+            Proof eqT = _d.Syl(Restrict(ctx, small), eqT0);
+            return pr.Apply("eleqtrrd", S(("ph", ctx), ("A", tag), ("B", set), ("C", iapp)), inSet, eqT);
+        }
+
+        Proof tagIn;
+        if (rf.Count == 0)
+        {
+            tagIn = TagInStage(small, "(/)", _d.Lift(small, pr.Apply("peano1", S())), null);
+        }
+        else
+        {
+            // r is in some stage m (a variable of its own: ssiun2s needs the union's k disjoint from suc m).
+            string r = fields[rf[0]];
+            var stepVars = _values[info.StepTok].Split(' ').ToHashSet();
+            string m = SetVars.First(x => x != k && !set.Split(' ').Contains(x) && !small.Split(' ').Contains(x) && !stepVars.Contains(x));
+            string setM = $"U_ {m} e. _om {Stage(m)}";
+            extraVars.Add(m);
+            Proof ren = pr.Apply("cbviunv", S(("x", k), ("y", m), ("A", "_om"), ("B", stageBody), ("C", Stage(m))),
+                _d.Congruence("class", Subst(stageBody, k, "Z"), "Z", pr.Apply("id", S(("ph", $"{k} = {m}")))));
+            Proof rInSet = pr.Apply("eleqtrd", S(("ph", small), ("A", r), ("B", iapp), ("C", set)), Pick(small, $"{r} e. {iapp}"), eqT0);
+            Proof rInSetM = pr.Apply("eleqtrd", S(("ph", small), ("A", r), ("B", set), ("C", setM)), rInSet, _d.Lift(small, ren));
+            Proof some = pr.Apply("sylib", S(("ph", small), ("ps", $"{r} e. {setM}"), ("ch", $"E. {m} e. _om {r} e. {Stage(m)}")),
+                rInSetM, pr.Apply("eliun", S(("A", r), ("x", m), ("B", "_om"), ("C", Stage(m)))));
+            string ctx = $"( ( {small} /\\ {m} e. _om ) /\\ {r} e. {Stage(m)} )";
+            Proof inner = TagInStage(ctx, m, Pick(ctx, $"{m} e. _om"), Pick(ctx, $"{r} e. {Stage(m)}"));
+            Proof lim = pr.Apply("rexlimdva2", S(("ph", small), ("x", m), ("A", "_om"), ("ps", $"{r} e. {Stage(m)}"), ("ch", $"{tag} e. {iapp}")), inner);
+            tagIn = pr.Apply("mpd", S(("ph", small), ("ps", $"E. {m} e. _om {r} e. {Stage(m)}"), ("ch", $"{tag} e. {iapp}")), some, lim);
+        }
+        Proof vInSmall = pr.Apply("eqeltrd", S(("ph", small), ("A", v), ("B", tag), ("C", iapp)), eqV0, tagIn);
+        Proof inType = _d.Syl(Restrict(ph, small), vInSmall);
+        Proof eqV = _d.Syl(Restrict(ph, small), eqV0);
+
+        // 2. frr2.
+        (Proof eqR, _, _) = Unfold(ph, rtok, recArgs.Append(v).ToList(), (i, dom) => i < nrec ? Pick(ph, $"{recArgs[i]} e. {dom}") : inType);
+        string frApp = Rhs(eqR);
+        string fr = Part(frApp, "F");
+        string rel = Part(fr, "R"), caseApp = Part(fr, "F");
+        string rx = Part(rel, "x"), ry = Part(rel, "y");
+        EnsureRankFr();
+        Proof frOk = _d.Lift(ph, pr.Apply("lean-rankfr", S(("x", rx), ("y", ry), ("A", iapp))));
+        Proof seOk = _d.Syl(Exists(ph, iapp), pr.Apply("exse", S(("A", iapp), ("V", "_V"), ("R", rel))));
+        Proof frEq = pr.Apply("eqid", S(("A", fr)));
+        Proof once = _d.Syl(_d.Jca(_d.Jca(frOk, seOk), inType),
+            pr.Apply("frr2", S(("R", rel), ("A", iapp), ("G", caseApp), ("X", v), ("F", fr)), frEq));
+        string g = $"( {fr} |` Pred ( {rel} , {iapp} , {v} ) )";
+
+        // 3. The case analysis at the value: rename the operation's variables away from g (which contains them), apply
+        // it (ovmpog), unfold the case analysis at the packed argument, and read the parts back.
+        string a0 = Part(caseApp, "x"), f0 = Part(caseApp, "y"), body0 = Part(caseApp, "C");
+        var used = (fr + " " + v + " " + ph).Split(' ').ToHashSet();
+        string a = SetVars.First(x => !used.Contains(x) && x != a0 && x != f0);
+        string f = SetVars.First(x => !used.Contains(x) && x != a0 && x != f0 && x != a);
+        extraVars.AddRange([a, f]);
+        string bodyA = Subst(body0, a0, a), body = Subst(bodyA, f0, f);
+        string mpo = $"( {a} e. _V , {f} e. _V |-> {body} )";
+        Proof ren2 = pr.Apply("cbvmpov", S(("x", a0), ("y", f0), ("z", a), ("w", f), ("A", "_V"), ("B", "_V"), ("C", body0), ("E", bodyA), ("D", body)),
+            _d.Congruence("class", Subst(body0, a0, "Z"), "Z", pr.Apply("id", S(("ph", $"{a0} = {a}")))),
+            _d.Congruence("class", Subst(bodyA, f0, "Z"), "Z", pr.Apply("id", S(("ph", $"{f0} = {f}")))));
+        string atV = Subst(body, a, v), atVg = Subst(atV, f, g);
+        Proof toMpo = pr.Apply("oveqd", S(("ph", ph), ("A", caseApp), ("B", mpo), ("C", v), ("D", g)), _d.Lift(ph, ren2));
+        Proof h1 = _d.Congruence("class", Subst(body, a, "Z"), "Z", pr.Apply("id", S(("ph", $"{a} = {v}"))));
+        Proof h2 = _d.Congruence("class", Subst(atV, f, "Z"), "Z", pr.Apply("id", S(("ph", $"{f} = {g}"))));
+        Proof frFn = _d.Syl(_d.Jca(frOk, seOk), pr.Apply("frr1", S(("R", rel), ("A", iapp), ("G", caseApp), ("F", fr)), frEq));
+        Proof frSet = _d.Syl(_d.Jca(frFn, Exists(ph, iapp)), pr.Apply("fnex", S(("F", fr), ("A", iapp), ("B", "_V"))));
+        Proof gSet = _d.Syl(frSet, pr.Apply("resexg", S(("A", fr), ("V", "_V"), ("B", $"Pred ( {rel} , {iapp} , {v} )"))));
+        _known[(ph, fr)] = frSet;
+        _known[(ph, g)] = gSet;
+        Proof ov = _d.Syl(pr.Apply("3jca", S(("ph", ph), ("ps", $"{v} e. _V"), ("ch", $"{g} e. _V"), ("th", $"{atVg} e. _V")),
+                Exists(ph, v), gSet, Exists(ph, atVg)),
+            pr.Apply("ovmpog", S(("x", a), ("y", f), ("A", v), ("B", g), ("C", "_V"), ("D", "_V"), ("R", body), ("G", atV), ("S", atVg), ("F", mpo), ("H", "_V")),
+                h1, h2, pr.Apply("eqid", S(("A", mpo)))));
+        Proof cur = _d.Trans(_d.Trans(_d.Trans(eqR, once), toMpo), ov);
+        string caseArg = Part(atVg, "A");
+        cur = _d.Trans(cur, UnfoldRaw(ph, info.CaseTok, caseArg));
+        if (Simp(ph, Rhs(cur)) is Proof simp0)
+        {
+            cur = _d.Trans(cur, simp0);
+        }
+        // The value v as the tagged tuple, outside g (which mentions v too).
+        const string gHole = "ZZG";
+        string ctxTag = Rhs(cur).Replace(g, gHole, StringComparison.Ordinal).Replace(v, "Z", StringComparison.Ordinal).Replace(gHole, g, StringComparison.Ordinal);
+        if (ctxTag.Split(' ').Contains("Z"))
+        {
+            cur = _d.Trans(cur, _d.Congruence("class", ctxTag, "Z", eqV));
+        }
+        if (Simp(ph, Rhs(cur)) is Proof simp)
+        {
+            cur = _d.Trans(cur, simp);
+        }
+
+        // 4. The recursion at the recursive field is the recursor there.
+        string minor = recArgs[np + rec.NumMotives + j];
+        string want = fields.Aggregate(minor, (acc, x) => $"( {acc} ` {x} )");
+        foreach (int ri in rf)
+        {
+            string r = fields[ri];
+            string pred = $"Pred ( {rel} , {iapp} , {v} )";
+            Proof rankLt = pr.Apply("eleqtrrd", S(("ph", ph), ("A", $"( rank ` {r} )"), ("B", $"( rank ` {tag} )"), ("C", $"( rank ` {v} )")),
+                RankChain(ph, r, tag), pr.Apply("fveq2d", S(("ph", ph), ("A", v), ("B", tag), ("F", "rank")), eqV));
+            Proof brBi = _d.Syl(_d.Jca(Exists(ph, r), Exists(ph, v)), Brabga(rx, ry, r, v, rel));
+            Proof isR = pr.Apply("mpbird", S(("ph", ph), ("ps", $"{r} {rel} {v}"), ("ch", $"( rank ` {r} ) e. ( rank ` {v} )")), rankLt, brBi);
+            Proof predBi = _d.Syl(_d.Jca(Exists(ph, v), Pick(ph, $"{r} e. {iapp}")),
+                pr.Apply("elpredg", S(("X", v), ("B", "_V"), ("Y", r), ("A", iapp), ("R", rel))));
+            Proof inPred = pr.Apply("mpbird", S(("ph", ph), ("ps", $"{r} e. {pred}"), ("ch", $"{r} {rel} {v}")), isR, predBi);
+            Proof e1 = _d.Syl(inPred, pr.Apply("fvres", S(("A", r), ("B", pred), ("F", fr))));
+            (Proof back, _, _) = Unfold(ph, rtok, recArgs.Append(r).ToList(), (i, dom) => Pick(ph, $"{(i < nrec ? recArgs[i] : r)} e. {dom}"));
+            Proof e = _d.Trans(e1, _d.Symm(back));
+            string here = $"( {g} ` {r} )";
+            string ctxText = Rhs(cur).Replace(here, "Z", StringComparison.Ordinal);
+            cur = _d.Trans(cur, _d.Congruence("class", ctxText, "Z", e));
+            want = $"( {want} ` {Lhs(back)} )";
+        }
+        if (Rhs(cur) != want)
+        {
+            throw new InvalidOperationException($"the computation rule came out as {Rhs(cur)}, not {want}");
+        }
+        string[] dv = DistinctFor([itok, ctok, rtok, info.StepTok, info.CaseTok], recArgs.Concat(fields));
+        return (cur.Proves, cur.Proof, [string.Join(' ', $"{dv[0]} {string.Join(' ', extraVars)}".Split(' ', StringSplitOptions.RemoveEmptyEntries).Distinct())]);
+    }
+
+    /// <summary>The part of a class term bound to the syntax variable <paramref name="var"/> of its top syntax axiom.</summary>
+    private string Part(string term, string var)
+    {
+        SyntaxTree n = pr.Parse("class", term.Split(' ')) ?? throw new InvalidOperationException($"does not parse: {term}");
+        var vars = n.Rule.Hyps.Where(h => h.Kind == 'f').Select(h => h.Var!).ToList();
+        int i = vars.IndexOf(var);
+        return i >= 0 ? pr.Render(n.Children[i]) : throw new InvalidOperationException($"{n.Rule.Label} has no {var}");
+    }
+
+    /// <summary>( ph -> ( tok ` arg ) = body[w := arg] ) for a definition with no universe layer, tok = ( w e. _V |-> body ).</summary>
+    private Proof UnfoldRaw(string ph, string tok, string arg)
+    {
+        Statement dfa = pr.Database["df-" + tok];
+        Proof df = pr.Apply(dfa.Label, dfa.Hyps.Where(h => h.Kind == 'f').ToDictionary(h => h.Var!, h => h.Var!));
+        SyntaxTree m = pr.Parse("class", _values[tok].Split(' '))!;
+        string w = pr.Render(m.Children[0]), body = pr.Render(m.Children[2]);
+        return Beta(ph, df, w, "_V", body, arg, Exists(ph, arg), tok);
+    }
+
+    /// <summary>( ctx -> X e. _V ) where the map's domain is _V (an argument X of a map over _V).</summary>
+    private Proof ExistsIn2(string ctx, string x, string dom) =>
+        dom == "_V" ? Exists(ctx, x) : throw new InvalidOperationException($"expected the domain _V, got {dom}");
+
+    /// <summary>( ph -> small ), for small a conjunction of some of ph's conjuncts.</summary>
+    private Proof Restrict(string ph, string small)
+    {
+        var parts = Conjuncts(small).Reverse().ToList();
+        return parts.Skip(1).Aggregate(Hyp(ph, parts[0]) ?? throw new Refused($"no {parts[0]}"), (acc, h) => _d.Jca(acc, Hyp(ph, h) ?? throw new Refused($"no {h}")));
+    }
+
+    /// <summary>|- ( ( A e. _V /\ B e. _V ) -> ( A rel B <-> ( rank ` A ) e. ( rank ` B ) ) ), by brabga.</summary>
+    private Proof Brabga(string rx, string ry, string a, string b, string rel)
+    {
+        string h = $"( {rx} = {a} /\\ {ry} = {b} )";
+        Proof e1 = _d.Congruence("wff", $"( rank ` Z ) e. ( rank ` {ry} )", "Z", pr.Apply("simpl", S(("ph", $"{rx} = {a}"), ("ps", $"{ry} = {b}"))));
+        Proof e2 = _d.Congruence("wff", $"( rank ` {a} ) e. ( rank ` Z )", "Z", pr.Apply("simpr", S(("ph", $"{rx} = {a}"), ("ps", $"{ry} = {b}"))));
+        Proof both = pr.Apply("bitrd", S(("ph", h), ("ps", $"( rank ` {rx} ) e. ( rank ` {ry} )"), ("ch", $"( rank ` {a} ) e. ( rank ` {ry} )"), ("th", $"( rank ` {a} ) e. ( rank ` {b} )")), e1, e2);
+        return pr.Apply("brabga", S(("x", rx), ("y", ry), ("ph", $"( rank ` {rx} ) e. ( rank ` {ry} )"), ("ps", $"( rank ` {a} ) e. ( rank ` {b} )"),
+                ("A", a), ("B", b), ("V", "_V"), ("W", "_V"), ("R", rel)),
+            both, pr.Apply("eqid", S(("A", rel))));
+    }
+
+    /// <summary>( ph -> ( rank ` inner ) e. ( rank ` outer ) ), for inner a component, at any depth, of the nested pairs outer.</summary>
+    private Proof RankChain(string ph, string inner, string outer)
+    {
+        SyntaxTree n = pr.Parse("class", outer.Split(' '))!;
+        if (n.Rule.Label != "cop")
+        {
+            throw new InvalidOperationException($"{inner} is not inside the pairs {outer}");
+        }
+        string l = pr.Render(n.Children[0]), r = pr.Render(n.Children[1]);
+        if (l == inner || r == inner)
+        {
+            return ComponentRank(ph, l, r, l == inner);
+        }
+        string via = $" {r} ".Contains($" {inner} ", StringComparison.Ordinal) ? r : l;
+        Proof deeper = RankChain(ph, inner, via), top = ComponentRank(ph, l, r, via == l);
+        Proof trans = pr.Apply("ax-mp", S(("ph", $"( rank ` {outer} ) e. On"), ("ps", $"( ( ( rank ` {inner} ) e. ( rank ` {via} ) /\\ ( rank ` {via} ) e. ( rank ` {outer} ) ) -> ( rank ` {inner} ) e. ( rank ` {outer} ) )")),
+            pr.Apply("rankon", S(("A", outer))), pr.Apply("ontr1", S(("A", $"( rank ` {inner} )"), ("B", $"( rank ` {via} )"), ("C", $"( rank ` {outer} )"))));
+        return _d.Syl(_d.Jca(deeper, top), trans);
+    }
+
+    /// <summary>( ph -> ( rank ` A ) e. ( rank ` <. A , B >. ) ) (or B's): A e. { A } e. <. A , B >. (B e. { A , B } e. …), by rankelb twice and ontr1.</summary>
+    private Proof ComponentRank(string ph, string l, string r, bool first)
+    {
+        string c = first ? l : r, pair = $"<. {l} , {r} >.", mid = first ? $"{{ {l} }}" : $"{{ {l} , {r} }}";
+        Proof hl = Exists(ph, l), hr = Exists(ph, r);
+        Proof inMid = first
+            ? _d.Syl(hl, pr.Apply("snidg", S(("A", l), ("V", "_V"))))
+            : _d.Syl(hr, pr.Apply("prid2g", S(("A", l), ("B", r), ("V", "_V"))));
+        Proof op = _d.Syl(_d.Jca(hl, hr), pr.Apply("dfopg", S(("A", l), ("B", r), ("V", "_V"), ("W", "_V"))));
+        string kur = $"{{ {{ {l} }} , {{ {l} , {r} }} }}";
+        Proof midSet = _d.Lift(ph, first ? pr.Apply("snex", S(("A", l))) : pr.Apply("prex", S(("A", l), ("B", r))));
+        Proof midInKur = _d.Syl(midSet, first
+            ? pr.Apply("prid1g", S(("A", mid), ("B", $"{{ {l} , {r} }}"), ("V", "_V")))
+            : pr.Apply("prid2g", S(("A", $"{{ {l} }}"), ("B", mid), ("V", "_V"))));
+        Proof midInPair = pr.Apply("eleqtrrd", S(("ph", ph), ("A", mid), ("B", kur), ("C", pair)), midInKur, op);
+        Proof Rank(string x, string y, Proof xInY, Proof ySet)
+        {
+            Proof inR1 = pr.Apply("eleqtrrdi", S(("ph", ph), ("A", y), ("B", "_V"), ("C", "U. ( R1 \" On )")), ySet, pr.Apply("unir1", S()));
+            Proof imp = _d.Syl(inR1, pr.Apply("rankelb", S(("A", x), ("B", y))));
+            return pr.Apply("mpd", S(("ph", ph), ("ps", $"{x} e. {y}"), ("ch", $"( rank ` {x} ) e. ( rank ` {y} )")), xInY, imp);
+        }
+        Proof r1 = Rank(c, mid, inMid, midSet);
+        Proof r2 = Rank(mid, pair, midInPair, _d.Lift(ph, pr.Apply("opex", S(("A", l), ("B", r)))));
+        Proof trans = pr.Apply("ax-mp", S(("ph", $"( rank ` {pair} ) e. On"), ("ps", $"( ( ( rank ` {c} ) e. ( rank ` {mid} ) /\\ ( rank ` {mid} ) e. ( rank ` {pair} ) ) -> ( rank ` {c} ) e. ( rank ` {pair} ) )")),
+            pr.Apply("rankon", S(("A", pair))), pr.Apply("ontr1", S(("A", $"( rank ` {c} )"), ("B", $"( rank ` {mid} )"), ("C", $"( rank ` {pair} )"))));
+        return _d.Syl(_d.Jca(r1, r2), trans);
+    }
+
+    /// <summary>Write lean-rankfr (smaller rank is well-founded) into the output once, and teach it to the prover.</summary>
+    private void EnsureRankFr()
+    {
+        if (pr.Database.Statements.ContainsKey("lean-rankfr"))
+        {
+            return;
+        }
+        var (stmt, proof, distinct) = new Recursion(pr).RankFr();
+        string text = $"""
+            $( Smaller rank is well-founded on any class: the recursors of recursive types rest on it (frr2). $)
+            {"${"}
+              {string.Join(" ", distinct.Select(d => $"$d {d} $."))}
+              lean-rankfr $p {stmt} $=
+                {string.Join(' ', proof)} $.
+            {"$}"}
+
+            """;
+        _out.AppendLine(text);
+        pr.Database.Extend(text);
     }
 
     private static bool IsProposition(ConstInfo ind)
@@ -857,7 +1418,40 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                     return Simp(ph, rest) is Proof more ? _d.Trans(chosen, more) : chosen;
                 }
         }
-        return null;
+        // Anything else: simplify its class parts, but not under a binder (only a binder's domain), one at a time.
+        string[] parts = n.Rule.Label switch
+        {
+            "ciun" => ["A", "B"],   // a body only where the binders avoid the context's variables (the step's do)
+            "cmpt" or "cixp" => ["A"],
+            "cun" or "cop" or "cres" or "co" => ["A", "B"],
+            "csn" => ["A"],
+            _ => [],
+        };
+        var vars = n.Rule.Hyps.Where(h => h.Kind == 'f').Select(h => h.Var!).ToList();
+        Proof? acc = null;
+        string curText = x;
+        foreach (string part in parts)
+        {
+            SyntaxTree node = pr.Parse("class", curText.Split(' '))!;
+            int idx = vars.IndexOf(part);
+            if (idx < 0)
+            {
+                continue;
+            }
+            string child = pr.Render(node.Children[idx]);
+            if (Simp(ph, child) is not Proof pc)
+            {
+                continue;
+            }
+            // The node with this child replaced by a hole Z, the others as they are.
+            var kids = node.Children.Select(c => pr.Render(c)).ToList();
+            kids[idx] = "Z";
+            string ctx = string.Join(' ', node.Rule.Expr.Symbols.Select(sym => vars.IndexOf(sym) is int vi and >= 0 ? kids[vi] : sym));
+            Proof step = _d.Congruence("class", ctx, "Z", pc);
+            acc = acc is Proof a1 ? _d.Trans(a1, step) : step;
+            curText = Rhs(step);
+        }
+        return acc;
     }
 
     /// <summary>
@@ -882,8 +1476,14 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     /// T. when none), then carried back to ph: the proof may go through binders of X (ralrimivw needs them disjoint
     /// from its context), and ph may mention the same bound variables in hypotheses X doesn't need.
     /// </summary>
+    private readonly Dictionary<(string, string), Proof> _known = new();   // sethood proved in context, e.g. of a recursion function
+
     private Proof Exists(string ph, string x)
     {
+        if (_known.TryGetValue((ph, x), out Proof known))
+        {
+            return known;
+        }
         var used = Conjuncts(ph).Where(h => x.Split(' ').Contains(h.Split(' ')[0]) && pr.Parse("class", [h.Split(' ')[0]]) is { Rule.Kind: 'f' }).Reverse().ToList();
         if (used.Count == 0)
         {
@@ -917,6 +1517,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 return _d.Lift(ph, pr.Apply("1oex", S()));
             case "c0":
                 return _d.Lift(ph, pr.Apply("0ex", S()));
+            case "com":
+                return _d.Lift(ph, pr.Apply("omex", S()));
             case "cop":
                 return _d.Lift(ph, pr.Apply("opex", S(("A", C(0)), ("B", C(1)))));
             case "csn":

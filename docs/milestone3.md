@@ -226,7 +226,7 @@ For `Eq.refl`, `HEq.refl`, `True.intro` and `And.intro`, both verifiers accept t
 
 The recursor is the real work. Its computation rules need induction, which comes down to the recursion theorem for the type: a function on the fixed point satisfying the constructor equations exists, and it is unique. The plan is to prove that once, in a general form that each recursive type instantiates, rather than generating an induction proof per type.
 
-## Step 3, third part: recursive types (in progress)
+## Step 3, third part: recursive types (built for finitary types)
 
 **The recursion theorem is already in `set.mm`.** `frr2` is well-founded recursion: for a relation R that is well-founded (`Fr`) and set-like (`Se`) on A, `F = frecs ( R , A , G )` satisfies `( F ` X ) = ( X G ( F |` Pred ( R , A , X ) ) )`. So a recursive type's recursor will be `frecs` over the relation "has smaller rank":
 
@@ -247,8 +247,45 @@ The proof, for a nonempty `w`:
 4. No `s e. w` has smaller rank (`onnmin`), so `v` is minimal.
 5. `df-fr` turns that into `Fr`.
 
-**Next:**
-- the type, as the union of an ω-chain of stages, `U_ n e. om ( rec ( ( X e. _V |-> ( X u. F ( X ) ) ) , (/) ) ` n )`, which is a set by `iunexg` and `omex`;
-- constructor membership through the stages (`eliun`, `rdgsuc`, `peano2`);
-- the recursor through `frecs`, with `frr2`, `fvres` and `elpred` for the computation rules;
-- first for types with at most one recursive field per constructor (`Nat`, `List`, `Lean.Name`).
+**Recursive types (built)** apply to finitary types, whose recursive fields are the type itself at its own parameters. The computation rules are proved for constructors with at most one recursive field.
+
+| Lean | `set.mm` |
+|---|---|
+| the type | `U_ k e. _om ( rec ( ( X e. _V |-> ( lean.I.-step ` <. P , X >. ) ) , (/) ) ` k )`, the union of an ω-chain of stages; a set by `iunexg` and `omex` |
+| the step | `X u.` every constructor's tagged tuple whose recursive fields are in `X` |
+| constructors | tagged tuples, as before |
+| the recursor | `( frecs ( RankLt , ⟦I params⟧ , ( a e. _V , f e. _V |-> ( lean.I.-case ` <. <. Q , a >. , f >. ) ) ) ` t )` |
+
+**The constants on a packed argument.** The step and the case analysis are constants of their own, each a single map over a packed argument. P packs the universe and the parameters; Q packs those plus the motive and the minor premises.
+- **They have no universe layer.** A definition may be a proper class, but a function value can't be. A map over `_V` reached as the value of a constant would be `(/)`. The checkers didn't flag this. Writing the proof did: it needed the step's value at the parameters to be a set.
+- **They are constants at all because of `$d`.** Inline, their bound variables would land inside their own scope when a stage, or the recursion function, is substituted back in.
+- **Renaming.** Where a stage or the recursion function is substituted, the wrapper's variable is renamed first (`cbvmptv`, `cbvmpov`).
+- **The simplifier** reads the packed parts back with `op1stg` and `op2ndg`, including inside unions and indexed unions.
+
+**The computation rule** of each constructor follows the plan above:
+1. The value is in the type. Unfold the step at a stage, show the tagged tuple is in the next stage (`rdgsuc`), then in the union (`ssiun2s`, `peano2`). For a recursive field, take the stage it is in (`eliun`, `rexlimdva2`, with the union's variable renamed by `cbviunv`). This runs under only the parameters' and fields' hypotheses.
+2. `frr2` unfolds the recursion once, with `lean-rankfr` for `Fr` and `exse` for `Se`.
+3. `ovmpog` applies the case analysis, and the simplifier evaluates it on the tag.
+4. The recursion at a recursive field is the recursor there. The field is a predecessor of the value (`elpredg`, `brabga`), since it has smaller rank (`dfopg`, `snidg`/`prid2g`, `rankelb`, `ontr1`), so `fvres` applies.
+
+**The output** states exactly Lean's computation rules:
+
+```
+lean-Nat.succ-iota |- ( … ) -> ( ( ( ( ( lean.Nat.rec ` U ) ` A ) ` B ) ` C ) ` ( ( lean.Nat.succ ` U ) ` D ) )
+                            = ( ( C ` D ) ` ( ( ( ( ( lean.Nat.rec ` U ) ` A ) ` B ) ` C ) ` D ) )
+lean-List.cons-iota |- ( … ) -> ( … lean.List.rec … ` ( ( ( ( lean.List.cons ` U ) ` A ) ` E ) ` F ) )
+                             = ( ( ( D ` E ) ` F ) ` ( ( ( ( ( ( lean.List.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` F ) )
+```
+
+Both verifiers accept them, and the definitions pass the definition check. The proofs are long: 55,000 steps for `Nat.zero`, 122,000 for `Nat.succ` and 311,000 for `List.cons`, because the text repeats every subterm. Sharing them as lemmas is the spec's size work, still to do.
+
+**The effect on `Init`:** 6,481 of 17,590 definitions now translate with everything they use, up from 5,362.
+
+| What stops a definition next | Definitions |
+|---|---|
+| recursive inductive propositions (`Nat.le` 5,634, `Acc` 124, `List.Mem` 49, …) | 5,950 |
+| `Nat` literals | 2,087 |
+| the nested type `Lean.Syntax` | 785 |
+| running out of set variables (set.mm has 26 lowercase ones) | 222 |
+
+**Next.** A recursive proposition, like a recursive type, is a least fixed point. Here it is a set of index tuples built in stages, with the proposition true when its indices are in it. Most such propositions eliminate only into `Prop`, so their recursors need no computation rule. `Nat` literals need a numeral-to-`Nat` map, by `rec` on `_om`.

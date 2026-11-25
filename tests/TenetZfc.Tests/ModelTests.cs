@@ -32,12 +32,12 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     public void WhatTheModelDoesNotCoverYetIsRefusedWithTheReason()
     {
         var t = new Terms();
-        Env env = Reader.ReadExport(t, Fixture("lenapp.ndjson"));
+        Env env = Reader.ReadExport(t, Fixture("natle.ndjson"));
         var m = new Model(t, env, new Prover(new Database()));
-        // List.length is about List, a recursive inductive type: not in the model yet.
-        var e = Assert.Throws<Model.Refused>(() => m.Define(t.Of("List.length")));
+        // Nat.le is a recursive inductive proposition: not in the model yet.
+        var e = Assert.Throws<Model.Refused>(() => m.Define(t.Of("Nat.le")));
         output.WriteLine(e.Message);
-        Assert.Equal("List is a recursive inductive type; only non-recursive ones are in the model so far", e.Message);
+        Assert.Equal("Nat.le is a recursive inductive proposition; not in the model yet", e.Message);
         Assert.Throws<Model.Refused>(() => m.Define(t.Of("No.such.constant")));
         Assert.Equal("", m.Declarations);   // nothing written for a refused definition
     }
@@ -305,6 +305,50 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var w = new Writer("set.mm", "tenet-zfc bridge lemma test");
         w.Theorem("lean-test-rankfr", "test", stmt, proof, distinct);
         string file = Path.Combine(SetMm, $"tenet-zfc-rankfr-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mm);
+            Assert.Contains("All proofs in the database were verified", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void NatRecursionComputesOnZeroAndSuccessorAndVerifies()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("recursive.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        var m = new Model(t, env, pr);
+        var (zs, zp, zd) = m.Iota(t.Of("Nat.zero"));
+        var (ss, sp, sd) = m.Iota(t.Of("Nat.succ"));
+        output.WriteLine($"{zs} ({zp.Count} steps)\n{ss} ({sp.Count} steps)");
+        // Nat.rec motive z s zero = z; Nat.rec motive z s (succ n) = s n (Nat.rec motive z s n).
+        Assert.EndsWith("` ( lean.Nat.zero ` U ) ) = B )", zs.ToString());
+        Assert.EndsWith("` ( ( lean.Nat.succ ` U ) ` D ) ) = ( ( C ` D ) ` ( ( ( ( ( lean.Nat.rec ` U ) ` A ) ` B ) ` C ) ` D ) ) )", ss.ToString());
+
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc recursive types test");
+        w.Raw(m.Declarations);
+        w.Theorem("lean-test-Nat.zero-iota", "test", zs, zp, zd);
+        w.Theorem("lean-test-Nat.succ-iota", "test", ss, sp, sd);
+        string file = Path.Combine(SetMm, $"tenet-zfc-nat-{Guid.NewGuid():N}.mm");
         File.WriteAllText(file, w.ToString());
         try
         {
