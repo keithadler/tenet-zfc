@@ -324,3 +324,68 @@ So a literal stays as short as its decimal digits: `UInt8.size` is `… ( lean.N
 - **Nested types** (`Lean.Syntax`), through the replayer's existing reduction to a mutual block.
 - **Strings**, as lists of characters.
 - **Axioms**, which are milestone 3's last item: `propext` holds in the model, and `Classical.choice` comes from `set.mm`'s choice.
+
+## Step 5, first part: strings, axioms and quotients (built, except `Classical.choice`)
+
+**String literals.** The kernel expands a literal to `String.ofList` applied to the list of its characters, each `Char.ofNat` of its code point (`StringToCtor` in the replayer). The model translates it to exactly that, with one helper so it stays short:
+
+```
+df-lean.String.-cons $a |- lean.String.-cons = ( u e. Univ |-> ( x e. NN0 |-> ( y e. ( ( lean.List ` u ) ` ( lean.Char ` u ) ) |->
+    ( ( ( ( lean.List.cons ` u ) ` ( lean.Char ` u ) ) ` ( ( lean.Char.ofNat ` u ) ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` x ) ) ) ) ` y ) ) ) ) $.
+```
+
+A literal is then `( ( lean.String.ofList ` u ) ` … )` over one `-cons` per character, each code point a decimal numeral as for `Nat` literals: `"leanprover/lean4"` begins `( ( ( lean.String.-cons ` u ) ` ; ; 1 0 8 ) ` …` and ends in `( ( lean.List.nil ` u ) ` ( lean.Char ` u ) )`. In Lean 4.36 `String` is a structure over UTF-8 bytes, so `String.ofList` brings in `List.utf8Encode` and `ByteArray`; all of it translates.
+
+**Axioms.** `Define` handles `ConstKind.Axiom` and the quotient's built-in constants:
+- An axiom whose type is a proposition is a proof, so its value is `(/)`: `lean.propext = ( u e. Univ |-> (/) )`. So is `Quot.ind`, and `Quot.sound` when an export has it.
+- `Classical.choice` is refused, with the reason (see below).
+
+**Quotients.** `Quot α r` is the set of classes of the least equivalence relation on `⟦α⟧` containing `r`. That relation is a helper constant: the intersection of every equivalence relation on `x` containing the pairs `r` relates, cut down to `x X. x`.
+
+```
+df-lean.Quot.-eqv $a |- lean.Quot.-eqv = ( u e. Univ |-> ( x e. u |-> ( y e. ( ( 2o ^m x ) ^m x ) |->
+    ( ( x X. x ) i^i |^| { a e. ~P ( x X. x ) | ( { <. b , c >. | ( ( b e. x /\ c e. x ) /\ (/) e. ( ( y ` b ) ` c ) ) } C_ a /\ a Er x ) } ) ) ) ) $.
+```
+
+| Lean | `set.mm` |
+|---|---|
+| `Quot r` | `( x /. E )`, the classes |
+| `Quot.mk r a` | `[ a ] E`, the class of `a` |
+| `Quot.lift f h` | `ran ( p e. x |-> <. [ p ] E , ( f ` p ) >. )`, set.mm's function lift (`qliftval`): `f` on a representative |
+
+None of it uses choice. `Quot.lift f h` is a function on the classes only when `f` respects `E`, which `h` ensures.
+
+**The computation rule** `Quot.lift f h (Quot.mk r a) = f a` is a theorem, in 100,610 steps:
+
+```
+lean-Quot.lift-iota |- ( ( … /\ D e. ( C ^m A ) ) /\ E e. X_ v e. A X_ t e. A ( ( ( ( ( lean.Eq ` U ) ` C ) ` ( D ` v ) ) ` ( D ` t ) ) ^m ( ( B ` v ) ` t ) ) ) /\ F e. A )
+    -> ( ( ( ( ( ( ( lean.Quot.lift ` U ) ` A ) ` B ) ` C ) ` D ) ` E ) ` ( ( ( ( lean.Quot.mk ` U ) ` A ) ` B ) ` F ) ) = ( D ` F ) )
+```
+
+1. Unfold `Quot.lift` and `Quot.mk`, then apply `qliftval`. It needs two facts.
+2. **`E` is an equivalence relation.** It is an intersection of them, inside `x X. x` (`riiner`, with `intiin`).
+3. **The lift is a function** (`qliftfund`), because `f` is constant on `E`'s classes. The kernel of `f`, `( `' f o. f )`, is an equivalence relation (`fcoinver`). It contains `r`, so it is one of those intersected, and `E` is inside it (`intss1`, `fcoinvbr`).
+4. **The kernel contains `r` because of `h`.** For `r b c`, `h` at `b` and `c` (`fvixp`) maps `(/)` into `Eq β (f b) (f c)`, which is therefore nonempty. That `Eq` unfolds to `if ( ( f ` c ) = ( f ` b ) , 1o , (/) )` (`n0i`, `iffalse`).
+
+The congruence prover learned the forms these definitions use: `/.`, `[ A ] R`, `ran`, `|^|`, `~P`, `i^i`, `X.`, `{ x e. A | }`, `{ <. x , y >. | }`, `C_`, `Er` and `-.`. Sethood learned `i^i`, `X.`, `ran`, `/.` and `[ A ] R`.
+
+**Checked:** `Lean.origin`, `String.instInhabited` and `instToStringBool`; `propext`, `Quot`, `Quot.mk`, `Quot.ind` and `Quot.lift`; and the quotient's computation rule. Their definitions pass the definition check, and both verifiers accept the equations and the rule, in a test and in CI.
+
+**`Classical.choice` is not defined.** The plan above said it "becomes a fixed global choice function from `set.mm`'s axiom of choice". That can't be a `set.mm` definition. ZFC proves that choice functions exist, but no class term defines one: it is consistent with ZFC that no definable well-ordering of `V`, or even of `~P om`, exists. `set.mm` says as much at `gblacfnacd`, and its Hilbert ε emulation (`hta`) is relative to a well-ordering `R`. A conservative definition can't pick an element, so a translation of `choice α h` would either not be in `α`, or need the choice as a parameter. The options:
+- **A parameter.** Every constant that uses choice, directly or not, takes a well-ordering of the universe as an extra argument, and theorems about them assume `W We U`. This is faithful, and it is how `hta` says to translate HOL's ε. It changes the arity of every dependent definition (`Classical.propDecidable`, and so everything noncomputable).
+- **A richer universe.** `u` ranges over pairs of a universe and a well-ordering of it, and sorts read the universe as `( 1st ` u )`. That is one change in one place, but it touches every definition and every theorem's hypotheses.
+- **ZFC plus global choice.** Add a constant `G` with the axiom that it's a global choice function. That is conservative over ZFC, as NBG with global choice is over ZFC, but it isn't a definition. The definition check would rightly refuse it, so it would be the one axiom an output adds.
+
+This is a decision for the project, not the translator, so `Classical.choice` is refused with the reason for now.
+
+**The effect on `Init`:** 12,079 of 17,590 definitions now translate with everything they use, up from 11,780. String literals and quotients no longer stop any definition. Of the 109 that axioms and quotients stopped, 75 now stop at `Classical.choice`.
+
+| What stops a definition next | Definitions |
+|---|---|
+| the nested type `Lean.Syntax` | 1,511 |
+| running out of set variables (set.mm has 26) | 1,058 |
+| `Acc` (a premise that is a function into `Acc`) | 328 |
+| a name a `set.mm` token can't hold (`'`, `?`, `₂`), over the 25 most common reasons | at least 774 |
+| `Classical.choice` | 75 |
+
+Names with `'` or `?` were hidden behind string literals before. They need an escaping scheme for tokens, a small change to `Model.Token`.

@@ -19,7 +19,7 @@ namespace TenetZfc;
 /// Each translated definition comes with its definitional equation as a theorem: lean.c applied to arguments of the
 /// right types equals its body with them substituted, by one fvmptd step per argument.
 /// </summary>
-public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = false)
+public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryRun = false)
 {
     private const string UniverseVar = "u";
     private static readonly string[] SetVars = "x y z w v t s r q p o n m k j i h g f e d c b a".Split(' ');
@@ -112,6 +112,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 return Tr(_ops.Instantiate(l.Body, [l.Value]), sc);
             case NatLit lit:
                 return NatLiteral(lit.Value);
+            case StrLit lit:
+                return StringLiteral(lit.Value, sc);
             case Proj p:
                 {
                     // A structure's value is <. (/) , fields >. (one constructor, tag (/)): field i of its second part.
@@ -180,6 +182,9 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 return;
             case ConstKind.Recursor when $"{n}".EndsWith(".rec", StringComparison.Ordinal):
                 Define(t.Of($"{n}"[..^4]));
+                return;
+            case ConstKind.Axiom or ConstKind.Quot:
+                DefineBuiltin(c);   // ModelBuiltins.cs
                 return;
         }
         throw new Refused($"{n} is not a definition but {(c.Kind == ConstKind.Inductive ? "an inductive type" : "a " + c.Kind.ToString().ToLowerInvariant())}; not in the model yet");
@@ -1716,6 +1721,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                     }
                     return _d.Syl(_d.Jca(ExistsIn(ph, dom), all), pr.Apply("iunexg", S(("x", v), ("A", dom), ("B", body), ("V", "_V"), ("W", "_V"))));
                 }
+        }
+        if (ExistsMore(ph, n) is Proof more)   // ModelBuiltins.cs: intersections, products, ranges, quotients, classes
+        {
+            return more;
         }
         // A class variable: from its hypothesis.
         if (n.Rule.Kind == 'f' && Conjuncts(ph).FirstOrDefault(h => h.StartsWith(x + " e. ", StringComparison.Ordinal)) is string hyp)
