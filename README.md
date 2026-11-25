@@ -6,7 +6,7 @@ Lean's foundation is a type theory, chosen because it is pleasant to work in. Th
 
 It is built on [Tenet](https://github.com/keithadler/tenet), an independent Lean 4 kernel that already re-checks all of Mathlib. Tenet does the checking; this project records each step it takes and prints the step as set theory.
 
-> **Status: milestone 1, in progress.** Tenet records the derivation behind each declaration it accepts (`tenet check --trace`, on Tenet's main branch). This repository replays those traces without Tenet. On every committed fixture, every step re-derives (reductions, equalities, typings), and every definition and theorem is concluded by its trace. Not yet: inductive blocks as one conclusion, a full Lean-core run, and any ZFC output. See [docs/trace-format.md](docs/trace-format.md#replay).
+> **Status: milestone 1, nearly met.** Tenet records the derivation behind each declaration it accepts. This repository replays those traces without Tenet. On all of Lean 4.36.0's `Init` (64,045 declarations, 86 million steps), every step re-derives except those of one nested inductive (`Lean.Syntax`), with 0 failures. Every definition and theorem is concluded by its trace, and every other inductive block's structure and recursors are rechecked. No ZFC output exists yet. See [docs/trace-format.md](docs/trace-format.md#results).
 
 ## Why
 

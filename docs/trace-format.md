@@ -129,14 +129,41 @@ Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `
 
 ## Results
 
-On the four committed fixtures (`tests/fixtures`), every step is verified, and every declaration that isn't an inductive or quotient block is concluded:
+### All of Lean core
 
-| Export | Steps | Verified | Declarations concluded | Blocks not traced |
-|---|---|---|---|---|
-| `Nat.add_succ` | 2,200 | 2,200 | 14 | 6 |
-| `Nat.add_succ.v3.0` | 2,178 | 2,178 | 13 | 6 |
-| `eta437` | 1,257 | 1,257 | 8 | 6 |
-| `acc436` | 1,082 | 1,082 | 7 | 5 |
+The `Init` library of Lean 4.36.0, exported by [leanout](https://github.com/keithadler/leanout), has 64,045 declarations. Every one was traced by Tenet (its `trace-recall` branch) and replayed, in 1,000-declaration chunks:
+
+| | |
+|---|---|
+| Declarations traced and replayed | 64,045 (all of them) |
+| Steps | 86,172,037 |
+| Verified | 86,169,809 |
+| Failed | **0** |
+| Not replayed | 2,228, all in `Lean.Syntax`, the one nested inductive block |
+| Definitions, theorems, opaque constants and axioms concluded by their trace | 63,435 of 63,435 |
+| Inductive blocks checked, recursors derived and matching | 605 of 606 (the other is `Lean.Syntax`) |
+| Quotient constants matching the built-in types | 4 of 4 |
+
+What this rests on: the replayer's own code, the export as `leanout` wrote it, and the assumptions listed above (the meaning of the Nat operations, and the typing side condition of rule K). The milestone 1 gate is to re-derive every check Tenet made on all of Lean core. That is met except for one nested inductive block, which is what remains.
+
+Running it showed three things that small fixtures didn't:
+- **Tracing without caches blows up.** Some declarations redid the same work until one 1,000-declaration chunk passed 4.9 GB, which is why Tenet's traces now recall earlier conclusions.
+- **Recall needs the environment as part of the key.** Without it, nested inductives broke, because their auxiliary types live in a separate environment.
+- **56 declarations couldn't be named on Tenet's command line.** Their names have dots or commas inside a component, and Tenet now parses `«…»` escapes.
+
+The first two were bugs in the tracing added for this project. Both failed safe: a declaration was rejected, never wrongly accepted.
+
+### Fixtures
+
+On the committed fixtures (`tests/fixtures`), every step is verified and every declaration is concluded or checked:
+
+| Export | Steps | Verified | Declarations concluded | Inductive blocks checked | Quotient constants |
+|---|---|---|---|---|---|
+| `Nat.add_succ` | 1,778 | 1,778 | 14 | 6 | 0 |
+| `Nat.add_succ.v3.0` | 1,759 | 1,759 | 13 | 6 | 0 |
+| `eta437` | 1,058 | 1,058 | 8 | 6 | 0 |
+| `acc436` | 912 | 912 | 7 | 5 | 0 |
+| `quot` | 178 | 178 | 1 | 1 | 4 |
 
 The tests change recorded results, the results of every kind of step the replayer checks, and require the change to be caught:
 - for `Infer`, `DefEq` and `WhnfCore`, the first 25 occurrences of each are changed one at a time;
@@ -146,4 +173,4 @@ The tests change recorded results, the results of every kind of step the replaye
 
 A replayer that accepted everything would also pass the clean fixtures, so the clean results mean little without these tests.
 
-The milestone 1 gate (every step re-derived on all of Lean core) is not met yet. Two things remain: running on a full `Init` export, and closing the gaps above. The replayer is also the template for the emitter: where replay checks a step, emission will print the `set.mm` proof step for it.
+The replayer is also the template for the emitter: where replay checks a step, emission will print the `set.mm` proof step for it.
