@@ -42,7 +42,7 @@ dotnet run --project src/TenetZfc.Cli -- replay Foo.ndjson Foo.trace.ndjson
 dotnet run --project src/TenetZfc.Cli -- emit Foo.ndjson Foo.trace.ndjson set.mm out.mm
 ```
 
-`emit` writes a `.mm` file that includes `set.mm` and adds a theorem for each Lean theorem it covers. Check the file with a Metamath verifier, such as `metamath "read out.mm" "verify proof *"`.
+`emit` writes a `.mm` file that includes `set.mm` and adds a theorem for each Lean theorem it covers. Check the file with a Metamath verifier, such as `metamath "read out.mm" "verify proof *"`. Proofs are written in Metamath's compressed format, sharing every repeated subproof; add `--uncompressed` for flat label lists.
 
 ## Documents
 
