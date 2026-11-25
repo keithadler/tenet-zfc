@@ -99,8 +99,9 @@ What is checked:
 - **Single rules.**
   - Reductions: `Beta`, `Zeta`, `ZetaFVar`, `Delta`, `DeltaLazy`, `Proj`, `Iota` (including literal and structure-eta major premises), `IotaK`, `QuotLift`, `QuotInd`, `UnfoldProjApp`.
   - Literal arithmetic: `NatLitOp` and `NatLitPred`.
+  - String literals: `StringLitToCtor` must give exactly Lean's expansion (`String.ofList`, or `String.mk` before it existed, applied to the `Char.ofNat` code points).
   - Equality rules that need no premises: `DefEqSyntactic`, `DefEqFVar`, `DefEqSort`, `DefEqConst` (universe levels are compared by case-splitting each parameter on zero or successor) and `DefEqOffset`.
-- **Equality rules that rest on premises.** `DefEqApp`, `DefEqBinding` (walking both telescopes with the locals the step introduced), `DefEqEta`, `DefEqEtaStruct` (including Lean 4.37's partially applied constructors), `DefEqProofIrrel`, `DefEqUnitLike`, `DefEqLazyDelta`, `DefEqLazyDeltaProj` and `DefEqReflect`.
+- **Equality rules that rest on premises.** `DefEqApp`, `DefEqBinding` (walking both telescopes with the locals the step introduced), `DefEqEta`, `DefEqEtaStruct` (including Lean 4.37's partially applied constructors), `DefEqProofIrrel`, `DefEqUnitLike`, `DefEqLazyDelta`, `DefEqLazyDeltaProj`, `DefEqReflect` and `DefEqStringLit`.
 - **Normalization.** `Whnf` and `WhnfCore`: there must be a chain from the term to its normal form through the step's direct premises. Each premise is used on the whole term or on the head of an application.
 - **Equality.** `DefEq`: the two sides must be equal by the recorded facts, or by congruence over them.
 - **Typing.**
@@ -114,7 +115,7 @@ What is checked:
   - **Recursors, derived here.** Each recursor's type and computation rules are derived from the block the way the kernel derives them, and must match the export's exactly (up to binder names). That covers motives, minor premises, induction hypotheses for recursive fields, elimination into Prop only versus into any universe, rule K, and annotation stripping on the derivation's locals (only for `optParam`, `autoParam`, `outParam` and `semiOutParam` defined as the identity). Iota steps therefore use rules the replayer has rederived, not just the exporter's.
   - Tenet's non-positive `Bad` from its negative corpus is rejected by the structural recheck alone, and a recursor rule swapped for another constructor's is caught.
 - **The quotient block.** The kernel builds `Quot`, `Quot.mk`, `Quot.lift` and `Quot.ind` in rather than deriving them, so there's nothing to replay. Instead, the export's four constants must have exactly the built-in types, and the `Eq` they mention must be the standard inductive with the standard `Eq.refl`.
-- **Each declaration.** Its trace must conclude, from checking-mode facts, what the kernel checks of it: its type is a type, and the value of a definition, theorem or opaque constant has that type. Without this check, a trace of valid steps that didn't add up to the declaration would pass. Infer-only facts don't count here, because they assume the term is well typed.
+- **Each declaration.** Its trace must conclude, from checking-mode facts, what the kernel checks of it: its type is a type, and the value of a definition, theorem or opaque constant has that type. Without this check, a trace of valid steps that didn't add up to the declaration would pass. Infer-only facts don't count here, because they assume the term is well typed. The declaration must also obey the kernel's safety rule: a safe declaration mentions no unsafe or partial constant, and a partial one mentions no unsafe constant.
 
 Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `mk_imax`, because the kernel's reduct carries the simplified level.
 
@@ -122,11 +123,9 @@ Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `
 
 - **Nested inductive blocks** (such as `Lean.Syntax`, which holds an `Array Syntax`) aren't replayed. The kernel checks them by translating to auxiliary mutual types that aren't in the export, and Tenet doesn't trace those auxiliary types or the translation. Their steps are reported as unsupported.
 - **Structural cases not handled.** A field whose block-type occurrence is hidden behind a definition, or parameters that differ only up to definitional equality, are reported as unsupported rather than decided.
-- **Safety flags.** Checking mode also rejects unsafe and partial constants used from safe declarations. Those flags aren't in the trace or read by the replayer.
 - **`Check` and recall need Tenet's `trace-recall` branch.** Tenet's main branch writes every inferred type as `Infer` and doesn't recall. Traces from it replay step by step, but no declaration in them is concluded, and some traces get very large.
 - **Nat operations** are taken to mean what their names say. Tenet checks that against their definitions once per environment, and that check isn't in the trace.
 - **Rule K** is checked for the reduct only. The kernel's check on the major premise's type is a typing fact the step doesn't cite.
-- **String literals** (`StringLitToCtor`, `DefEqStringLit`) are reported as unsupported.
 
 ## Results
 
