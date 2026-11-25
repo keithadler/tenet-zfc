@@ -35,7 +35,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
-    public void PropAxiomsAreProofsAndChoiceIsRefusedWithTheReason()
+    public void PropAxiomsAreProofsAndChoiceIsTheLeastElementInAWellOrdering()
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("axioms.ndjson"));
@@ -44,8 +44,13 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
         m.Define(t.Of("Quot.ind"));
         Assert.Contains("df-lean.propext $a |- lean.propext = ( u e. Univ |-> (/) ) $.", m.Declarations);
         Assert.Contains("df-lean.Quot.ind $a |- lean.Quot.ind = ( u e. Univ |-> (/) ) $.", m.Declarations);
-        var e = Assert.Throws<Model.Refused>(() => m.Define(t.Of("Classical.choice")));
-        Assert.Contains("no definable global choice function", e.Message);
+        m.Define(t.Of("Classical.propDecidable"));
+        string d = m.Declarations;
+        output.WriteLine(d);
+        // Choice takes a well-ordering v of the universe after it, and picks α's least element in v.
+        Assert.Contains("df-lean.Classical.choice $a |- lean.Classical.choice = ( u e. Univ |-> ( v e. ~P ( u X. u ) |-> ( x e. u |-> ( y e. ( ( lean.Nonempty ` u ) ` x ) |-> ( iota_ z e. x A. w e. x -. w v z ) ) ) ) ) $.", d);
+        // What uses choice takes the well-ordering too, and passes it on.
+        Assert.Contains("lean.Classical.propDecidable = ( u e. Univ |-> ( y e. ~P ( u X. u ) |-> ( x e. 2o |-> ( ( ( ( lean.Classical.choice ` u ) ` y ) ` ( ( lean.Decidable ` u ) ` x ) ) ` (/) ) ) ) ) $.", d);
     }
 
     [Fact]
@@ -83,7 +88,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
-    public void TheQuotientsEquationsAndComputationRuleVerify()
+    public void TheQuotientsAndChoicesEquationsAndRulesVerify()
     {
         if (SetMm is null)
         {
@@ -92,8 +97,12 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         var m = new Model(t, Reader.ReadExport(t, Fixture("axioms.ndjson")), new Prover(Database.Read(Path.Combine(SetMm, "set.mm"))));
         var w = new Writer("set.mm", "tenet-zfc axioms and quotients test");
-        var eqs = new[] { "propext", "Quot", "Quot.mk", "Quot.lift" }.Select(n => (n, m.Equation(t.Of(n)))).ToList();
+        var eqs = new[] { "propext", "Quot", "Quot.mk", "Quot.lift", "Classical.choice", "Classical.choose", "Classical.propDecidable" }
+            .Select(n => (n, m.Equation(t.Of(n)))).ToList();
         var (qs, qp, qd) = m.QuotLiftIota();
+        var (cs, cp, cd) = m.ChoiceSpec();
+        // Given W We U, choice picks an element of α.
+        Assert.EndsWith("/\\ W We U ) -> ( ( ( ( lean.Classical.choice ` U ) ` W ) ` A ) ` B ) e. A )", cs.ToString());
         output.WriteLine($"{qs} ({qp.Count} steps)");
         // Quot.lift f h (Quot.mk r a) = f a.
         Assert.EndsWith("` ( ( ( ( lean.Quot.mk ` U ) ` A ) ` B ) ` F ) ) = ( D ` F ) )", qs.ToString());
@@ -103,6 +112,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
             w.Theorem($"lean-test-{n}-eq", "test", s, p, dv);
         }
         w.Theorem("lean-test-Quot.lift-iota", "test", qs, qp, qd);
+        w.Theorem("lean-test-Classical.choice-spec", "test", cs, cp, cd);
         Check(w);
     }
 

@@ -261,6 +261,12 @@ public sealed class Deduction(Prover pr)
                     }
                     return first ?? second!.Value;
                 }
+            case "crio": // ( iota_ x e. A ph ) ($d x ph)
+                return pr.Apply("riotaeqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
+            case "wral": // A. x e. A ph ($d x ph)
+                return pr.Apply("raleqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
             case "wn":   // -. ph
                 return pr.Apply("notbid", S(("ph", h), ("ps", L("ph")), ("ch", R("ph"))), Sub("ph")!.Value);
             case "wceq": // A = B

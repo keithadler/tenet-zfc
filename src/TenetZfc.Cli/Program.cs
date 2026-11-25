@@ -50,6 +50,13 @@ if (args.Length >= 5 && args[0] == "define")
                 proved.Add(($"lean-{name}-iota", qstmt, qproof, qdistinct, "The computation rule of the quotient: Quot.lift f h (Quot.mk r a) = f a."));
                 Console.WriteLine($"{name} (computation rule): {qstmt} ({qproof.Count} proof steps)");
             }
+            if (name == "Classical.choice")
+            {
+                // Choice picks an element of α, given a well-ordering of the universe.
+                var (cstmt, cproof, cdistinct) = model.ChoiceSpec();
+                proved.Add(($"lean-{name}-spec", cstmt, cproof, cdistinct, "Classical.choice picks an element of a nonempty type, given a well-ordering W of the universe."));
+                Console.WriteLine($"{name} (picks an element): {cstmt} ({cproof.Count} proof steps)");
+            }
             if (denv.Find(dt.Of(name))?.Kind == ConstKind.Constructor)
             {
                 // A constructor also has its computation rule: the recursor on it reduces to its minor premise.

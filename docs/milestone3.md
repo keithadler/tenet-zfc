@@ -325,7 +325,7 @@ So a literal stays as short as its decimal digits: `UInt8.size` is `… ( lean.N
 - **Strings**, as lists of characters.
 - **Axioms**, which are milestone 3's last item: `propext` holds in the model, and `Classical.choice` comes from `set.mm`'s choice.
 
-## Step 5, first part: strings, axioms and quotients (built, except `Classical.choice`)
+## Step 5, first part: strings, axioms, quotients and choice (built)
 
 **String literals.** The kernel expands a literal to `String.ofList` applied to the list of its characters, each `Char.ofNat` of its code point (`StringToCtor` in the replayer). The model translates it to exactly that, with one helper so it stays short:
 
@@ -338,7 +338,7 @@ A literal is then `( ( lean.String.ofList ` u ) ` … )` over one `-cons` per ch
 
 **Axioms.** `Define` handles `ConstKind.Axiom` and the quotient's built-in constants:
 - An axiom whose type is a proposition is a proof, so its value is `(/)`: `lean.propext = ( u e. Univ |-> (/) )`. So is `Quot.ind`, and `Quot.sound` when an export has it.
-- `Classical.choice` is refused, with the reason (see below).
+- `Classical.choice` is defined relative to a well-ordering of the universe (see below).
 
 **Quotients.** `Quot α r` is the set of classes of the least equivalence relation on `⟦α⟧` containing `r`. That relation is a helper constant: the intersection of every equivalence relation on `x` containing the pairs `r` relates, cut down to `x X. x`.
 
@@ -369,23 +369,43 @@ lean-Quot.lift-iota |- ( ( … /\ D e. ( C ^m A ) ) /\ E e. X_ v e. A X_ t e. A 
 
 The congruence prover learned the forms these definitions use: `/.`, `[ A ] R`, `ran`, `|^|`, `~P`, `i^i`, `X.`, `{ x e. A | }`, `{ <. x , y >. | }`, `C_`, `Er` and `-.`. Sethood learned `i^i`, `X.`, `ran`, `/.` and `[ A ] R`.
 
-**Checked:** `Lean.origin`, `String.instInhabited` and `instToStringBool`; `propext`, `Quot`, `Quot.mk`, `Quot.ind` and `Quot.lift`; and the quotient's computation rule. Their definitions pass the definition check, and both verifiers accept the equations and the rule, in a test and in CI.
+**Checked:** `Lean.origin`, `String.instInhabited` and `instToStringBool`; `propext`, `Quot`, `Quot.mk`, `Quot.ind` and `Quot.lift`; `Classical.choice`, `Classical.choose` and `Classical.propDecidable`; the quotient's computation rule; and the theorem that choice picks an element. Their definitions pass the definition check, and both verifiers accept the equations and the rule, in a test and in CI.
 
-**`Classical.choice` is not defined.** The plan above said it "becomes a fixed global choice function from `set.mm`'s axiom of choice". That can't be a `set.mm` definition. ZFC proves that choice functions exist, but no class term defines one: it is consistent with ZFC that no definable well-ordering of `V`, or even of `~P om`, exists. `set.mm` says as much at `gblacfnacd`, and its Hilbert ε emulation (`hta`) is relative to a well-ordering `R`. A conservative definition can't pick an element, so a translation of `choice α h` would either not be in `α`, or need the choice as a parameter. The options:
-- **A parameter.** Every constant that uses choice, directly or not, takes a well-ordering of the universe as an extra argument, and theorems about them assume `W We U`. This is faithful, and it is how `hta` says to translate HOL's ε. It changes the arity of every dependent definition (`Classical.propDecidable`, and so everything noncomputable).
-- **A richer universe.** `u` ranges over pairs of a universe and a well-ordering of it, and sorts read the universe as `( 1st ` u )`. That is one change in one place, but it touches every definition and every theorem's hypotheses.
-- **ZFC plus global choice.** Add a constant `G` with the axiom that it's a global choice function. That is conservative over ZFC, as NBG with global choice is over ZFC, but it isn't a definition. The definition check would rightly refuse it, so it would be the one axiom an output adds.
+**`Classical.choice` takes a well-ordering of the universe.** The plan above said choice "becomes a fixed global choice function from `set.mm`'s axiom of choice". That can't be a `set.mm` definition:
+- ZFC proves that choice functions exist, but no class term defines one. It is consistent with ZFC that no definable well-ordering of `V`, or even of `~P om`, exists.
+- `set.mm` says as much at `gblacfnacd`, and its emulation of Hilbert's ε (`hta`) is relative to a well-ordering `R`.
 
-This is a decision for the project, not the translator, so `Classical.choice` is refused with the reason for now.
+So the well-ordering is a parameter, the way `hta` says to translate HOL's ε. A constant whose value uses choice, directly or through another constant, gets a second layer after the universe's:
 
-**The effect on `Init`:** 12,079 of 17,590 definitions now translate with everything they use, up from 11,780. String literals and quotients no longer stop any definition. Of the 109 that axioms and quotients stopped, 75 now stop at `Classical.choice`.
+```
+df-lean.Classical.choice $a |- lean.Classical.choice = ( u e. Univ |-> ( v e. ~P ( u X. u ) |->
+    ( x e. u |-> ( y e. ( ( lean.Nonempty ` u ) ` x ) |-> ( iota_ z e. x A. w e. x -. w v z ) ) ) ) ) $.
+df-lean.Classical.propDecidable $a |- lean.Classical.propDecidable = ( u e. Univ |-> ( y e. ~P ( u X. u ) |->
+    ( x e. 2o |-> ( ( ( ( lean.Classical.choice ` u ) ` y ) ` ( ( lean.Decidable ` u ) ` x ) ) ` (/) ) ) ) ) $.
+```
+
+- **`choice α h`** is `α`'s least element in the well-ordering `v`, Hilbert's ε as `hta` emulates it.
+- **Using it.** A constant that depends on choice translates to `( ( lean.c ` u ) ` v )`, passing its own well-ordering on. One that doesn't is `( lean.c ` u )` as before, so nothing that avoids choice changes.
+- **Equations** take the well-ordering as `W`, with the hypothesis `W e. ~P ( U X. U )`.
+- **Choice picks an element.** This is a theorem, `lean-Classical.choice-spec`, in 7,179 steps:
+
+  ```
+  |- ( ( … /\ B e. ( ( lean.Nonempty ` U ) ` A ) ) /\ W We U ) -> ( ( ( ( lean.Classical.choice ` U ) ` W ) ` A ) ` B ) e. A )
+  ```
+
+  `α` is in the universe, so inside it (`grutr`, `trss`). It is nonempty, since `Nonempty α`'s condition holds (`n0i`, `iffalse`, `rexn0`). So `W` has a unique least element on it (`wereu`), and the definition picks that element (`riotacl`).
+
+The trust story doesn't change: no new axiom, and the definitions pass the definition check. A theorem that uses choice holds for every well-ordering of the universe. ZFC proves that one exists (`weth`), so a closed statement can discharge `W We U` the way `hta`'s comment describes.
+
+Not yet handled: an inductive type, or a packed helper (a recursive type's step or case analysis), whose definition depends on choice. Each is refused with the reason.
+
+**The effect on `Init`:** 12,145 of 17,590 definitions now translate with everything they use, up from 11,780. String literals, axioms, quotients and choice no longer stop any definition.
 
 | What stops a definition next | Definitions |
 |---|---|
-| the nested type `Lean.Syntax` | 1,511 |
-| running out of set variables (set.mm has 26) | 1,058 |
+| the nested type `Lean.Syntax` | 1,513 |
+| running out of set variables (set.mm has 26) | 1,059 |
 | `Acc` (a premise that is a function into `Acc`) | 328 |
-| a name a `set.mm` token can't hold (`'`, `?`, `₂`), over the 25 most common reasons | at least 774 |
-| `Classical.choice` | 75 |
+| a name a `set.mm` token can't hold (`'`, `?`, `₂`), over the 25 most common reasons | at least 786 |
 
 Names with `'` or `?` were hidden behind string literals before. They need an escaping scheme for tokens, a small change to `Model.Token`.

@@ -12,6 +12,46 @@ public sealed partial class Model
 {
     private const string StringCons = "lean.String.-cons", QuotEqv = "lean.Quot.-eqv";
 
+    // ---- the well-ordering that choice depends on --------------------------------------------------------------------
+
+    /// <summary>Where a definition's well-ordering goes while it is translated; a setvar replaces it in <see cref="Emit"/>.</summary>
+    private const string WellOrderHole = "ZZW";
+
+    /// <summary>The constants whose value depends on Classical.choice, so take a well-ordering after the universe.</summary>
+    private readonly HashSet<string> _choiceDependent = new();
+
+    /// <summary>
+    /// A constant at the scope's universe: ( lean.c ` u ), or ( ( lean.c ` u ) ` r ) when c depends on choice, with r
+    /// the scope's well-ordering of the universe. The scope then depends on choice too.
+    /// </summary>
+    private string ConstTerm(Name n, Scope sc)
+    {
+        string tok = Token(n)!;
+        if (!_choiceDependent.Contains(tok))
+        {
+            return $"( {tok} ` {sc.Universe} )";
+        }
+        sc.UsesChoice = true;
+        return $"( ( {tok} ` {sc.Universe} ) ` {sc.WellOrder} )";
+    }
+
+    /// <summary>
+    /// A value that depends on choice gets a layer for the well-ordering, right after the universe's:
+    /// ( r e. ~P ( u X. u ) |-> value ), with r a set variable the value doesn't bind.
+    /// </summary>
+    private string WellOrderLayer(string tok, string body, Scope sc)
+    {
+        if (!sc.UsesChoice)
+        {
+            return body;
+        }
+        var tokens = body.Split(' ').ToHashSet();
+        string r = FirstVar(v => !sc.Bound.Contains(v) && !tokens.Contains(v));
+        sc.Bound.Add(r);
+        _choiceDependent.Add(tok);
+        return $"( {r} e. ~P ( {UniverseVar} X. {UniverseVar} ) |-> {Subst(body, WellOrderHole, r)} )";
+    }
+
     // ---- string literals --------------------------------------------------------------------------------------------
 
     /// <summary>
@@ -42,6 +82,10 @@ public sealed partial class Model
     private string ConstAt(Name n, string u)
     {
         Define(n);
+        if (_choiceDependent.Contains(Token(n)!))
+        {
+            throw new Refused($"{n} depends on Classical.choice; not expected in a string literal");
+        }
         return $"( {Token(n) ?? throw new Refused($"{n}: the name has characters a set.mm token can't")} ` {u} )";
     }
 
@@ -85,7 +129,19 @@ public sealed partial class Model
                 DefineQuot();
                 return;
             case "Classical.choice":
-                throw new Refused($"{n} is an axiom that picks an element, and ZFC has no definable global choice function; not in the model yet");
+                {
+                    // Hilbert's ε as set.mm's hta emulates it: the least element of α in the well-ordering.
+                    var sc = NewScope();
+                    Expr ty = c.Type;
+                    var ps = Telescope(ref ty, 2, sc);
+                    string x = ps[0].Var;
+                    string z = Add(sc, FirstVar(v => !sc.Bound.Contains(v))), w = Add(sc, FirstVar(v => !sc.Bound.Contains(v)));
+                    sc.UsesChoice = true;
+                    _defined.Add(n);
+                    Emit(n, tok, Maps(ps, $"( iota_ {z} e. {x} A. {w} e. {x} -. {w} {WellOrderHole} {z} )"), sc,
+                        "axiom of choice, as the least element in a well-ordering of the universe (Hilbert's epsilon as set.mm's hta emulates it):");
+                    return;
+                }
         }
         throw new Refused($"{n} is an axiom whose type isn't a proposition; not in the model yet");
     }
@@ -177,6 +233,10 @@ public sealed partial class Model
                 return _d.Syl(ExistsIn(ph, K("A")), pr.Apply("rnexg", S(("A", K("A")), ("V", "_V"))));
             case "cqs":
                 return _d.Syl(ExistsIn(ph, K("A")), pr.Apply("qsexg", S(("A", K("A")), ("R", K("R")), ("V", "_V"))));
+            case "cpw":
+                return _d.Syl(ExistsIn(ph, K("A")), pr.Apply("pwexg", S(("A", K("A")), ("V", "_V"))));
+            case "crio":
+                return _d.Lift(ph, pr.Apply("riotaex", S(("x", K("x")), ("A", K("A")), ("ps", K("ph")))));
             case "cec":
                 return _d.Syl(ExistsIn(ph, K("R")), pr.Apply("ecexg", S(("A", K("A")), ("R", K("R")), ("B", "_V"))));
         }
@@ -353,5 +413,50 @@ public sealed partial class Model
         Proof sub = pr.Apply("ssopab2dv", S(("ph", ph), ("x", b), ("y", c), ("ps", psi), ("ch", $"{b} {k} {c}")), imp);
         return pr.Apply("sstrd", S(("ph", ph), ("A", r0), ("B", $"{{ <. {b} , {c} >. | {b} {k} {c} }}"), ("C", k)),
             sub, _d.Lift(ph, pr.Apply("opabss", S(("x", b), ("y", c), ("R", k)))));
+    }
+
+    /// <summary>
+    /// Classical.choice picks an element: given a well-ordering W of the universe and a proof that α is nonempty,
+    /// ( hypotheses /\ W We U ) -> ( ( ( ( lean.Classical.choice ` U ) ` W ) ` A ) ` B ) e. A.
+    /// α is in the universe, so inside it (grutr), and nonempty (Nonempty's condition holds, rexn0), so W has a
+    /// unique least element on it (wereu), which the definition picks (riotacl).
+    /// </summary>
+    public (MmExpr Statement, List<string> Proof, string[] Distinct) ChoiceSpec()
+    {
+        Name n = t.Of("Classical.choice");
+        Define(n);
+        string tok = Token(n)!;
+        string[] args = ["W", "A", "B"];
+        List<string> doms = Domains(tok, args, 3);
+        var hyps = new List<string> { "U e. Univ" };
+        hyps.AddRange(args.Select((a, i) => $"{a} e. {doms[i]}"));
+        hyps.Add("W We U");
+        string ph = Conj(hyps);
+        Proof H(string h) => Hyp(ph, h) ?? throw new Refused($"no hypothesis {h}");
+        (Proof eq, _, _) = Unfold(ph, tok, args, (i, dom) => H($"{args[i]} e. {dom}"));
+        string eps = Rhs(eq), z = Kid("class", eps, "x"), least = Kid("class", eps, "ph");
+        string w = Kid("wff", least, "x");
+
+        // α is nonempty: B is in ⟦Nonempty α⟧ = if ( E. y e. A T. , 1o , (/) ), so the condition holds.
+        string ne = doms[2];
+        string neTok = Kid("class", Kid("class", ne, "F"), "F");
+        (Proof neEq, _, _) = Unfold(ph, neTok, ["A"], (_, dom) => H($"A e. {dom}"));
+        string ite = Rhs(neEq), cond = Kid("class", ite, "ph");
+        Proof inIte = pr.Apply("eleqtrd", S(("ph", ph), ("A", "B"), ("B", ne), ("C", ite)), H($"B e. {ne}"), neEq);
+        Proof holds = _d.Syl(_d.Syl(inIte, pr.Apply("n0i", S(("B", "B"), ("A", ite)))),
+            pr.Apply("con1i", S(("ph", cond), ("ps", $"{ite} = (/)")), pr.Apply("iffalse", S(("ph", cond), ("A", Kid("class", ite, "A")), ("B", Kid("class", ite, "B"))))));
+        Proof nonempty = _d.Syl(holds, pr.Apply("rexn0", S(("x", Kid("wff", cond, "x")), ("A", "A"), ("ph", Kid("wff", cond, "ph")))));
+
+        // α is inside the universe.
+        Proof tr = _d.Syl(H("U e. Univ"), pr.Apply("grutr", S(("U", "U"))));
+        Proof sub = pr.Apply("mpd", S(("ph", ph), ("ps", "A e. U"), ("ch", "A C_ U")), H("A e. U"),
+            _d.Syl(tr, pr.Apply("trss", S(("A", "U"), ("B", "A")))));
+
+        // The least element exists and is unique, so it is in α.
+        Proof eu = _d.Syl(_d.Jca(H("W We U"), pr.Apply("3jca", S(("ph", ph), ("ps", "A e. U"), ("ch", "A C_ U"), ("th", "A =/= (/)")), H("A e. U"), sub, nonempty)),
+            pr.Apply("wereu", S(("R", "W"), ("A", "U"), ("B", "A"), ("V", "U"), ("x", z), ("y", w))));
+        Proof inA = _d.Syl(eu, pr.Apply("riotacl", S(("x", z), ("A", "A"), ("ph", least))));
+        Proof r = pr.Apply("eqeltrd", S(("ph", ph), ("A", Lhs(eq)), ("B", eps), ("C", "A")), eq, inA);
+        return (r.Proves, r.Proof, DistinctFor([tok, neTok], args));
     }
 }
