@@ -371,6 +371,15 @@ public sealed class ProofKit(Prover pr)
                         : null;
                     return dom is Proof d1 && body is Proof b1 ? Trans(d1, b1) : (dom ?? body!.Value);
                 }
+            case "cdm":
+                return Use("dmeqd", Sub("A"));
+            case "cixp":
+                return UseS("ixpeq12dv", [("x", L("x"))], Sub("A"), Sub("B"));
+            case "cmpo":
+                return UseS("mpoeq123dv", [("x", L("x")), ("y", L("y"))], Sub("A"), Sub("B"), Sub("C"));
+            case "cfrecs":
+                return Use("syl", Use("3jca", Sub("R"), Sub("A"), Sub("F")),
+                    UseS("frecseq123", [("R", L("R")), ("S", R("R")), ("A", L("A")), ("B", R("A")), ("F", L("F")), ("G", R("F"))]));
             case "wceq":
                 return Use("eqeq12d", Sub("A"), Sub("B"));
             case "wcel":

@@ -54,6 +54,37 @@ public sealed class NatBridge
         _k = new ProofKit(pr);
     }
 
+    /// <summary>
+    /// The whole bridge as a set.mm file: the model's definitions of Nat, its constructors, Nat.add and the literal
+    /// maps, then every bridge theorem, a theorem F ( n ) = n for each numeral given, and the proof that Nat.below
+    /// is empty in the current model. The export must contain Nat.add.
+    /// </summary>
+    public static (string Text, List<(string Label, string Comment, MmExpr Statement, List<string> Proof, string[] Distinct)> Theorems) Emit(
+        string export, string setmm, IEnumerable<System.Numerics.BigInteger> numerals, bool compress = true)
+    {
+        var t = new Terms();
+        Environment env = Reader.ReadExport(t, export);
+        var pr = new Prover(Database.Read(setmm));
+        var model = new Model(t, env, pr);
+        var bridge = new NatBridge(pr);
+        foreach (string c in new[] { "Nat", "Nat.zero", "Nat.succ", "Nat.add" })
+        {
+            model.Define(t.Of(c));
+        }
+        model.Class(t.Nat(2), "U", new Dictionary<ulong, string>());   // declares the literal maps
+        bridge.ProveAll(numerals);
+        var (bstmt, bproof, bdistinct) = model.Equation(t.Of("Nat.below"));
+        bridge.Add("lean-Nat.below-eq", "The definitional equation of Nat.below.", bstmt, bproof, bdistinct);
+        bridge.BelowCollapses(bdistinct);
+        var w = new Writer(Path.GetFileName(setmm), "tenet-zfc bridge theorems: the model's Nat is NN0 (docs/bridges.md)", compress ? pr.Database : null);
+        w.Raw(model.Declarations);
+        foreach (var th in bridge.Theorems)
+        {
+            w.Theorem(th.Label, th.Comment, th.Statement, th.Proof, th.Distinct);
+        }
+        return (w.ToString(), bridge.Theorems);
+    }
+
     private static string U(string s) => ProofKit.Replace(s, "U", "u");
 
     /// <summary>Fail loudly if the model's definitions are not the encoding these proofs are written for.</summary>
@@ -107,9 +138,9 @@ public sealed class NatBridge
     private Proof SubBi(string x, string t, string body) => _k.Cong("wff", ProofKit.Replace(body, x, "Y"), "Y", Id($"{x} = {t}"));
 
     /// <summary>Record a theorem, teach it to the prover, and return it by label.</summary>
-    public void Thm(string label, string comment, Proof p)
+    public void Thm(string label, string comment, Proof p, string[]? extraDistinct = null)
     {
-        string[] distinct = Distinct(p);
+        string[] distinct = [.. Distinct(p), .. extraDistinct ?? []];
         Theorems.Add((label, comment, p.Proves, p.Proof, distinct));
         string text = "${ " + string.Join(' ', distinct.Select(d => $"$d {d} $.")) + $" {label} $p {p.Proves} $= {string.Join(' ', p.Proof)} $. $}}";
         Db.Extend(text);
@@ -618,6 +649,74 @@ public sealed class NatBridge
             Thm("lean-nat-natadd-2p2e4", "Cross-check: 2 + 2 = 4 for the model's Nat.add, from set.mm's 2p2e4, given its computation rules.",
                 UseS("lean-nat-2p2e4", [("G", "( lean.Nat.add ` U )"), ("U", "U")]));
         }
+    }
+
+    // ================================================================ a limit of the current model
+
+    /// <summary>
+    /// Why Nat.add's computation rules are hypotheses: in the one-universe model, Nat.below's motive returns the
+    /// universe U itself, and U is not in U, so the motive is outside Nat.rec's domain and Nat.below is (/) at every
+    /// argument. Lean's Nat.below motive 0 is PUnit, which is not empty. Nat.add, compiled through Nat.brecOn and
+    /// Nat.below, inherits this. Needs Nat.below's definitional equation (label lean-Nat.below-eq) in the database.
+    /// </summary>
+    public void BelowCollapses(string[] belowEqDistinct)
+    {
+        const string h = "U e. Univ";
+        string m = "( z e. ( lean.Nat ` U ) |-> U )";
+        SyntaxTree df = _k.Tree("wff", Db["df-lean.Nat.rec"].Expr.Symbols);
+        string inner = _pr.Render(ProofKit.Child(ProofKit.Child(df, "B"), "B"));
+        string innerU = ProofKit.Replace(inner, "u", "U");
+        string dom = $"( U ^m {Nat} )";
+        Proof rec = Use("fvmpt", SubEq("u", "U", inner), Ax("df-lean.Nat.rec"),
+            UseG("mptex", $"{innerU} e. _V", UseS("ovex", [("A", "U"), ("F", "^m"), ("B", Nat)])));
+
+        // The motive ( z e. Nat |-> U ) is not a function into U: its value U would be in U.
+        const string h2 = "( U e. Univ /\\ ( z e. ( lean.Nat ` U ) |-> U ) e. ( U ^m ( lean.Nat ` U ) ) )";
+        Proof f = Imp(h2, "elmapi", [Hyp(h2, $"{m} e. {dom}")]);
+        Proof zn = Imp(h2, "lean-nat-litnat", [Hyp(h2, "U e. Univ"), Lift(h2, Use("peano1"))]);
+        Proof fv = Imp(h2, "ffvelcdm", [f, zn]);
+        Proof mv = UseS("fvmptd3", [("V", "Univ")], UseS("eqid", [("A", m)]), Lift($"z = {Lt("(/)")}", UseS("eqid", [("A", "U")])), zn, Hyp(h2, "U e. Univ"));
+        Proof uu = Rw(fv, mv);
+        Proof notIn = Use("mtod", Lift(h, UseS("elirr", [("A", "U")])), Use("ex", uu));
+        Proof domSs = Rw(Lift(h, Use("dmmptss", UseS("eqid", [("A", innerU)]))), Symm(Use("syl", Hyp(h, h), rec)));
+        Proof notDom = Use("mpd", notIn, UseS("ssneld", [("C", m)], domSs));
+        Thm("lean-nat-belowmotive", "The motive Nat.below gives Nat.rec is outside Nat.rec's domain in the one-universe model.",
+            Imp(h, "ndmfv", [notDom]));
+
+        // So Nat.below is (/) everywhere.
+        Proof eq = Use("lean-Nat.below-eq");
+        string ant = _k.Split(ProofKit.Of(eq)).H;
+        Proof r = Rw(eq, Imp(ant, "lean-nat-belowmotive", [Hyp(ant, "U e. Univ")]));
+        while (ZeroApp(_k.Split(ProofKit.Of(r)).X) is string arg)
+        {
+            r = Rw(r, Lift(ant, UseS("0fv", [("A", arg)])));
+        }
+        Thm("lean-nat-belowempty", "In the one-universe model, Nat.below is empty at every argument (Lean's Nat.below motive 0 is PUnit).",
+            r, belowEqDistinct);
+    }
+
+    /// <summary>The argument A of the first ( (/) ` A ) in a formula, or null.</summary>
+    private static string? ZeroApp(string x)
+    {
+        string[] t = x.Split(' ');
+        for (int i = 0; i + 3 < t.Length; i++)
+        {
+            if (t[i] == "(" && t[i + 1] == "(/)" && t[i + 2] == "`")
+            {
+                int depth = 0, j = i + 3;
+                var arg = new List<string>();
+                for (; j < t.Length; j++)
+                {
+                    if (depth == 0 && t[j] == ")")
+                    {
+                        return string.Join(' ', arg);
+                    }
+                    depth += t[j] is "(" or "<." or "{" ? 1 : t[j] is ")" or ">." or "}" ? -1 : 0;
+                    arg.Add(t[j]);
+                }
+            }
+        }
+        return null;
     }
 
     // ================================================================ literals

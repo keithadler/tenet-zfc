@@ -13,6 +13,7 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `lenapp.ndjson` | 4.36.0 | leanout (`leanout Init -- List.length_append`): `List.length_append` and its 59 dependencies, 12 of them theorems |
 | `tree.ndjson` | 4.36.0 | `Tree.lean` (here), compiled with `lean -o Tree.olean Tree.lean` and exported with `leanout Tree -- Tree.rec`: a binary tree, whose `node` has two recursive fields |
 | `syntax.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Syntax`): the nested inductive `Lean.Syntax` (it holds an `Array Syntax`) with its 272 dependencies; the same file as Tenet's `tests/fixtures/nested/Lean.Syntax.ndjson` |
+| `natadd.ndjson` | 4.36.0 | leanout (`leanout Init -- Nat.add`): `Nat.add` with `Nat`, `Nat.below`, `Nat.brecOn` and its other dependencies, for `tenet-zfc nat-bridge` |
 
 Each `.trace.ndjson` was made from the export beside it by Tenet's main branch (commit `125fd3d` or later), which records checking-mode inference as `Check` and recalls earlier conclusions with `"of"`:
 
