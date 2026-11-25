@@ -23,6 +23,16 @@ public sealed class StatementTranslator(Terms t)
     /// <summary>Why the last translation failed.</summary>
     public string? Why => _why;
 
+    /// <summary>Translate the free variable <paramref name="fvar"/> as the class variable <paramref name="name"/>.</summary>
+    public void Bind(Expr fvar, string name) => _vars[((FVar)fvar).Id] = name;
+
+    /// <summary>Forget every binding.</summary>
+    public void Reset()
+    {
+        _vars.Clear();
+        _why = null;
+    }
+
     private bool Is(Expr e, Name n) => e is Const c && ReferenceEquals(c.Name, n);
 
     private string? Fail(string why)

@@ -85,6 +85,26 @@ Writing `set.mm` proofs mechanically needs one more piece of infrastructure: eve
 
    `set.mm` already proves `ccatlen`, the translated statement, so the result can be cross-checked as `2 + 2 = 4` was.
 
+### Proof translation of the two cases (built)
+
+`ProofTranslator` translates Lean proof terms into `set.mm` deductions `|- ( H -> ⟦P⟧ )`, where `H` gathers the locals' hypotheses. It covers the fragment `List.length_append`'s proof uses:
+- **Fixed steps:** `of_eq_true` (via `tru`, `mpbiri`), `Eq.trans` on propositions (`bitrd`) and on values (`eqtrd`), and `eq_self` (`eqid`, `tbtru`).
+- **Rewrite chains:** a tree of `congrArg`, `congr` and `congrFun'` proves `L = R` from the equations at its leaves. It becomes a chain of rewrites of `⟦L⟧` by those equations, each done by the congruence prover (`Deduction.Congruence`), ending at `⟦R⟧`. Function-valued intermediate equalities, such as `congrArg (HAdd.hAdd x) ih`, are never translated themselves; only their leaves are.
+- **Definitional unfolding on the `set.mm` side:** `len nil` ↦ `0` (`hash0`), `nil ++ l` ↦ `l` (`ccatlid`), `(a :: l) ++ m` ↦ `a :: (l ++ m)` (`ccatass`), and `len (a :: l)` ↦ `len l + 1` (`ccatlen`, `s1len`, `addcomd`). These are applied until both sides agree, wherever Lean's proof relies on unfolding silently.
+- **Typing:** membership facts for every term a lemma is applied to (`lencl`, `ccatcl`, `s1cld`, `nn0addcld`, `wrd0`).
+- **Lemma bridges:** `Nat.zero_add` and `Nat.succ_add` come from `set.mm` facts about `+` (`addlid`, `addassd`, `addcomd`), not from translating their Lean proofs, which use `Nat.brecOn`.
+
+Both cases of `List.length_append`'s induction are translated from its actual proof term, and both verifiers accept them:
+- nil: `|- ( C e. Word A -> ( # ` ( (/) ++ C ) ) = ( ( # ` (/) ) + ( # ` C ) ) )`, 780 proof steps;
+- cons: from the induction hypothesis `( # ` ( E ++ C ) ) = ( ( # ` E ) + ( # ` C ) )`, under `C e. Word A`, `D e. A` and `E e. Word A`, it proves `( # ` ( ( <" D "> ++ E ) ++ C ) ) = ( ( # ` ( <" D "> ++ E ) ) + ( # ` C ) )`, 5,722 proof steps.
+
+The proofs are longer than they need to be: the normalizer chains a reflexivity and a transitivity step per rewrite.
+
+**What remains for the gate** is the induction itself:
+- a cons-style induction lemma for `Word` in `wrdind`'s format, proved once from `wrdind` by word reversal;
+- instantiating it with the motive, with the base case and step from the two translations above and the substitution hypotheses from the congruence prover;
+- `$d` declarations in the writer for the dummy set variables.
+
 ### Statement cross-check (built)
 
 `StatementTranslator` translates a theorem's statement into a `set.mm` statement:
