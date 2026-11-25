@@ -54,7 +54,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         Env env = Reader.ReadExport(t, Fixture("model.ndjson"));
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
         var m = new Model(t, env, pr);
-        var w = new Writer("set.mm", "tenet-zfc model test");
+        var w = new Writer("set.mm", "tenet-zfc model test", pr.Database);
         var eqs = new List<(string, Metamath.Expr, List<string>, string[])>();
         foreach (string n in new[] { "id", "Function.comp", "Function.const" })
         {
@@ -180,7 +180,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             return;
         }
-        var w = new Writer("set.mm", "tenet-zfc inductive types test");
+        var w = new Writer("set.mm", "tenet-zfc inductive types test", pr.Database);
         w.Raw(m.Declarations);
         foreach (var (label, stmt, proof, distinct) in rules)
         {
@@ -264,7 +264,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             return;
         }
-        var w = new Writer("set.mm", "tenet-zfc inductive propositions test");
+        var w = new Writer("set.mm", "tenet-zfc inductive propositions test", pr.Database);
         w.Raw(m.Declarations);
         foreach (var (label, stmt, proof, distinct) in rules)
         {
@@ -303,7 +303,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             return;
         }
-        var w = new Writer("set.mm", "tenet-zfc bridge lemma test");
+        var w = new Writer("set.mm", "tenet-zfc bridge lemma test", pr.Database);
         w.Theorem("lean-test-rankfr", "test", stmt, proof, distinct);
         string file = Path.Combine(SetMm, $"tenet-zfc-rankfr-{Guid.NewGuid():N}.mm");
         File.WriteAllText(file, w.ToString());
@@ -345,7 +345,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             return;
         }
-        var w = new Writer("set.mm", "tenet-zfc recursive types test");
+        var w = new Writer("set.mm", "tenet-zfc recursive types test", pr.Database);
         w.Raw(m.Declarations);
         w.Theorem("lean-test-Nat.zero-iota", "test", zs, zp, zd);
         w.Theorem("lean-test-Nat.succ-iota", "test", ss, sp, sd);
