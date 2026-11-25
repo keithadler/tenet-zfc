@@ -11,7 +11,7 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `quot.ndjson` | 4.36.0 | leanout (`leanout Init -- Quot.sound`): the quotient block, Eq and Quot.sound |
 | `syntax.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Syntax`): the nested inductive `Lean.Syntax` (it holds an `Array Syntax`) with its 272 dependencies; the same file as Tenet's `tests/fixtures/nested/Lean.Syntax.ndjson` |
 
-Each `.trace.ndjson` was made from the export beside it by Tenet's `trace-recall` branch (commit `8158d13`), which records checking-mode inference as `Check` and recalls earlier conclusions with `"of"`:
+Each `.trace.ndjson` was made from the export beside it by Tenet's main branch (commit `125fd3d` or later), which records checking-mode inference as `Check` and recalls earlier conclusions with `"of"`:
 
 ```bash
 tenet check Nat.add_succ.ndjson --trace Nat.add_succ.trace.ndjson

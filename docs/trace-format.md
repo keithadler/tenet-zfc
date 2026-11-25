@@ -1,6 +1,6 @@
 # Trace format (milestone 1)
 
-Milestone 1 adds tracing to Tenet: every step Tenet takes while accepting a declaration is written to a file that can later be replayed without Tenet's search. Recording is on Tenet's main branch, not yet in a release. Replay of single-rule steps is in this repository (see [Replay](#replay)). The milestone 1 gate isn't met yet.
+Milestone 1 adds tracing to Tenet: every step Tenet takes while accepting a declaration is written to a file that can later be replayed without Tenet's search. Recording is on Tenet's main branch (commit `125fd3d` and later), not yet in a release. Replay of single-rule steps is in this repository (see [Replay](#replay)). The milestone 1 gate isn't met yet.
 
 ```
 tenet check Foo.ndjson --trace Foo.trace.ndjson
@@ -128,7 +128,7 @@ Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `
 ## What replay does not establish yet
 
 - **Structural cases not handled.** A field whose block-type occurrence is hidden behind a definition, or parameters that differ only up to definitional equality, are reported as unsupported rather than decided.
-- **`Check` and recall need Tenet's `trace-recall` branch.** Tenet's main branch writes every inferred type as `Infer` and doesn't recall. Traces from it replay step by step, but no declaration in them is concluded, and some traces get very large.
+- **Tenet before commit `125fd3d`** (its main branch before November 25, 2026) writes every inferred type as `Infer` and doesn't recall. Traces from it replay step by step, but no declaration in them is concluded, and some get very large. Use Tenet's main branch.
 - **Nat operations** are taken to mean what their names say. Tenet checks that against their definitions once per environment, and that check isn't in the trace.
 - **Rule K** is checked for the reduct only. The kernel's check on the major premise's type is a typing fact the step doesn't cite.
 
@@ -136,7 +136,7 @@ Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `
 
 ### All of Lean core
 
-The `Init` library of Lean 4.36.0, exported by [leanout](https://github.com/keithadler/leanout), has 64,045 declarations. Every one was traced by Tenet (its `trace-recall` branch) and replayed, in 1,000-declaration chunks:
+The `Init` library of Lean 4.36.0, exported by [leanout](https://github.com/keithadler/leanout), has 64,045 declarations. Every one was traced by Tenet (main, commit `125fd3d`) and replayed, in 1,000-declaration chunks:
 
 | | |
 |---|---|
