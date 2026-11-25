@@ -24,6 +24,6 @@ jobs:
       - name: Replay the fixture traces
         shell: bash
         run: |
-          for f in Nat.add_succ Nat.add_succ.v3.0 eta437 acc436; do
+          for f in Nat.add_succ Nat.add_succ.v3.0 eta437 acc436 quot; do
             dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll replay tests/fixtures/$f.ndjson tests/fixtures/$f.trace.ndjson
           done

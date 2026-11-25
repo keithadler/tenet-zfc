@@ -13,7 +13,7 @@ public class ReplayTests
 {
     private static string Fixture(string name) => Path.Combine(AppContext.BaseDirectory, "fixtures", name);
 
-    public static TheoryData<string> Exports => new() { "Nat.add_succ", "Nat.add_succ.v3.0", "eta437", "acc436" };
+    public static TheoryData<string> Exports => new() { "Nat.add_succ", "Nat.add_succ.v3.0", "eta437", "acc436", "quot" };
 
     private static (Terms T, Env Env, List<DeclTrace> Traces) Load(string name)
     {
@@ -161,7 +161,8 @@ public class ReplayTests
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load(name);
         ReplayReport r = new Replayer(t, env).Replay(traces);
-        Assert.Equal(r.Declarations, r.Concluded + r.BlocksChecked + r.BlocksTypesChecked + r.BlocksNested + r.BlocksNotTraced);
+        Assert.Equal(r.Declarations, r.Concluded + r.BlocksChecked + r.BlocksTypesChecked + r.BlocksNested + r.QuotientsChecked + r.BlocksNotTraced);
+        Assert.Equal(0, r.BlocksNotTraced);
         Assert.True(r.BlocksChecked > 0);
         Assert.True(r.Concluded > 0);
     }
@@ -278,6 +279,17 @@ public class ReplayTests
         {
             rec.Rules[1] = saved;
         }
+    }
+
+    [Fact]
+    public void AQuotientConstantWithTheWrongTypeIsCaught()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("quot");
+        ConstInfo lift = env.Find(t.Of("Quot.lift"))!;
+        // Give Quot.lift Quot.ind's type: a real, well-formed type that is not the built-in one.
+        typeof(ConstInfo).GetProperty(nameof(ConstInfo.Type))!.SetValue(lift, env.Find(t.Of("Quot.ind"))!.Type);
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Reason.Contains("Quot.lift"));
     }
 
     [Fact]

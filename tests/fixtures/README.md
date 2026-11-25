@@ -1,6 +1,6 @@
 # Fixtures
 
-The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadler/tenet, `tests/fixtures`), which say how each was made:
+The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadler/tenet, `tests/fixtures`), which say how each was made, except `quot.ndjson`, made here with [leanout](https://github.com/keithadler/leanout):
 
 | Export | Lean | Format |
 |---|---|---|
@@ -8,6 +8,7 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `Nat.add_succ.v3.0.ndjson` | 4.27.0-rc1 | lean4export 3.0.0 |
 | `eta437.ndjson` | 4.37.0-rc1 | lean4export 3.1.0 |
 | `acc436.ndjson` | 4.36.0 | lean4export 3.1.0 |
+| `quot.ndjson` | 4.36.0 | leanout (`leanout Init -- Quot.sound`): the quotient block, Eq and Quot.sound |
 
 Each `.trace.ndjson` was made from the export beside it by Tenet's `trace-recall` branch (commit `8158d13`), which records checking-mode inference as `Check` and recalls earlier conclusions with `"of"`:
 

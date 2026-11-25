@@ -46,6 +46,9 @@ public sealed class ReplayReport
     /// </summary>
     public int BlocksNested { get; internal set; }
 
+    /// <summary>Quotient constants (Tenet traces each as a declaration) whose block has exactly the kernel's built-in types, with the standard Eq.</summary>
+    public int QuotientsChecked { get; internal set; }
+
     /// <summary>Inductive and quotient blocks the trace does not conclude anything about.</summary>
     public int BlocksNotTraced { get; internal set; }
     public int Steps { get; internal set; }
@@ -66,7 +69,7 @@ public sealed class ReplayReport
     {
         var sb = new StringBuilder();
         sb.AppendLine($"{Declarations} declarations, {Steps} steps");
-        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksChecked} inductive blocks checked (types, constructors, positivity, universes, recursors); {BlocksTypesChecked} with only their types checked; {BlocksNested} nested inductive blocks not replayed; {BlocksNotTraced} blocks not concluded");
+        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksChecked} inductive blocks checked (types, constructors, positivity, universes, recursors); {BlocksTypesChecked} with only their types checked; {BlocksNested} nested inductive blocks not replayed; {QuotientsChecked} quotient constants checked; {BlocksNotTraced} blocks not concluded");
         sb.AppendLine($"  verified {Count(Verdict.Verified)}, failed {Count(Verdict.Failed)}, unsupported {Count(Verdict.Unsupported)}, not yet replayed {Count(Verdict.NotYet)}");
         sb.AppendLine();
         sb.AppendLine($"  {"step",-24}{"verified",10}{"failed",8}{"unsupp.",9}{"not yet",9}");
@@ -207,6 +210,19 @@ public sealed partial class Replayer
                 else
                 {
                     report.Failures.Add(new StepFailure(d.Decl, -1, "decl", "the trace does not check every type of the block"));
+                }
+                continue;
+            }
+            if (_env.Find(d.Decl) is { Kind: ConstKind.Quot })
+            {
+                string? q = CheckQuotients();
+                if (q is null)
+                {
+                    report.QuotientsChecked++;
+                }
+                else
+                {
+                    report.Failures.Add(new StepFailure(d.Decl, -1, "decl", q));
                 }
                 continue;
             }
