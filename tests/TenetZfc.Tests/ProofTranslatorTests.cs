@@ -93,6 +93,75 @@ public class ProofTranslatorTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void ListLengthAppendIsTranslatedFromItsProofAndVerifies()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("lenapp.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        ConstInfo thm = env.Find(t.Of("List.length_append"))!;
+        (var proof, string? why) = new ListInduction(t, env, pr).Prove(thm);
+        Assert.Null(why);
+        output.WriteLine($"{proof!.Value.Proves}  ({proof.Value.Proof.Count} steps)");
+        // Exactly the translated statement: the theorem, not a variant of it.
+        Assert.Equal(new StatementTranslator(t).Statement(thm.Type), proof.Value.Proves.ToString());
+
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc proof translator test");
+        w.Theorem("lean-test-List.length_append", "test", proof.Value.Proves, proof.Value.Proof, ListInduction.Distinct);
+        string file = Path.Combine(SetMm, $"tenet-zfc-la-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            output.WriteLine(string.Join("\n", mm.Split('\n').Where(l => l.Contains('?') || l.Contains("verified"))));
+            Assert.DoesNotContain("?Error", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void AProofOfADifferentStatementIsRefused()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("lenapp.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        ConstInfo thm = env.Find(t.Of("List.length_append"))!;
+        // Claim the lengths add the other way round: len (as ++ bs) = len bs + len as. The proof does not prove it.
+        var ops = new Ops(t);
+        TenetZfc.Expr ty = thm.Type;
+        var b1 = (Binder)ty;
+        var b2 = (Binder)b1.Body;
+        var b3 = (Binder)b2.Body;
+        TenetZfc.Expr head = Ops.Spine(b3.Body, out List<TenetZfc.Expr> eq);
+        TenetZfc.Expr sumHead = Ops.Spine(eq[2], out List<TenetZfc.Expr> sum);
+        TenetZfc.Expr swapped = t.MkApp(sumHead, [sum[0], sum[1], sum[2], sum[3], sum[5], sum[4]]);
+        TenetZfc.Expr wrong = t.Binding(true, b1.BinderName, b1.Info, b1.Domain, t.Binding(true, b2.BinderName, b2.Info, b2.Domain,
+            t.Binding(true, b3.BinderName, b3.Info, b3.Domain, t.MkApp(head, [eq[0], eq[1], swapped]))));
+        typeof(ConstInfo).GetProperty(nameof(ConstInfo.Type))!.SetValue(thm, wrong);
+        (var proof, string? why) = new ListInduction(t, env, pr).Prove(thm);
+        Assert.Null(proof);
+        Assert.Contains("but the theorem states", why);
+    }
+
     private static string Run(string exe, string dir, string args, out int code)
     {
         var psi = new ProcessStartInfo(exe, args) { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true };

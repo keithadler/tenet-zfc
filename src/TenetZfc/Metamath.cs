@@ -441,5 +441,18 @@ public sealed class Writer
         _sb.AppendLine();
     }
 
+    /// <summary>A theorem in its own scope, with distinct-variable conditions (each line a $d list).</summary>
+    public void Theorem(string label, string comment, Expr statement, IEnumerable<string> proof, IEnumerable<string> distinct)
+    {
+        _sb.AppendLine("  ${");
+        foreach (string d in distinct)
+        {
+            _sb.AppendLine($"    $d {d} $.");
+        }
+        Theorem(label, comment, statement, proof);
+        _sb.AppendLine("  $}");
+        _sb.AppendLine();
+    }
+
     public override string ToString() => _sb.ToString();
 }

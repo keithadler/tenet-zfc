@@ -118,10 +118,16 @@ public sealed class ProofTranslator
     public Proof Member(string c)
     {
         SyntaxTree n = _pr.Parse("class", c.Split(' ')) ?? throw new InvalidOperationException($"not a class: {c}");
+        // A term with a hypothesis of its own: a class variable, a set variable used as a class, or any term a
+        // hypothesis names (like ( reverse ` y ) in an induction step).
+        int i = _hyps.FindIndex(h => h.StartsWith(c + " e. ", StringComparison.Ordinal));
+        if (i >= 0)
+        {
+            return Hyp(i);
+        }
         if (n.Rule.Kind == 'f')
         {
-            int i = _hyps.FindIndex(h => h.StartsWith(c + " e. ", StringComparison.Ordinal));
-            return i >= 0 ? Hyp(i) : throw new InvalidOperationException($"no hypothesis for {c}");
+            throw new InvalidOperationException($"no hypothesis for {c}");
         }
         switch (n.Rule.Label)
         {

@@ -63,11 +63,12 @@ jobs:
           TENET_ZFC_METAMATH: ${{ runner.temp }}/mm/metamath
           TENET_ZFC_MMVERIFY: ${{ runner.temp }}/mm/mmverify/mmverify.py
         run: dotnet test tests/TenetZfc.Tests -c Release -f net10.0
-      - name: Emit the gate theorem and verify it
+      - name: Emit the gate theorems and verify them
         run: |
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- emit tests/fixtures/gate.ndjson tests/fixtures/gate.trace.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/gate.mm"
-          cd "$RUNNER_TEMP/mm/setmm"
-          out=$("$RUNNER_TEMP/mm/metamath" "read gate.mm" "verify proof *" "exit")
-          echo "$out" | tail -2
-          if echo "$out" | grep -q '?Error'; then exit 1; fi
-          python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" gate.mm
+          for g in gate lenapp; do
+            dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- emit tests/fixtures/$g.ndjson tests/fixtures/$g.trace.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/$g.mm"
+            out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read $g.mm" "verify proof *" "exit")
+            echo "$out" | tail -2
+            if echo "$out" | grep -q '?Error'; then exit 1; fi
+            (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" $g.mm)
+          done

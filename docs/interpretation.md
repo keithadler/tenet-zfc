@@ -78,7 +78,7 @@ Writing `set.mm` proofs mechanically needs one more piece of infrastructure: eve
    with a 30-step proof. On the earlier `ω` encoding it was `( suc suc (/) +o suc suc (/) ) = suc suc suc suc (/)` in 369 steps. Both verifiers accept it, and CI checks it again on every push against pinned versions of `set.mm` and both verifiers.
    - **The trace is the licence.** The proof evaluates both sides, and every addition it uses must be a `NatLitOp` step of the declaration's replayed trace. Remove that step and the emitter refuses. Change the statement to `2 + 2 = 5` and it refuses.
    - **What the translation trusts:** the definition table. It's the single place the statement's meaning comes from, and it's small and checkable by hand. The same trace also carries Tenet's check of `Nat.add`'s defining equations over variables, `x + 0 ≡ x` and `x + succ y ≡ succ (x + y)`. Those hold of `+` on `NN0`, which is why `Nat.add` ↦ `+` is the right entry.
-5. **`List.length_append`. Designed, not built.** Its proof term (Lean 4.36, `Init.Data.List.Basic`) is an induction, `List.rec` into `Prop`, whose cases rewrite with `Nat.zero_add` and `Nat.succ_add` through `congrArg`, `congr`, `Eq.trans`, `eq_self` and `of_eq_true`. The export has 12 theorems, each with its own proof term. Emitting it takes three new pieces:
+5. **`List.length_append`. Done** (see below). Its proof term (Lean 4.36, `Init.Data.List.Basic`) is an induction, `List.rec` into `Prop`, whose cases rewrite with `Nat.zero_add` and `Nat.succ_add` through `congrArg`, `congr`, `Eq.trans`, `eq_self` and `of_eq_true`. The export has 12 theorems, each with its own proof term. Emitting it takes three new pieces:
    - **Propositions as wffs.** A `Prop` in a statement is translated as a `set.mm` wff: `@Eq α a b` becomes `⟦a⟧ = ⟦b⟧`, `∀ x : A, P` becomes `A. x ( x e. ⟦A⟧ -> ⟦P⟧ )`, `True` becomes `T.`, `P → Q` becomes `( ⟦P⟧ -> ⟦Q⟧ )`. A type variable `α : Sort u` becomes a class variable.
    - **Proof terms as deductions.** Natural deduction maps onto `set.mm` directly: `fun x => p` is ∀-introduction, an application `h a` is ∀-elimination with `a`'s typing fact, `Eq.refl` is `eqid`, `Eq.trans` is `eqtr`, `congrArg f` is the equality congruence for `f`'s translation, and `of_eq_true`/`eq_self` relate a wff to `T.`. Each step's typing and definitional equalities come from the replayed trace. A conversion between definitionally equal propositions needs `⟦P⟧ <-> ⟦P'⟧`, assembled from the trace's reduction steps.
    - **Induction on lists.** `List.rec` into `Prop` becomes induction on `Word`. `set.mm`'s `wrdind` adds at the end of a word, while `List.rec` adds at the front, so a cons-style induction lemma is one bridge lemma to prove once.
@@ -100,10 +100,26 @@ Both cases of `List.length_append`'s induction are translated from its actual pr
 
 The proofs are longer than they need to be: the normalizer chains a reflexivity and a transitivity step per rewrite.
 
-**What remains for the gate** is the induction itself:
-- a cons-style induction lemma for `Word` in `wrdind`'s format, proved once from `wrdind` by word reversal;
-- instantiating it with the motive, with the base case and step from the two translations above and the substitution hypotheses from the congruence prover;
-- `$d` declarations in the writer for the dummy set variables.
+### The induction, and the whole theorem (built)
+
+`ListInduction` joins the two cases. Lean's `List.rec` adds at the front of a list and `set.mm`'s `wrdind` adds at the end of a word, so `wrdind` is applied to the motive composed with word reversal: `ψ(x) := ( C e. Word A -> φ(reverse x) )`. A general cons-induction lemma isn't needed.
+- **Base:** `ψ((/))`, from the translated nil case and `rev0`.
+- **Step:** `( ( y e. Word A /\ z e. A ) -> ( ψ(y) -> ψ(( y ++ <" z "> )) ) )`, from the translated cons case run with head `z` and tail `( reverse ` y )`, plus `revccat`, `revs1` and `revcl`, then reshuffled into `wrdind`'s form with `ex`.
+- **Substitution hypotheses:** `( x = T -> ( ψ(x) <-> ψ(T) ) )`, from the congruence prover.
+- **Conclusion:** `wrdind` at `reverse B` gives `ψ(reverse B)`, and `revrev` turns it into `φ(B)`.
+
+The proof's conclusion must be the theorem's own statement, translated; a test that changes the stated type checks this is refused. The emitted theorem carries `$d x y z A`, `$d x y z B` and `$d x y z C` for the dummy set variables.
+
+`tenet-zfc emit` on `List.length_append` writes
+
+`lean-List.length_append $p |- ( ( B e. Word A /\ C e. Word A ) -> ( # ` ( B ++ C ) ) = ( ( # ` B ) + ( # ` C ) ) )`
+
+with a 13,268-step proof translated from Lean's proof term. Both verifiers accept it, and CI emits and verifies it again on every push. That completes milestone 2's gate: both gate theorems come out of Lean as ZFC theorems that two independent verifiers accept.
+
+**What this rests on, beyond the two verifiers and `set.mm`:**
+- the definition table (`List` ↦ `Word`, `length` ↦ `#`, `++` ↦ `++`, `Nat` ↦ `NN0`, `+` ↦ `+`), cross-checked here by `ccatlen`, which states the same theorem;
+- `Nat.zero_add` and `Nat.succ_add`, which come from `set.mm` facts about `+` rather than from translating their Lean proofs (those use `Nat.brecOn`);
+- the translator handles this proof's fragment and this shape of induction (two lists over one type, induction on the first). Other proofs are refused with a reason.
 
 ### Statement cross-check (built)
 
