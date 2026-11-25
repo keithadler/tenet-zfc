@@ -148,6 +148,9 @@ The biggest risk is output size. If sharing doesn't keep it near linear, large m
 
 **Open questions**
 
-- [ ] Is anyone already building a Lean-to-Metamath translator? Check Mario Carneiro's Metamath Zero work first, to build on it rather than duplicate it.
+- [x] Is anyone already building a Lean-to-Metamath translator? Not that we found (searched 2026-11-25). Closest work:
+  - Carneiro's Metamath Zero translates in the other direction, Metamath into MM0 and on to Lean; that's how Dirichlet's theorem and the prime number theorem reached Lean. MM0 also verifies all of `set.mm` in under 200 ms ([arXiv 1910.10703](https://arxiv.org/abs/1910.10703)).
+  - Carneiro's 2014 HOL Light → `set.mm` conversion is the nearest precedent for importing another system's proofs into `set.mm`. It goes through a HOL formalization (`hol.mm`) embedded in ZFC ([arXiv 1412.8091](https://arxiv.org/abs/1412.8091)).
+  - Bresolin and Mamino, *Reflections on Trusting Lean* ([arXiv 2610.30433](https://arxiv.org/abs/2610.30433), Oct 2026), prove that a second-order arithmetic sentence is provable in ZFC with an infinite set exactly when its Lean counterpart is inhabited. That's a logic result with a partial Lean formalization, not a proof translator. It relies on Carneiro's model of Lean's type theory, as this project does.
 - [ ] Target `set.mm` directly, or Metamath Zero, which is designed for exactly this kind of machine-generated proof?
 - [ ] Which headline theorem to aim for first?
