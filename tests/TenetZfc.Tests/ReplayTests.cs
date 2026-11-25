@@ -161,7 +161,8 @@ public class ReplayTests
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load(name);
         ReplayReport r = new Replayer(t, env).Replay(traces);
-        Assert.Equal(r.Declarations, r.Concluded + r.BlocksNotTraced);
+        Assert.Equal(r.Declarations, r.Concluded + r.BlocksChecked + r.BlocksTypesChecked + r.BlocksNested + r.BlocksNotTraced);
+        Assert.True(r.BlocksChecked > 0);
         Assert.True(r.Concluded > 0);
     }
 
@@ -213,6 +214,28 @@ public class ReplayTests
             }
         }
         Assert.Fail("no checked application in the fixture");
+    }
+
+    [Fact]
+    public void ANonPositiveInductiveIsRejected()
+    {
+        // From Tenet's negative corpus: Bad.mk : (Bad → False) → Bad. Tenet rejects it, so there is no trace; the
+        // structural recheck needs none.
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("invalid/nonpositive.ndjson"));
+        string? why = new Replayer(t, env).RecheckBlockStructure(t.Of("Bad"));
+        Assert.NotNull(why);
+        Assert.Contains("not strictly positive", why);
+    }
+
+    [Theory]
+    [MemberData(nameof(Exports))]
+    public void EveryFixtureBlockPassesTheStructuralRecheck(string name)
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load(name);
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.DoesNotContain(r.Failures, f => f.Step < 0);
+        Assert.Equal(0, r.BlocksTypesChecked);
     }
 
     [Fact]

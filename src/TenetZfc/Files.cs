@@ -37,7 +37,13 @@ public sealed class ConstInfo
     // inductive types
     /// <summary>The universe parameters of every constant in this type's block (types, constructors, recursors).</summary>
     public Name[] BlockLevelParams { get; init; } = [];
+
+    /// <summary>Every constant of this type's block: types, constructors and recursors.</summary>
+    public Name[] BlockMembers { get; init; } = [];
     public bool IsRec { get; init; }
+
+    /// <summary>For a nested inductive (one whose constructors mention another inductive applied to it), how many nestings.</summary>
+    public int NumNested { get; init; }
     public Name[] Ctors { get; init; } = [];
 
     public int MajorIdx => NumParams + NumMotives + NumMinors + NumIndices;
@@ -380,14 +386,19 @@ public sealed class Reader
             Name[] blockParams = new[] { "types", "ctors", "recs" }
                 .SelectMany(k => Arr(ind, k, k switch { "types" => "inductiveVals", "ctors" => "constructorVals", _ => "recursorVals" }).EnumerateArray())
                 .SelectMany(Params).Distinct().ToArray();
+            Name[] members = new[] { "types", "ctors", "recs" }
+                .SelectMany(k => Arr(ind, k, k switch { "types" => "inductiveVals", "ctors" => "constructorVals", _ => "recursorVals" }).EnumerateArray())
+                .Select(x => N(x.GetProperty("name"))).ToArray();
             foreach (JsonElement t in Arr(ind, "types", "inductiveVals").EnumerateArray())
             {
                 env.Add(new ConstInfo
                 {
                     BlockLevelParams = blockParams,
+                    BlockMembers = members,
                     Name = N(t.GetProperty("name")), Kind = ConstKind.Inductive, LevelParams = Params(t), Type = E(t.GetProperty("type")),
                     NumParams = t.GetProperty("numParams").GetInt32(), NumIndices = t.GetProperty("numIndices").GetInt32(),
-                    IsRec = t.GetProperty("isRec").GetBoolean(), Ctors = t.GetProperty("ctors").EnumerateArray().Select(N).ToArray(),
+                    IsRec = t.GetProperty("isRec").GetBoolean(),
+                    NumNested = t.TryGetProperty("numNested", out JsonElement nn) ? nn.GetInt32() : 0, Ctors = t.GetProperty("ctors").EnumerateArray().Select(N).ToArray(),
                 });
             }
             foreach (JsonElement c in Arr(ind, "ctors", "constructorVals").EnumerateArray())

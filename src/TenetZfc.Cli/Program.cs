@@ -30,7 +30,10 @@ try
     int open = report.Count(Verdict.Unsupported) + report.Count(Verdict.NotYet);
     Console.WriteLine($"{(report.Ok ? "OK" : "FAILED")} in {sw.Elapsed.TotalSeconds:F1}s. "
         + (report.Ok && open == 0 ? "Every step replayed." : $"{open} steps not replayed; see docs/trace-format.md.")
-        + (report.BlocksNotTraced > 0 ? $" {report.BlocksNotTraced} inductive or quotient blocks are not concluded by their trace." : ""));
+        + (report.BlocksChecked > 0 ? $" {report.BlocksChecked} inductive blocks checked, recursors not derived." : "")
+        + (report.BlocksTypesChecked > 0 ? $" {report.BlocksTypesChecked} inductive blocks: only types checked." : "")
+        + (report.BlocksNested > 0 ? $" {report.BlocksNested} nested inductive blocks not replayed." : "")
+        + (report.BlocksNotTraced > 0 ? $" {report.BlocksNotTraced} blocks not concluded." : ""));
     return report.Ok ? 0 : 1;
 }
 catch (Exception e) when (e is IOException or TenetZfc.FormatException or System.Text.Json.JsonException)

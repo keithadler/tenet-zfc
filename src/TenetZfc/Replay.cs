@@ -31,7 +31,22 @@ public sealed class ReplayReport
     /// <summary>Declarations whose trace concludes what the kernel checks of them (their type is a type; their value has it).</summary>
     public int Concluded { get; internal set; }
 
-    /// <summary>Inductive and quotient blocks: their well-formedness is checked by Tenet but not traced as one conclusion.</summary>
+    /// <summary>
+    /// Inductive blocks whose every type is checked by the trace and whose structure is rechecked here: constructor
+    /// shapes, strict positivity and field universes. Their recursors are not derived.
+    /// </summary>
+    public int BlocksChecked { get; internal set; }
+
+    /// <summary>Inductive blocks whose every type is checked, in a case the structural recheck does not handle (listed as unsupported).</summary>
+    public int BlocksTypesChecked { get; internal set; }
+
+    /// <summary>
+    /// Nested inductive blocks. The kernel checks one by building auxiliary inductive types that are not in the
+    /// export, and the trace does not record them, so these blocks' steps are counted as unsupported.
+    /// </summary>
+    public int BlocksNested { get; internal set; }
+
+    /// <summary>Inductive and quotient blocks the trace does not conclude anything about.</summary>
     public int BlocksNotTraced { get; internal set; }
     public int Steps { get; internal set; }
 
@@ -51,7 +66,7 @@ public sealed class ReplayReport
     {
         var sb = new StringBuilder();
         sb.AppendLine($"{Declarations} declarations, {Steps} steps");
-        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksNotTraced} inductive or quotient blocks, whose well-formedness is not traced");
+        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksChecked} inductive blocks checked (types, constructors, positivity, universes; recursors not derived); {BlocksTypesChecked} with only their types checked; {BlocksNested} nested inductive blocks not replayed; {BlocksNotTraced} blocks not concluded");
         sb.AppendLine($"  verified {Count(Verdict.Verified)}, failed {Count(Verdict.Failed)}, unsupported {Count(Verdict.Unsupported)}, not yet replayed {Count(Verdict.NotYet)}");
         sb.AppendLine();
         sb.AppendLine($"  {"step",-24}{"verified",10}{"failed",8}{"unsupp.",9}{"not yet",9}");
@@ -128,6 +143,18 @@ public sealed partial class Replayer
             {
                 report.Failures.Add(new StepFailure(d.Decl, -1, "decl", "not declared in the export"));
             }
+            if (_env.Find(d.Decl) is { Kind: ConstKind.Inductive } nested
+                && nested.BlockMembers.Any(m => _env.Find(m) is { Kind: ConstKind.Inductive, NumNested: > 0 }))
+            {
+                report.BlocksNested++;
+                foreach (Step s in d.Steps)
+                {
+                    report.Steps++;
+                    report.Add(s.Kind == StepKind.Rule ? s.Rule ?? "?" : s.Kind.ToString(), Verdict.Unsupported);
+                }
+                report.Unsupported.Add(new StepFailure(d.Decl, -1, "decl", $"a nested inductive block ({d.Steps.Count} steps): Tenet's auxiliary types are not in the trace"));
+                continue;
+            }
             var state = new DeclState(_env.Find(d.Decl) switch
             {
                 { Kind: ConstKind.Inductive } i => i.BlockLevelParams,
@@ -150,6 +177,31 @@ public sealed partial class Replayer
                     report.Unsupported.Add(new StepFailure(d.Decl, s.Index, what, why ?? "unsupported"));
                 }
                 state.Record(s);
+            }
+            if (_env.Find(d.Decl) is { Kind: ConstKind.Inductive } block)
+            {
+                if (block.BlockMembers.All(m => _env.Find(m) is ConstInfo c && CheckedSortOf(c.Type, state) is not null))
+                {
+                    BlockCheck bc = CheckBlock(block, d.Steps, state);
+                    if (bc.Ok)
+                    {
+                        report.BlocksChecked++;
+                    }
+                    else if (bc.Unsupported)
+                    {
+                        report.BlocksTypesChecked++;
+                        report.Unsupported.Add(new StepFailure(d.Decl, -1, "decl", bc.Why!));
+                    }
+                    else
+                    {
+                        report.Failures.Add(new StepFailure(d.Decl, -1, "decl", bc.Why!));
+                    }
+                }
+                else
+                {
+                    report.Failures.Add(new StepFailure(d.Decl, -1, "decl", "the trace does not check every type of the block"));
+                }
+                continue;
             }
             switch (Concludes(d.Decl, state))
             {
