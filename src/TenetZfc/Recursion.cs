@@ -78,6 +78,55 @@ public sealed class Recursion(Prover pr)
         return (fr.Proves, fr.Proof, ["x y w v s A"]);
     }
 
+    /// <summary>The label of <see cref="StageSs"/>'s theorem, and of its hypothesis.</summary>
+    public const string StageSsLabel = "lean-stagess", StageSsHyp = "lean-stagess.1";
+
+    /// <summary>Its hypothesis: in context ph, the step's values contain their argument.</summary>
+    public const string StageSsHypText = "|- ( ph -> z C_ ( F ` z ) )";
+
+    /// <summary>
+    /// The stages of a recursive type only grow: for a step F whose values contain their argument (in context ph),
+    ///   |- ( ( ( M e. _om /\ N e. _om ) /\ N C_ M ) -> ( ph -> ( rec ( F , A ) ` N ) C_ ( rec ( F , A ) ` M ) ) ).
+    /// By induction from N (findsg) on ( ph -> stage N C_ stage x ): at N by ssid, and from y to suc y because stage
+    /// suc y is F at stage y (rdgsuc), which contains stage y (the hypothesis at stage y, by vtocl).
+    /// A constructor with several recursive fields, each in some stage, puts them all in the union of those stages.
+    /// </summary>
+    public (TenetZfc.Metamath.Expr Statement, List<string> Proof, string[] Distinct) StageSs()
+    {
+        static string G(string n) => $"( rec ( F , A ) ` {n} )";
+        static string Phi(string n) => $"( ph -> {G("N")} C_ {G(n)} )";
+        Proof hyp = ([StageSsHyp], TenetZfc.Metamath.Expr.Of(StageSsHypText));
+        Proof Eq(string x, string to) => _d.Congruence("wff", Phi("Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {to}"))));
+
+        // At N: stage N C_ stage N.
+        Proof base_ = _d.Lift("N e. _om", _d.Lift("ph", pr.Apply("ssid", S(("A", G("N"))))));
+
+        // From y to suc y: under H /\ ph, stage y C_ ( F ` stage y ) = stage suc y.
+        const string h = "( ( y e. _om /\\ N e. _om ) /\\ N C_ y )";
+        const string hp = "( " + h + " /\\ ph )";
+        Proof Hyp(string ctx, string x) => HypOf(ctx, x) ?? throw new InvalidOperationException($"no {x} in {ctx}");
+        Proof yOn = _d.Syl(Hyp(hp, "y e. _om"), pr.Apply("nnon", S(("A", "y"))));
+        Proof suc = _d.Syl(yOn, pr.Apply("rdgsuc", S(("B", "y"), ("F", "F"), ("A", "A"))));
+        string fy = $"( F ` {G("y")} )";
+        Proof inst = pr.Apply("vtocl", S(("x", "z"), ("A", G("y")), ("ph", "( ph -> z C_ ( F ` z ) )"), ("ps", $"( ph -> {G("y")} C_ {fy} )")),
+            pr.Apply("fvex", S(("F", "rec ( F , A )"), ("A", "y"))),
+            _d.Congruence("wff", "( ph -> Z C_ ( F ` Z ) )", "Z", pr.Apply("id", S(("ph", $"z = {G("y")}")))),
+            hyp);
+        Proof grows = pr.Apply("sseqtrrd", S(("ph", hp), ("A", G("y")), ("B", fy), ("C", G("suc y"))),
+            _d.Syl(Hyp(hp, "ph"), inst), suc);
+        string k = $"( ( {h} /\\ {Phi("y")} ) /\\ ph )";
+        Proof atY = pr.Apply("mpd", S(("ph", k), ("ps", "ph"), ("ch", $"{G("N")} C_ {G("y")}")), Hyp(k, "ph"), Hyp(k, Phi("y")));
+        Proof atSuc = pr.Apply("sstrd", S(("ph", k), ("A", G("N")), ("B", G("y")), ("C", G("suc y"))),
+            atY, _d.Syl(_d.Jca(Hyp(k, h), Hyp(k, "ph")), grows));
+        Proof step = pr.Apply("ex", S(("ph", h), ("ps", Phi("y")), ("ch", Phi("suc y"))),
+            pr.Apply("ex", S(("ph", $"( {h} /\\ {Phi("y")} )"), ("ps", "ph"), ("ch", $"{G("N")} C_ {G("suc y")}")), atSuc));
+
+        Proof all = pr.Apply("findsg", S(("x", "x"), ("y", "y"), ("ph", Phi("x")), ("ps", Phi("N")), ("ch", Phi("y")), ("th", Phi("suc y")),
+                ("ta", Phi("M")), ("A", "M"), ("B", "N")),
+            Eq("x", "N"), Eq("x", "y"), Eq("x", "suc y"), Eq("x", "M"), base_, step);
+        return (all.Proves, all.Proof, ["x y z", "x y z ph", "x y z F", "x y z A", "x y M", "x y N"]);
+    }
+
     /// <summary>|- ( a RankLt b <-> ( rank ` a ) e. ( rank ` b ) ), for set variables a and b, by brab.</summary>
     public Proof Brab(string a, string b)
     {
