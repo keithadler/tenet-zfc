@@ -19,7 +19,7 @@ namespace TenetZfc;
 /// Each translated definition comes with its definitional equation as a theorem: lean.c applied to arguments of the
 /// right types equals its body with them substituted, by one fvmptd step per argument.
 /// </summary>
-public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = false)
+public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryRun = false)
 {
     private const string UniverseVar = "u";
     private static readonly string[] Letters = "x y z w v t s r q p o n m k j i h g f e d c b a".Split(' ');
@@ -63,6 +63,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         public Dictionary<ulong, Expr> Types { get; } = new();   // each local's Lean type, for telling proofs from data
         public List<string> Bound { get; } = new();   // every setvar the definition binds (for its $d list)
         public List<string> Active { get; } = new();  // the binders enclosing the current position
+        public string WellOrder { get; set; } = "W";   // the well-ordering Classical.choice depends on (ModelBuiltins.cs)
+        public bool UsesChoice { get; set; }          // whether the term mentions a constant that depends on it
     }
 
     /// <summary>⟦e⟧ as a set.mm class, with the universe written as <paramref name="universe"/> and the free variables as bound.</summary>
@@ -91,7 +93,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 return IsZero(s.Level) ? "2o" : sc.Universe;
             case Const c:
                 Define(c.Name);
-                return $"( {Token(c.Name)} ` {sc.Universe} )";
+                return ConstTerm(c.Name, sc);   // ModelBuiltins.cs: with the well-ordering when it depends on choice
             case App a:
                 return $"( {Tr(a.Fn, sc)} ` {Tr(a.Arg, sc)} )";
             case Binder b:
@@ -119,6 +121,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 return Tr(_ops.Instantiate(l.Body, [l.Value]), sc);
             case NatLit lit:
                 return NatLiteral(lit.Value);
+            case StrLit lit:
+                return StringLiteral(lit.Value, sc);
             case Proj p:
                 {
                     // A structure's value is <. (/) , fields >. (one constructor, tag (/)): field i of its second part.
@@ -210,13 +214,16 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             case ConstKind.Recursor when $"{n}".EndsWith(".rec", StringComparison.Ordinal):
                 Define(t.Of($"{n}"[..^4]));
                 return;
+            case ConstKind.Axiom or ConstKind.Quot:
+                DefineBuiltin(c);   // ModelBuiltins.cs
+                return;
         }
         throw new Refused($"{n} is not a definition but {(c.Kind == ConstKind.Inductive ? "an inductive type" : "a " + c.Kind.ToString().ToLowerInvariant())}; not in the model yet");
     }
 
     private Scope NewScope()
     {
-        var sc = new Scope(UniverseVar);
+        var sc = new Scope(UniverseVar) { WellOrder = WellOrderHole };
         sc.Bound.Add(UniverseVar);
         sc.Active.Add(UniverseVar);
         return sc;
@@ -224,6 +231,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
 
     private void Emit(Name n, string tok, string body, Scope sc, string what)
     {
+        body = WellOrderLayer(tok, body, sc);   // ModelBuiltins.cs: ( r e. ~P ( u X. u ) |-> … ) when it depends on choice
         string text = $"""
             $( The Lean {what} {n}, translated by the model of docs/milestone3.md. $)
             $c {tok} $.
@@ -842,6 +850,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     /// <summary>A definition with no universe layer: df-tok $a |- tok = definiens $. (a map over a packed argument).</summary>
     private void EmitRaw(Name n, string tok, string definiens, IEnumerable<string> bound, string what)
     {
+        if (definiens.Split(' ').Contains(WellOrderHole))
+        {
+            throw new Refused($"{n} depends on Classical.choice inside a packed helper; not in the model yet");
+        }
         var b = bound.Distinct().ToList();
         string text = $"""
             $( The {what} of {n}, for the model of docs/milestone3.md. $)
@@ -975,7 +987,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         {
             throw new Refused("more parameters than class variables");
         }
-        var args = ClassVars.Take(arity).ToList();
+        var args = _choiceDependent.Contains(tok) ? ClassVars.Take(arity - 1).Prepend("W").ToList() : ClassVars.Take(arity).ToList();
         List<string> doms = Domains(tok, args, arity);
         var hyps = new List<string> { "U e. Univ" };
         hyps.AddRange(args.Select((a, i) => $"{a} e. {doms[i]}"));
@@ -998,6 +1010,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         }
         ConstInfo ind = env.Find(ctor.Induct!)!;
         ConstInfo rec = env.Find(t.Of($"{ind.Name}.rec"))!;
+        if (_choiceDependent.Contains(Token(ind.Name)!) || _choiceDependent.Contains(Token(ctorName)!) || _choiceDependent.Contains(Token(rec.Name)!))
+        {
+            throw new Refused($"{ind.Name} depends on Classical.choice; its computation rules aren't in the model yet");
+        }
         if (IsProposition(ind))
         {
             return PropositionIota(ctor, ind, rec);
@@ -1822,6 +1838,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                     }
                     return _d.Syl(_d.Jca(ExistsIn(ph, dom), all), pr.Apply("iunexg", S(("x", v), ("A", dom), ("B", body), ("V", "_V"), ("W", "_V"))));
                 }
+        }
+        if (ExistsMore(ph, n) is Proof more)   // ModelBuiltins.cs: intersections, products, ranges, quotients, classes
+        {
+            return more;
         }
         // A class variable: from its hypothesis.
         if (n.Rule.Kind == 'f' && Conjuncts(ph).FirstOrDefault(h => h.StartsWith(x + " e. ", StringComparison.Ordinal)) is string hyp)
