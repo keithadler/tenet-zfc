@@ -34,10 +34,11 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("natle.ndjson"));
         var m = new Model(t, env, new Prover(new Database()));
-        // Nat.le is a recursive inductive proposition: not in the model yet.
-        var e = Assert.Throws<Model.Refused>(() => m.Define(t.Of("Nat.le")));
+        // Acc's premise is a function into Acc (not finitary): not in the model yet.
+        Assert.Throws<Model.Refused>(() => m.Define(t.Of("No.such.constant")));
+        var e = Assert.Throws<Model.Refused>(() => m.Define(t.Of("No.such.constant.either")));
         output.WriteLine(e.Message);
-        Assert.Equal("Nat.le is a recursive inductive proposition; not in the model yet", e.Message);
+        Assert.Equal("No.such.constant.either is not in the export", e.Message);
         Assert.Throws<Model.Refused>(() => m.Define(t.Of("No.such.constant")));
         Assert.Equal("", m.Declarations);   // nothing written for a refused definition
     }
@@ -362,6 +363,23 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             File.Delete(file);
         }
+    }
+
+    [Fact]
+    public void NatLeIsALeastSetOfIndicesAndLiteralsAreShort()
+    {
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("natle.ndjson"));
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        m.Define(t.Of("Nat.le.rec"));
+        m.Define(t.Of("UInt8.size"));
+        string d = m.Declarations;
+        output.WriteLine(d);
+        // Nat.le n m: <. m , (/) >. is in the least set containing <. n , (/) >. and closed under succ.
+        Assert.Contains("if ( <. y , (/) >. e. U_ z e. _om ( rec ( ( v e. _V |-> ( lean.Nat.le.-step ` <. <. u , <. x , (/) >. >. , v >. ) ) , (/) ) ` z ) , 1o , (/) )", d);
+        Assert.Contains("{ <. ( 1st ` ( 2nd ` ( 1st ` w ) ) ) , (/) >. } u. U_ y e. ( lean.Nat ` ( 1st ` ( 1st ` w ) ) ) U_ z e. if ( <. y , (/) >. e. ( 2nd ` w ) , 1o , (/) )", d);
+        // 256 is its decimal numeral, through the ordinals, into the model's Nat.
+        Assert.Contains("( lean.Nat.-lit ` ( lean.Nat.-ofnum ` ; ; 2 5 6 ) )", d);
     }
 
     private static string Run(string exe, string dir, string args, out int code)

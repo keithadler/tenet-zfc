@@ -288,4 +288,39 @@ Both verifiers accept them, and the definitions pass the definition check. The p
 | the nested type `Lean.Syntax` | 785 |
 | running out of set variables (set.mm has 26 lowercase ones) | 222 |
 
-**Next.** A recursive proposition, like a recursive type, is a least fixed point. Here it is a set of index tuples built in stages, with the proposition true when its indices are in it. Most such propositions eliminate only into `Prop`, so their recursors need no computation rule. `Nat` literals need a numeral-to-`Nat` map, by `rec` on `_om`.
+## Step 3, fourth part: recursive propositions and `Nat` literals (built)
+
+**Recursive propositions.** A recursive proposition, like a recursive type, is a least fixed point. Here it is the least set of index tuples closed under the constructors, built in the same stages. The proposition is true at indices whose tuple is in that set:
+
+```
+df-lean.Nat.le $a |- lean.Nat.le = ( u e. Univ |-> ( x e. ( lean.Nat ` u ) |-> ( y e. ( lean.Nat ` u ) |->
+    if ( <. y , (/) >. e. U_ z e. _om ( rec ( ( v e. _V |-> ( lean.Nat.le.-step ` <. <. u , <. x , (/) >. >. , v >. ) ) , (/) ) ` z ) , 1o , (/) ) ) ) ) $.
+```
+
+- **The step** adds each constructor's result indices over its fields. A recursive premise `I params e⃗` ranges over `if ( <. e⃗ >. e. X , 1o , (/) )`, so it holds when its own indices were in the last stage. For `Nat.le n`, the step adds `<. n , (/) >.` (`refl`), and `succ y` for each `y` already present (`step`).
+- **Recursors** of recursive propositions eliminating only into `Prop` are `(/)`, and their computation rules need no proof.
+- **Not yet handled:** large elimination of a recursive proposition, and premises that are functions into the proposition (`Acc`).
+
+**`Nat` literals.** A literal is `( lean.Nat.-lit ` ( lean.Nat.-ofnum ` n ) )`, with n as `set.mm`'s decimal numeral:
+- **`-ofnum`** inverts `set.mm`'s standard isomorphism from `_om` onto `NN0`, `( rec ( ( y e. _V |-> ( y + 1 ) ) , 0 ) |` _om )`.
+- **`-lit`** takes the ordinal k to `Nat.succ` applied k times to `Nat.zero`, in the model's encoding.
+
+So a literal stays as short as its decimal digits: `UInt8.size` is `… ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` ; ; 2 5 6 ) ) …`. `Nat` arithmetic on literals (the kernel's GMP steps) will need bridge theorems relating `-lit` to `+` on `NN0`, as the spec planned.
+
+**Checked:** `Nat.le`, its constructors and recursor, `Nat.lt` and `UInt8.size`. Their definitions pass the definition check, and both verifiers accept their equations, in a test and in CI.
+
+**The effect on `Init`:** 11,780 of 17,590 definitions now translate with everything they use, up from 6,481 (two thirds of `Init`).
+
+| What stops a definition next | Definitions |
+|---|---|
+| the nested type `Lean.Syntax` | 1,483 |
+| running out of set variables (set.mm has 26) | 1,058 |
+| string literals | 339 |
+| `Acc` (a premise that is a function into `Acc`) | 325 |
+| axioms (`propext`, `Classical.choice`, …) and quotients | 109 |
+
+**Next:**
+- **Set variables.** Definitions with many nested binders need more than set.mm's 26. They can be declared by the output itself, as new `$v` and `$f` statements, which add no axioms.
+- **Nested types** (`Lean.Syntax`), through the replayer's existing reduction to a mutual block.
+- **Strings**, as lists of characters.
+- **Axioms**, which are milestone 3's last item: `propext` holds in the model, and `Classical.choice` comes from `set.mm`'s choice.

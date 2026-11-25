@@ -110,6 +110,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 }
             case Let l:
                 return Tr(_ops.Instantiate(l.Body, [l.Value]), sc);
+            case NatLit lit:
+                return NatLiteral(lit.Value);
             case Proj p:
                 {
                     // A structure's value is <. (/) , fields >. (one constructor, tag (/)): field i of its second part.
@@ -278,7 +280,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         {
             if (IsProposition(ind))
             {
-                throw new Refused($"{n} is a recursive inductive proposition; not in the model yet");
+                DefineRecursiveProposition(ind, itok);
+                return;
             }
             if (ind.NumIndices > 0)
             {
@@ -548,7 +551,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             }
             string set = parts.Skip(1).Aggregate(parts[0], (acc, p) => $"( {acc} u. {p} )");
             string body = $"( {hole} u. {set} )";
-            string w = SetVars.First(x => !sc.Bound.Contains(x) && !body.Split(' ').Contains(x) && !ps.Any(q => q.Var == x));
+            string w = FirstVar(x => !sc.Bound.Contains(x) && !body.Split(' ').Contains(x) && !ps.Any(q => q.Var == x));
             var packed = new[] { UniverseVar }.Concat(ps.Select(q => q.Var)).ToList();
             body = Unpack(body, packed, $"( 1st ` {w} )");
             body = Subst(body, hole, $"( 2nd ` {w} )");
@@ -563,9 +566,9 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             Expr ty = ind.Type;
             var ps = Telescope(ref ty, ind.NumParams, sc);
             string pack = Tuple(new[] { UniverseVar }.Concat(ps.Select(q => q.Var)).ToList());
-            string x = SetVars.First(v => !sc.Bound.Contains(v) && !stepBound.Contains(v));
+            string x = FirstVar(v => !sc.Bound.Contains(v) && !stepBound.Contains(v));
             sc.Bound.Add(x);
-            string k = SetVars.First(v => !sc.Bound.Contains(v));
+            string k = FirstVar(v => !sc.Bound.Contains(v));
             sc.Bound.Add(k);
             string stepf = $"( {x} e. _V |-> ( {steptok} ` <. {pack} , {x} >. ) )";
             _defined.Add(n);
@@ -601,7 +604,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 ? Minor(j, $"( 2nd ` {x} )")
                 : $"if ( ( 1st ` {x} ) = (/) , {Minor(j, $"( 2nd ` {x} )")} , {Case(j + 1, $"( 2nd ` {x} )")} )";
             string body = Case(0, ha);
-            string w = SetVars.First(x => !body.Split(' ').Contains(x) && !bs.Any(q => q.Var == x) && x != UniverseVar);
+            string w = FirstVar(x => !body.Split(' ').Contains(x) && !bs.Any(q => q.Var == x) && x != UniverseVar);
             var packed = new[] { UniverseVar }.Concat(bs.Select(q => q.Var)).ToList();
             body = Unpack(body, packed, $"( 1st ` ( 1st ` {w} ) )");
             body = Subst(Subst(body, ha, $"( 2nd ` ( 1st ` {w} ) )"), hf, $"( 2nd ` {w} )");
@@ -624,6 +627,178 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             Emit(rec.Name, Token(rec.Name)!, Maps(bs, $"( frecs ( {rel} , {dom} , {g} ) ` {major} )"), sc, "recursor");
         }
     }
+
+    /// <summary>
+    /// A recursive inductive proposition (like Nat.le), indexed or not: the least set of index tuples closed under its
+    /// constructors, built in stages as for recursive types, and the proposition true at indices whose tuple is in it:
+    /// ( params |-> ( indices |-> if ( <. indices >. e. U_ k e. _om ( rec ( stepf , (/) ) ` k ) , 1o , (/) ) ) ).
+    /// The step adds, for each constructor, the tuples of its result indices over its fields, where a recursive premise
+    /// I params e⃗ ranges over if ( <. e⃗ >. e. X , 1o , (/) ): it holds when its own indices were in the last stage.
+    /// Constructors are (/). A recursor that eliminates only into Prop is (/); others are refused for now.
+    /// </summary>
+    private void DefineRecursiveProposition(ConstInfo ind, string itok)
+    {
+        Name n = ind.Name;
+        List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
+        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        foreach (ConstInfo c in ctors.Append(rec))
+        {
+            _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
+        }
+        string steptok = itok + ".-step";
+        bool Mentions(Expr e) => e switch
+        {
+            Const c => ReferenceEquals(c.Name, n),
+            App a => Mentions(a.Fn) || Mentions(a.Arg),
+            Binder b => Mentions(b.Domain) || Mentions(b.Body),
+            Let l => Mentions(l.Type) || Mentions(l.Value) || Mentions(l.Body),
+            Proj p => Mentions(p.Struct),
+            _ => false,
+        };
+
+        // The step, over w = <. <. u , params >. , X >.
+        var stepBound = new List<string>();
+        {
+            var sc = NewScope();
+            var pfv = new List<Expr>();
+            Expr ty = ind.Type;
+            var ps = Telescope(ref ty, ind.NumParams, sc, pfv);
+            const string hole = "ZZX";
+            var parts = new List<string>();
+            foreach (ConstInfo c in ctors)
+            {
+                Expr cty = c.Type;
+                Telescope(ref cty, ind.NumParams, sc, reuse: pfv);
+                var fs = new List<(string Var, string Dom)>();
+                for (int k = 0; k < c.NumFields; k++)
+                {
+                    var b = (Binder)cty;
+                    string dom;
+                    if (Ops.Spine(b.Domain, out List<Expr> ra) is Const h && ReferenceEquals(h.Name, n))
+                    {
+                        if (ra.Count != ind.NumParams + ind.NumIndices || !ra.Take(ind.NumParams).Zip(pfv).All(z => ReferenceEquals(z.First, z.Second)))
+                        {
+                            throw new Refused($"{c.Name} has a recursive premise at other parameters; not in the model yet");
+                        }
+                        string idx = Tuple(ra.Skip(ind.NumParams).Select(e => Tr(e, sc)).ToList());
+                        dom = $"if ( {idx} e. {hole} , 1o , (/) )";
+                    }
+                    else if (Mentions(b.Domain))
+                    {
+                        throw new Refused($"{c.Name} has a premise mentioning {n} other than as a premise; not in the model yet");
+                    }
+                    else
+                    {
+                        dom = Tr(b.Domain, sc);
+                    }
+                    string v = Fresh(sc, dom);
+                    Expr fv = t.FVar(_fresh++);
+                    sc.Vars[((FVar)fv).Id] = v;
+                    sc.Types[((FVar)fv).Id] = b.Domain;
+                    if (!sc.Bound.Contains(v))
+                    {
+                        sc.Bound.Add(v);
+                    }
+                    sc.Active.Add(v);
+                    fs.Add((v, dom));
+                    cty = _ops.Instantiate(b.Body, [fv]);
+                }
+                Ops.Spine(cty, out List<Expr> result);
+                string tuple = Tuple(result.Skip(ind.NumParams).Select(e => Tr(e, sc)).ToList());
+                foreach (var f in fs)
+                {
+                    sc.Active.Remove(f.Var);
+                }
+                parts.Add(fs.AsEnumerable().Reverse().Aggregate($"{{ {tuple} }}", (acc, f) => $"U_ {f.Var} e. {f.Dom} {acc}"));
+            }
+            string set = parts.Count == 0 ? "(/)" : parts.Skip(1).Aggregate(parts[0], (acc, p) => $"( {acc} u. {p} )");
+            string body = $"( {hole} u. {set} )";
+            string w = FirstVar(x => !sc.Bound.Contains(x) && !body.Split(' ').Contains(x) && !ps.Any(q => q.Var == x));
+            var packed = new[] { UniverseVar }.Concat(ps.Select(q => q.Var)).ToList();
+            body = Subst(Unpack(body, packed, $"( 1st ` {w} )"), hole, $"( 2nd ` {w} )");
+            stepBound.AddRange(sc.Bound.Where(x => x != UniverseVar && !ps.Any(q => q.Var == x)));
+            stepBound.Add(w);
+            EmitRaw(t.Of($"{n}.-step"), steptok, $"( {w} e. _V |-> {body} )", stepBound, "inductive proposition's stage step, over a packed argument");
+        }
+
+        // The proposition.
+        {
+            var sc = NewScope();
+            Expr ty = ind.Type;
+            var ps = Telescope(ref ty, ind.NumParams, sc);
+            var ixs = Telescope(ref ty, ind.NumIndices, sc);
+            string pack = Tuple(new[] { UniverseVar }.Concat(ps.Select(q => q.Var)).ToList());
+            string x = FirstVar(v => !sc.Bound.Contains(v) && !stepBound.Contains(v));
+            sc.Bound.Add(x);
+            string k = FirstVar(v => !sc.Bound.Contains(v));
+            sc.Bound.Add(k);
+            string stepf = $"( {x} e. _V |-> ( {steptok} ` <. {pack} , {x} >. ) )";
+            string least = $"U_ {k} e. _om ( rec ( {stepf} , (/) ) ` {k} )";
+            _defined.Add(n);
+            Emit(n, itok, Maps(ps.Concat(ixs), $"if ( {Tuple(ixs.Select(q => q.Var).ToList())} e. {least} , 1o , (/) )"), sc, "recursive inductive proposition");
+        }
+
+        // Constructors: proofs, so (/).
+        foreach (ConstInfo c in ctors)
+        {
+            var sc = NewScope();
+            Expr cty = c.Type;
+            var bs = Telescope(ref cty, ind.NumParams + c.NumFields, sc);
+            _defined.Add(c.Name);
+            Emit(c.Name, Token(c.Name)!, Maps(bs, "(/)"), sc, "constructor");
+        }
+
+        // The recursor: (/) when it eliminates only into Prop.
+        {
+            var sc = NewScope();
+            Expr rty = rec.Type;
+            var mfv = new List<Expr>();
+            var bs = Telescope(ref rty, ind.NumParams + rec.NumMotives + rec.NumMinors + ind.NumIndices + 1, sc, mfv);
+            Expr mt = sc.Types[((FVar)mfv[ind.NumParams]).Id];
+            while (mt is Binder { IsPi: true } mb)
+            {
+                mt = mb.Body;
+            }
+            if (mt is not Sort { Level: LZero })
+            {
+                throw new Refused($"{rec.Name} eliminates a recursive proposition into any sort; not in the model yet");
+            }
+            _intoPropOnly.Add(Token(rec.Name)!);
+            _defined.Add(rec.Name);
+            Emit(rec.Name, Token(rec.Name)!, Maps(bs, "(/)"), sc, "recursor");
+        }
+    }
+
+    /// <summary>
+    /// A Nat literal n: ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` n ) ), with n as set.mm's decimal numeral. -ofnum is
+    /// the inverse of set.mm's standard isomorphism from _om onto NN0, ( rec ( ( y e. _V |-> ( y + 1 ) ) , 0 ) |` _om ),
+    /// and -lit takes the ordinal k to Nat.succ applied k times to Nat.zero, in the model's encoding. So a literal stays
+    /// as short as its decimal digits.
+    /// </summary>
+    private string NatLiteral(System.Numerics.BigInteger value)
+    {
+        Name nat = t.Of("Nat");
+        Define(nat);
+        const string lit = "lean.Nat.-lit", ofnum = "lean.Nat.-ofnum";
+        if (!_values.ContainsKey(lit))
+        {
+            ConstInfo ind = env.Find(nat)!;
+            int zero = Array.FindIndex(ind.Ctors, c => $"{c}" == "Nat.zero"), succ = Array.FindIndex(ind.Ctors, c => $"{c}" == "Nat.succ");
+            if (zero < 0 || succ < 0)
+            {
+                throw new Refused("Nat's constructors aren't zero and succ");
+            }
+            EmitRaw(t.Of("Nat.-ofnum"), ofnum, "`' ( rec ( ( y e. _V |-> ( y + 1 ) ) , 0 ) |` _om )", ["y"], "map from decimal numerals to ordinals, for Nat literals");
+            EmitRaw(t.Of("Nat.-lit"), lit, $"( rec ( ( x e. _V |-> {Tag(succ, Tuple(["x"]))} ) , {Tag(zero, "(/)")} ) |` _om )", ["x"], "map from ordinals to the model's Nat, for Nat literals");
+        }
+        return $"( {lit} ` ( {ofnum} ` {Decimal(value)} ) )";
+    }
+
+    /// <summary>The first set variable satisfying the condition, or a refusal when set.mm's 26 are used up.</summary>
+    private static string FirstVar(Func<string, bool> ok) =>
+        SetVars.FirstOrDefault(ok) ?? throw new Refused("more set variables needed than set.mm has");
+
+    private static string Decimal(System.Numerics.BigInteger n) => n < 10 ? n.ToString() : $"; {Decimal(n / 10)} {n % 10}";
 
     /// <summary>Replace each packed variable by its projection from the tuple: the i-th of a Tuple is Field(tuple, i).</summary>
     private static string Unpack(string body, List<string> packed, string tuple)
@@ -910,7 +1085,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         // apply it, unfold the step at the packed argument, and read the packed parts back.
         Proof StepAt(string ctx, string sb)
         {
-            string y = SetVars.First(x => x != sx && !sb.Split(' ').Contains(x) && !sBody.Split(' ').Contains(x) && !ctx.Split(' ').Contains(x));
+            string y = FirstVar(x => x != sx && !sb.Split(' ').Contains(x) && !sBody.Split(' ').Contains(x) && !ctx.Split(' ').Contains(x));
             extraVars.Add(y);
             string bodyY = Subst(sBody, sx, y), stepY = $"( {y} e. _V |-> {bodyY} )";
             Proof ren = pr.Apply("cbvmptv", S(("x", sx), ("y", y), ("A", "_V"), ("B", sBody), ("C", bodyY)),
@@ -956,7 +1131,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             // r is in some stage m (a variable of its own: ssiun2s needs the union's k disjoint from suc m).
             string r = fields[rf[0]];
             var stepVars = _values[info.StepTok].Split(' ').ToHashSet();
-            string m = SetVars.First(x => x != k && !set.Split(' ').Contains(x) && !small.Split(' ').Contains(x) && !stepVars.Contains(x));
+            string m = FirstVar(x => x != k && !set.Split(' ').Contains(x) && !small.Split(' ').Contains(x) && !stepVars.Contains(x));
             string setM = $"U_ {m} e. _om {Stage(m)}";
             extraVars.Add(m);
             Proof ren = pr.Apply("cbviunv", S(("x", k), ("y", m), ("A", "_om"), ("B", stageBody), ("C", Stage(m))),
@@ -992,8 +1167,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         // it (ovmpog), unfold the case analysis at the packed argument, and read the parts back.
         string a0 = Part(caseApp, "x"), f0 = Part(caseApp, "y"), body0 = Part(caseApp, "C");
         var used = (fr + " " + v + " " + ph).Split(' ').ToHashSet();
-        string a = SetVars.First(x => !used.Contains(x) && x != a0 && x != f0);
-        string f = SetVars.First(x => !used.Contains(x) && x != a0 && x != f0 && x != a);
+        string a = FirstVar(x => !used.Contains(x) && x != a0 && x != f0);
+        string f = FirstVar(x => !used.Contains(x) && x != a0 && x != f0 && x != a);
         extraVars.AddRange([a, f]);
         string bodyA = Subst(body0, a0, a), body = Subst(bodyA, f0, f);
         string mpo = $"( {a} e. _V , {f} e. _V |-> {body} )";
