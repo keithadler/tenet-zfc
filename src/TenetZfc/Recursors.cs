@@ -41,7 +41,68 @@ public sealed partial class Replayer
     /// </summary>
     private string? CheckRecursors(ConstInfo first, DeclState st)
     {
-        List<ConstInfo> types = first.BlockMembers.Select(m => _env.Find(m)!).Where(c => c.Kind == ConstKind.Inductive).ToList();
+        (string? error, List<ConstInfo> derived) = DeriveRecursors(first, st);
+        if (error is not null)
+        {
+            return error;
+        }
+        foreach (ConstInfo mine in derived)
+        {
+            string? diff = CompareRecursor(mine, _env.Find(mine.Name));
+            if (diff is not null)
+            {
+                return diff;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Null when the export's recursor is the derived one; otherwise how they differ.</summary>
+    private static string? CompareRecursor(ConstInfo mine, ConstInfo? theirs)
+    {
+        if (theirs is not { Kind: ConstKind.Recursor } rec)
+        {
+            return $"{mine.Name} is not in the export";
+        }
+        if (!mine.LevelParams.SequenceEqual(rec.LevelParams))
+        {
+            return $"{mine.Name}'s universe parameters are not the ones its block determines";
+        }
+        if (!ReferenceEquals(mine.Type, rec.Type))
+        {
+            return $"{mine.Name}'s type is not the one its block determines";
+        }
+        if (rec.K != mine.K || rec.NumParams != mine.NumParams || rec.NumMotives != mine.NumMotives
+            || rec.NumMinors != mine.NumMinors || rec.NumIndices != mine.NumIndices)
+        {
+            return $"{mine.Name}'s counts or rule K differ from what its block determines";
+        }
+        if (rec.Rules.Length != mine.Rules.Length)
+        {
+            return $"{mine.Name} has {rec.Rules.Length} rules; its block determines {mine.Rules.Length}";
+        }
+        for (int r = 0; r < mine.Rules.Length; r++)
+        {
+            RecRule a = mine.Rules[r], b = rec.Rules[r];
+            if (!ReferenceEquals(a.Ctor, b.Ctor) || a.NumFields != b.NumFields)
+            {
+                return $"{mine.Name}'s rule {r} is for the wrong constructor or field count";
+            }
+            if (!ReferenceEquals(a.Rhs, b.Rhs))
+            {
+                return $"{mine.Name}'s rule for {a.Ctor} is not the one its block determines";
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The block's recursors as the kernel derives them, one per type, in block order: motives, minor premises with
+    /// induction hypotheses, elimination into Prop only or into any universe, rule K, and the computation rules.
+    /// </summary>
+    private (string? Error, List<ConstInfo> Recs) DeriveRecursors(ConstInfo first, DeclState st)
+    {
+        List<ConstInfo> types = first.BlockMembers.Select(m => _env.Find(m)).OfType<ConstInfo>().Where(c => c.Kind == ConstKind.Inductive).ToList();
         int np = first.NumParams;
         Level[] levels = first.LevelParams.Select(_t.Param).ToArray();
         var tel = new Telescope(_t, _ops, ConsumeAnnotations);
@@ -53,7 +114,7 @@ public sealed partial class Replayer
         {
             if (ty0 is not Binder { IsPi: true } pi)
             {
-                return "the type has fewer binders than parameters";
+                return ("the type has fewer binders than parameters", []);
             }
             Expr p = tel.Local(_ops.InstantiateRev(pi.Domain, ps));
             ps.Add(p);
@@ -63,27 +124,25 @@ public sealed partial class Replayer
         // The universe motives eliminate into, and rule K.
         Level result = ResultLevel(first);
         bool elimZero = ElimOnlyAtZero(types, np, result, st);
-        ConstInfo rec0 = _env.Find(_t.Str(first.Name, "rec")) ?? throw new InvalidOperationException();
+        // The motive's universe: Prop only, or a new parameter named u (u_1, u_2, … if the block has a u), as the kernel names it.
         Level elim;
-        Level[] recLevels;
+        Name[] recParams;
         if (elimZero)
         {
             elim = _t.Zero;
-            recLevels = levels;
+            recParams = first.LevelParams;
         }
         else
         {
-            if (rec0.LevelParams.Length != first.LevelParams.Length + 1)
+            Name u = _t.Of("u");
+            for (ulong n = 1; first.LevelParams.Any(x => ReferenceEquals(x, u)); n++)
             {
-                return "the recursor should eliminate into any universe, and the export's has no universe for it";
+                u = _t.Of("u_" + n);
             }
-            elim = _t.Param(rec0.LevelParams[0]);
-            recLevels = [elim, .. levels];
+            elim = _t.Param(u);
+            recParams = [u, .. first.LevelParams];
         }
-        if (elimZero && rec0.LevelParams.Length != first.LevelParams.Length)
-        {
-            return "the recursor should eliminate only into Prop, and the export's has a universe for its motive";
-        }
+        Level[] recLevels = recParams.Select(_t.Param).ToArray();
 
         // Indices, major premise and motive of each type.
         var indices = new List<List<Expr>>();
@@ -101,7 +160,7 @@ public sealed partial class Replayer
             {
                 if (t is not Binder { IsPi: true } pi)
                 {
-                    return $"{ind.Name}'s type has fewer binders than indices";
+                    return ($"{ind.Name}'s type has fewer binders than indices", []);
                 }
                 Expr x = tel.Local(pi.Domain);
                 idx.Add(x);
@@ -154,52 +213,32 @@ public sealed partial class Replayer
         }
 
         // Each type's recursor: its type, then its rules.
+        bool kTarget = KTarget(types, np, result);
+        var derived = new List<ConstInfo>();
         for (int j = 0; j < types.Count; j++)
         {
             Name recName = _t.Str(types[j].Name, "rec");
-            if (_env.Find(recName) is not { Kind: ConstKind.Recursor } rec)
-            {
-                return $"{recName} is not in the export";
-            }
             Expr recType = tel.Close(true, [.. ps, .. motives, .. minors, .. indices[j], majors[j]],
                 _t.App(_t.MkApp(motives[j], indices[j]), majors[j]));
-            if (!ReferenceEquals(recType, rec.Type))
+            var rules = new List<RecRule>();
+            foreach (((ConstInfo c, int _, List<Expr> fields, var recs), int mi) in ctorInfo.Select((x, i) => (x, i)).Where(p => p.x.TypeIdx == j))
             {
-                return $"{recName}'s type is not the one its block determines";
-            }
-            bool k = KTarget(types, np, result);
-            if (rec.K != k || rec.NumParams != np || rec.NumMotives != types.Count || rec.NumMinors != minors.Count
-                || rec.NumIndices != types[j].NumIndices)
-            {
-                return $"{recName}'s counts or rule K differ from what its block determines";
-            }
-            var mine = ctorInfo.Select((x, i) => (x, i)).Where(p => p.x.TypeIdx == j).ToList();
-            if (rec.Rules.Length != mine.Count)
-            {
-                return $"{recName} has {rec.Rules.Length} rules; its type has {mine.Count} constructors";
-            }
-            for (int r = 0; r < mine.Count; r++)
-            {
-                ((ConstInfo c, int _, List<Expr> fields, var recs), int mi) = mine[r];
-                RecRule rule = rec.Rules[r];
-                if (!ReferenceEquals(rule.Ctor, c.Name) || rule.NumFields != fields.Count)
-                {
-                    return $"{recName}'s rule {r} is for the wrong constructor or field count";
-                }
                 var ihValues = recs.Select(x =>
                 {
                     Expr recK = _t.MkApp(_t.MkApp(_t.MkApp(_t.Const(_t.Str(types[x.K].Name, "rec"), recLevels), ps), motives), minors);
                     return tel.Close(false, x.Xs, _t.App(_t.MkApp(recK, x.Idx), _t.MkApp(x.Field, x.Xs)));
                 }).ToList();
-                Expr rhs = tel.Close(false, [.. ps, .. motives, .. minors, .. fields],
-                    _t.MkApp(_t.MkApp(minors[mi], fields), ihValues));
-                if (!ReferenceEquals(rhs, rule.Rhs))
-                {
-                    return $"{recName}'s rule for {c.Name} is not the one its block determines";
-                }
+                Expr rhs = tel.Close(false, [.. ps, .. motives, .. minors, .. fields], _t.MkApp(_t.MkApp(minors[mi], fields), ihValues));
+                rules.Add(new RecRule(c.Name, fields.Count, rhs));
             }
+            derived.Add(new ConstInfo
+            {
+                Name = recName, Kind = ConstKind.Recursor, LevelParams = recParams, Type = recType,
+                NumParams = np, NumMotives = types.Count, NumMinors = minors.Count, NumIndices = types[j].NumIndices,
+                K = kTarget, Rules = rules.ToArray(),
+            });
         }
-        return null;
+        return (null, derived);
     }
 
     /// <summary>

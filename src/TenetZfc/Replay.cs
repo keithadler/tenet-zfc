@@ -46,6 +46,9 @@ public sealed class ReplayReport
     /// </summary>
     public int BlocksNested { get; internal set; }
 
+    /// <summary>Nested inductive blocks checked: auxiliary block rebuilt and checked, recursors restored and matching the export's.</summary>
+    public int BlocksNestedChecked { get; internal set; }
+
     /// <summary>Quotient constants (Tenet traces each as a declaration) whose block has exactly the kernel's built-in types, with the standard Eq.</summary>
     public int QuotientsChecked { get; internal set; }
 
@@ -69,7 +72,7 @@ public sealed class ReplayReport
     {
         var sb = new StringBuilder();
         sb.AppendLine($"{Declarations} declarations, {Steps} steps");
-        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksChecked} inductive blocks checked (types, constructors, positivity, universes, recursors); {BlocksTypesChecked} with only their types checked; {BlocksNested} nested inductive blocks not replayed; {QuotientsChecked} quotient constants checked; {BlocksNotTraced} blocks not concluded");
+        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksChecked} inductive blocks checked (types, constructors, positivity, universes, recursors); {BlocksTypesChecked} with only their types checked; {BlocksNestedChecked} nested inductive blocks checked; {BlocksNested} nested blocks not replayed; {QuotientsChecked} quotient constants checked; {BlocksNotTraced} blocks not concluded");
         sb.AppendLine($"  verified {Count(Verdict.Verified)}, failed {Count(Verdict.Failed)}, unsupported {Count(Verdict.Unsupported)}, not yet replayed {Count(Verdict.NotYet)}");
         sb.AppendLine();
         sb.AppendLine($"  {"step",-24}{"verified",10}{"failed",8}{"unsupp.",9}{"not yet",9}");
@@ -110,7 +113,7 @@ public sealed partial class Replayer
 {
     private readonly Terms _t;
     private readonly Ops _ops;
-    private readonly Environment _env;
+    private Environment _env;   // swapped for an overlay while a nested inductive block is replayed
 
     private readonly Name _natZero, _natSucc, _boolTrue, _boolFalse, _quotLift, _quotInd, _quotMk;
     private readonly Dictionary<Name, string> _natOps = new(ReferenceEqualityComparer.Instance);
@@ -149,13 +152,7 @@ public sealed partial class Replayer
             if (_env.Find(d.Decl) is { Kind: ConstKind.Inductive } nested
                 && nested.BlockMembers.Any(m => _env.Find(m) is { Kind: ConstKind.Inductive, NumNested: > 0 }))
             {
-                report.BlocksNested++;
-                foreach (Step s in d.Steps)
-                {
-                    report.Steps++;
-                    report.Add(s.Kind == StepKind.Rule ? s.Rule ?? "?" : s.Kind.ToString(), Verdict.Unsupported);
-                }
-                report.Unsupported.Add(new StepFailure(d.Decl, -1, "decl", $"a nested inductive block ({d.Steps.Count} steps): Tenet's auxiliary types are not in the trace"));
+                ReplayNested(d, nested, report);
                 continue;
             }
             var state = new DeclState(_env.Find(d.Decl) switch
@@ -240,6 +237,75 @@ public sealed partial class Replayer
             }
         }
         return report;
+    }
+
+    /// <summary>
+    /// A nested block: its steps are replayed against the auxiliary environment the kernel built (rebuilt here), and,
+    /// for the ones taken after restoring, against the export's; then the block itself is checked.
+    /// </summary>
+    private void ReplayNested(DeclTrace d, ConstInfo block, ReplayReport report)
+    {
+        (string? err, Elimination? el) = EliminateNested(block);
+        if (err is not null)
+        {
+            report.Failures.Add(new StepFailure(d.Decl, -1, "decl", err));
+            return;
+        }
+        Environment main = _env;
+        Environment aux = AuxEnvironment(block, el!);
+        var state = new DeclState(block.BlockLevelParams.Union(aux.Find(el!.Types[0].Name)!.BlockLevelParams, ReferenceEqualityComparer.Instance).Cast<Name>().ToArray());
+        try
+        {
+            // The auxiliary recursors are needed by the steps (iota on them), so derive them before replaying.
+            _env = aux;
+            (string? derr, List<ConstInfo> recs) = DeriveRecursors(aux.Find(el.Types[0].Name)!, state);
+            foreach (ConstInfo r in recs)
+            {
+                aux.Add(r);
+            }
+            _fieldSteps = null;
+            foreach (Step s in d.Steps)
+            {
+                report.Steps++;
+                string what = s.Kind == StepKind.Rule ? s.Rule ?? "?" : s.Kind.ToString();
+                _env = aux;
+                (Verdict v, string? why) = Check(s, d.Steps, state);
+                if (v != Verdict.Verified)
+                {
+                    _env = main;
+                    (Verdict v2, string? why2) = Check(s, d.Steps, state);
+                    if (v2 == Verdict.Verified || v == Verdict.Failed)
+                    {
+                        (v, why) = (v2, why2);
+                    }
+                }
+                report.Add(what, v);
+                if (v == Verdict.Failed)
+                {
+                    report.Failures.Add(new StepFailure(d.Decl, s.Index, what, why ?? "rejected"));
+                }
+                else if (v == Verdict.Unsupported)
+                {
+                    report.Unsupported.Add(new StepFailure(d.Decl, s.Index, what, why ?? "unsupported"));
+                }
+                state.Record(s);
+            }
+            _env = main;
+            string? blockErr = derr ?? CheckNestedBlock(block, d.Steps, state, el, aux);
+            if (blockErr is null)
+            {
+                report.BlocksNestedChecked++;
+            }
+            else
+            {
+                report.Failures.Add(new StepFailure(d.Decl, -1, "decl", blockErr));
+            }
+        }
+        finally
+        {
+            _env = main;
+            _fieldSteps = null;
+        }
     }
 
     /// <summary>

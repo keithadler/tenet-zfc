@@ -59,9 +59,16 @@ public sealed class ConstInfo
 public sealed class Environment
 {
     private readonly Dictionary<Name, ConstInfo> _consts = new(ReferenceEqualityComparer.Instance);
+    private readonly Environment? _parent;
+
+    public Environment() { }
+
+    /// <summary>An overlay: its own constants first, then the parent's. Used for a nested inductive's auxiliary block.</summary>
+    internal Environment(Environment parent) => _parent = parent;
+
     public string? LeanVersion { get; internal set; }
     public int Count => _consts.Count;
-    public ConstInfo? Find(Name n) => _consts.TryGetValue(n, out ConstInfo? c) ? c : null;
+    public ConstInfo? Find(Name n) => _consts.TryGetValue(n, out ConstInfo? c) ? c : _parent?.Find(n);
     internal void Add(ConstInfo c) => _consts[c.Name] = c;
 }
 

@@ -217,6 +217,32 @@ public sealed class Terms
     public Name Str(Name pre, string s) => Get(_str, (pre, s), () => new StrName(pre, s));
     public Name Num(Name pre, ulong n) => Get(_num, (pre, n), () => new NumName(pre, n));
 
+    /// <summary>Lean's Name.appendIndexAfter: the last string component gets "_idx" (u becomes u_1).</summary>
+    public Name AppendIndexAfter(Name n, ulong idx) => n is StrName s ? Str(s.Prefix, s.Value + "_" + idx) : Str(n, "_" + idx);
+
+    /// <summary>Lean's Name.append: b's components after a's.</summary>
+    public Name Append(Name a, Name b) => b switch
+    {
+        StrName s => Str(Append(a, s.Prefix), s.Value),
+        NumName m => Num(Append(a, m.Prefix), m.Value),
+        _ => a,
+    };
+
+    /// <summary>Lean's Name.replacePrefix: n with the prefix query replaced by newPrefix (n unchanged if query is not a prefix).</summary>
+    public Name ReplacePrefix(Name n, Name query, Name newPrefix)
+    {
+        if (ReferenceEquals(n, query))
+        {
+            return newPrefix;
+        }
+        return n switch
+        {
+            StrName s => Str(ReplacePrefix(s.Prefix, query, newPrefix), s.Value),
+            NumName m => Num(ReplacePrefix(m.Prefix, query, newPrefix), m.Value),
+            _ => n,
+        };
+    }
+
     public Name Of(string dotted)
     {
         Name n = Name.Anonymous;

@@ -31,8 +31,8 @@ public sealed partial class Replayer
 
     private BlockCheck CheckBlock(ConstInfo first, IReadOnlyList<Step> steps, DeclState st)
     {
-        List<ConstInfo> types = first.BlockMembers.Select(m => _env.Find(m)!).Where(c => c.Kind == ConstKind.Inductive).ToList();
-        List<ConstInfo> ctors = first.BlockMembers.Select(m => _env.Find(m)!).Where(c => c.Kind == ConstKind.Constructor).ToList();
+        List<ConstInfo> types = first.BlockMembers.Select(m => _env.Find(m)).OfType<ConstInfo>().Where(c => c.Kind == ConstKind.Inductive).ToList();
+        List<ConstInfo> ctors = first.BlockMembers.Select(m => _env.Find(m)).OfType<ConstInfo>().Where(c => c.Kind == ConstKind.Constructor).ToList();
         var names = new HashSet<Name>(types.Select(t => t.Name), ReferenceEqualityComparer.Instance);
         int np = types[0].NumParams;
 

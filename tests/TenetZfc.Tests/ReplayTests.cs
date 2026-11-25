@@ -13,7 +13,7 @@ public class ReplayTests
 {
     private static string Fixture(string name) => Path.Combine(AppContext.BaseDirectory, "fixtures", name);
 
-    public static TheoryData<string> Exports => new() { "Nat.add_succ", "Nat.add_succ.v3.0", "eta437", "acc436", "quot" };
+    public static TheoryData<string> Exports => new() { "Nat.add_succ", "Nat.add_succ.v3.0", "eta437", "acc436", "quot", "syntax" };
 
     private static (Terms T, Env Env, List<DeclTrace> Traces) Load(string name)
     {
@@ -161,7 +161,8 @@ public class ReplayTests
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load(name);
         ReplayReport r = new Replayer(t, env).Replay(traces);
-        Assert.Equal(r.Declarations, r.Concluded + r.BlocksChecked + r.BlocksTypesChecked + r.BlocksNested + r.QuotientsChecked + r.BlocksNotTraced);
+        Assert.Equal(r.Declarations, r.Concluded + r.BlocksChecked + r.BlocksTypesChecked + r.BlocksNestedChecked + r.BlocksNested + r.QuotientsChecked + r.BlocksNotTraced);
+        Assert.Equal(0, r.BlocksNested);
         Assert.Equal(0, r.BlocksNotTraced);
         Assert.True(r.BlocksChecked > 0);
         Assert.True(r.Concluded > 0);
@@ -317,6 +318,50 @@ public class ReplayTests
         typeof(ConstInfo).GetProperty(nameof(ConstInfo.Unsafe))!.SetValue(nat, true);
         ReplayReport r = new Replayer(t, env).Replay(traces);
         Assert.Contains(r.Failures, f => f.Decl.ToString() == "Nat.add_succ" && f.Reason.Contains("does not conclude"));
+    }
+
+    [Fact]
+    public void TheNestedBlockIsRebuiltAndChecked()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("syntax");
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Equal(1, r.BlocksNestedChecked);
+        Assert.True(r.Ok, r.Format());
+    }
+
+    [Theory]
+    [InlineData("Lean.Syntax.rec")]     // the main type's recursor, restored
+    [InlineData("Lean.Syntax.rec_1")]   // the auxiliary Array type's, renamed and restored
+    [InlineData("Lean.Syntax.rec_2")]   // the auxiliary List type's
+    public void AChangedRestoredRecursorRuleIsCaught(string rec)
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("syntax");
+        ConstInfo info = env.Find(t.Of(rec))!;
+        RecRule saved = info.Rules[^1];
+        // Another recursor's rule: always a different term (rec_1, for Array, has a single rule to swap with).
+        ConstInfo other = env.Find(t.Of(rec == "Lean.Syntax.rec" ? "Lean.Syntax.rec_2" : "Lean.Syntax.rec"))!;
+        info.Rules[^1] = saved with { Rhs = other.Rules[0].Rhs };
+        Assert.NotSame(saved.Rhs, other.Rules[0].Rhs);
+        try
+        {
+            ReplayReport r = new Replayer(t, env).Replay(traces);
+            Assert.Contains(r.Failures, f => f.Decl.ToString() == "Lean.Syntax" && f.Reason.Contains("restored"));
+        }
+        finally
+        {
+            info.Rules[^1] = saved;
+        }
+    }
+
+    [Fact]
+    public void AChangedNestedConstructorIsCaught()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("syntax");
+        // Lean.Syntax.node takes an Array Syntax; give it Lean.Syntax.missing's type instead.
+        ConstInfo node = env.Find(t.Of("Lean.Syntax.node"))!;
+        typeof(ConstInfo).GetProperty(nameof(ConstInfo.Type))!.SetValue(node, env.Find(t.Of("Lean.Syntax.missing"))!.Type);
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Decl.ToString() == "Lean.Syntax");
     }
 
     [Fact]

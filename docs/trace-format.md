@@ -114,6 +114,12 @@ What is checked:
   - **Structure, rechecked from the export.** The block's types share their parameters, and each constructor takes exactly those parameters. Each field is strictly positive: a type of the block appears only as I params indices, at the end of the field's arrows. Each field's universe fits within the type's, unless the type is a Prop; the field universes come from the trace's checking-mode facts about the constructor's type. Each constructor returns its own type applied to the parameters.
   - **Recursors, derived here.** Each recursor's type and computation rules are derived from the block the way the kernel derives them, and must match the export's exactly (up to binder names). That covers motives, minor premises, induction hypotheses for recursive fields, elimination into Prop only versus into any universe, rule K, and annotation stripping on the derivation's locals (only for `optParam`, `autoParam`, `outParam` and `semiOutParam` defined as the identity). Iota steps therefore use rules the replayer has rederived, not just the exporter's.
   - Tenet's non-positive `Bad` from its negative corpus is rejected by the structural recheck alone, and a recursor rule swapped for another constructor's is caught.
+- **Nested inductive blocks** (such as `Lean.Syntax`, which holds an `Array Syntax`) are checked the way the kernel checks them, with all three stages redone from the export:
+  1. **Elimination.** Each nested occurrence is replaced by an auxiliary type (`_nested.Array_1`, and `_nested.List_2` for the `List Syntax` inside `Array`'s constructor). Names and order follow the kernel's traversal.
+  2. **The auxiliary block** is checked like any other: its types from the trace, its structure and recursors rechecked.
+  3. **Restoration.** Its recursors and constructors are translated back and must equal the export's `Lean.Syntax.rec`, `rec_1`, `rec_2` and constructors.
+
+  The block's trace was taken partly in the auxiliary environment and partly, for the kernel's final re-check, in the declaration's own. Each step is replayed against the auxiliary environment first and the export's second. Both environments are verified to agree through step 3.
 - **The quotient block.** The kernel builds `Quot`, `Quot.mk`, `Quot.lift` and `Quot.ind` in rather than deriving them, so there's nothing to replay. Instead, the export's four constants must have exactly the built-in types, and the `Eq` they mention must be the standard inductive with the standard `Eq.refl`.
 - **Each declaration.** Its trace must conclude, from checking-mode facts, what the kernel checks of it: its type is a type, and the value of a definition, theorem or opaque constant has that type. Without this check, a trace of valid steps that didn't add up to the declaration would pass. Infer-only facts don't count here, because they assume the term is well typed. The declaration must also obey the kernel's safety rule: a safe declaration mentions no unsafe or partial constant, and a partial one mentions no unsafe constant.
 
@@ -121,7 +127,6 @@ Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `
 
 ## What replay does not establish yet
 
-- **Nested inductive blocks** (such as `Lean.Syntax`, which holds an `Array Syntax`) aren't replayed. The kernel checks them by translating to auxiliary mutual types that aren't in the export, and Tenet doesn't trace those auxiliary types or the translation. Their steps are reported as unsupported.
 - **Structural cases not handled.** A field whose block-type occurrence is hidden behind a definition, or parameters that differ only up to definitional equality, are reported as unsupported rather than decided.
 - **`Check` and recall need Tenet's `trace-recall` branch.** Tenet's main branch writes every inferred type as `Infer` and doesn't recall. Traces from it replay step by step, but no declaration in them is concluded, and some traces get very large.
 - **Nat operations** are taken to mean what their names say. Tenet checks that against their definitions once per environment, and that check isn't in the trace.
@@ -137,14 +142,14 @@ The `Init` library of Lean 4.36.0, exported by [leanout](https://github.com/keit
 |---|---|
 | Declarations traced and replayed | 64,045 (all of them) |
 | Steps | 86,172,037 |
-| Verified | 86,169,809 |
+| Verified | 86,172,037 |
 | Failed | **0** |
-| Not replayed | 2,228, all in `Lean.Syntax`, the one nested inductive block |
+| Not replayed | 0 |
 | Definitions, theorems, opaque constants and axioms concluded by their trace | 63,435 of 63,435 |
-| Inductive blocks checked, recursors derived and matching | 605 of 606 (the other is `Lean.Syntax`) |
+| Inductive blocks checked, recursors derived and matching | 606 of 606, including the nested `Lean.Syntax` |
 | Quotient constants matching the built-in types | 4 of 4 |
 
-What this rests on: the replayer's own code, the export as `leanout` wrote it, and the assumptions listed above (the meaning of the Nat operations, and the typing side condition of rule K). The milestone 1 gate is to re-derive every check Tenet made on all of Lean core. That is met except for one nested inductive block, which is what remains.
+What this rests on: the replayer's own code, the export as `leanout` wrote it, and the assumptions listed above (the meaning of the Nat operations, and the typing side condition of rule K). The milestone 1 gate is to re-derive every check Tenet made on all of Lean core. That is met.
 
 Running it showed three things that small fixtures didn't:
 - **Tracing without caches blows up.** Some declarations redid the same work until one 1,000-declaration chunk passed 4.9 GB, which is why Tenet's traces now recall earlier conclusions.
@@ -164,6 +169,7 @@ On the committed fixtures (`tests/fixtures`), every step is verified and every d
 | `eta437` | 1,058 | 1,058 | 8 | 6 | 0 |
 | `acc436` | 912 | 912 | 7 | 5 | 0 |
 | `quot` | 178 | 178 | 1 | 1 | 4 |
+| `syntax` | 48,606 | 48,606 | 228 | 45 (one nested) | 0 |
 
 The tests change recorded results, the results of every kind of step the replayer checks, and require the change to be caught:
 - for `Infer`, `DefEq` and `WhnfCore`, the first 25 occurrences of each are changed one at a time;
