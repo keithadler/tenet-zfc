@@ -865,7 +865,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     private string PickRecursionVar(Scope sc)
     {
         // Our own set variables appear in no set.mm proof, so frr2 and exse reserve none of them.
-        foreach (string v in RecursionPool.Reverse().Concat(ExtraSetVars))
+        // Enumerable.Reverse, not the span Reverse, which returns void.
+        foreach (string v in Enumerable.Reverse(RecursionPool).Concat(ExtraSetVars))
         {
             if (!sc.Bound.Contains(v))
             {
