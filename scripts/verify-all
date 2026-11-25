@@ -11,6 +11,7 @@
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 now() { perl -MTime::HiRes=time -e 'printf "%.1f", time'; }
+sub() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f", a - b }'; }
 
 if [ "${1:-}" = "--one" ]; then
   # One chunk; prints its line of verify-all.tsv.
@@ -49,7 +50,7 @@ if [ "${1:-}" = "--one" ]; then
 
   ok=pass; { [ "$mmerr" -ne 0 ] || [ "$mmv" -ne 0 ] || [ "$dc" -ne 0 ]; } && ok=FAIL
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$chunk" "$ok" "$bytes" "$theorems" \
-    "$mmerr" "$(echo "$t1 - $t0" | bc)" "$mmv" "$(echo "$t2 - $t1" | bc)" "$dc" "$(echo "$t3 - $t2" | bc)" "$bad"
+    "$mmerr" "$(sub "$t1" "$t0")" "$mmv" "$(sub "$t2" "$t1")" "$dc" "$(sub "$t3" "$t2")" "$bad"
   exit 0
 fi
 
@@ -71,7 +72,7 @@ tsv="$out/verify-all.tsv"
 printf 'chunk\tresult\tbytes\ttheorems\tmetamath_errors\tmetamath_s\tmmverify_status\tmmverify_s\tdefcheck_status\tdefcheck_s\tfailing_labels\n' > "$tsv"
 ls "$out"/chunk-*.mm | xargs -P "$jobs" -n 1 "$0" --one | sort | tee -a "$tsv" | awk -F'\t' '{ printf "%s %s  %8.1f MiB  %5d theorems  metamath %ss  mmverify %ss  definitionCheck %ss\n", $1, $2, $3/1048576, $4, $6, $8, $10 }'
 end=$(now)
-awk -F'\t' -v wall="$(echo "$end - $start" | bc)" -v jobs="$jobs" 'NR > 1 {
+awk -F'\t' -v wall="$(sub "$end" "$start")" -v jobs="$jobs" 'NR > 1 {
     n++; bytes += $3; thm += $4; mm += $6; mv += $8; dc += $10
     if ($2 == "pass") { pass++; pthm += $4 } else fail++
   } END {
