@@ -22,7 +22,14 @@ namespace TenetZfc;
 public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = false)
 {
     private const string UniverseVar = "u";
-    private static readonly string[] SetVars = "x y z w v t s r q p o n m k j i h g f e d c b a".Split(' ');
+    private static readonly string[] Letters = "x y z w v t s r q p o n m k j i h g f e d c b a".Split(' ');
+    /// <summary>
+    /// Set variables of our own, for when set.mm's 26 letters run out: xx1, xx2, …: set.mm has no token of the form xx followed by digits.
+    /// Each is declared ($v, and $f setvar with label vxxN) in the output the first time a definition or proof uses it.
+    /// </summary>
+    private static readonly string[] ExtraSetVars = Enumerable.Range(1, 500).Select(i => $"xx{i}").ToArray();
+    private static readonly string[] SetVars = [.. Letters, .. ExtraSetVars];
+    private static readonly HashSet<string> SetVarSet = [.. SetVars];
     private static readonly string[] ClassVars = "A B C D E F G H I J K L M N O P Q R S T".Split(' ');   // U is the universe, Z a hole
 
     private readonly Ops _ops = new(t);
@@ -134,10 +141,32 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         {
             if (!sc.Active.Contains(x) && !sc.Vars.ContainsValue(x) && !inDomain.Contains(x))
             {
-                return x;
+                return Declare(x);
             }
         }
-        throw new Refused("more nested binders than set.mm has set variables");
+        throw new Refused("more nested binders than the model declares set variables");
+    }
+
+    private readonly HashSet<string> _declaredVars = new();
+
+    /// <summary>The set variable, declared first in the output when it is one of ours rather than set.mm's.</summary>
+    private string Declare(string x)
+    {
+        if (x.StartsWith("xx", StringComparison.Ordinal) && _declaredVars.Add(x))
+        {
+            string text = $"""
+                $( A set variable of tenet-zfc's own: set.mm's are used up. $)
+                $v {x} $.
+                v{x} $f setvar {x} $.
+
+                """;
+            _out.AppendLine(text);
+            if (!dryRun)
+            {
+                pr.Database.Extend(text);
+            }
+        }
+        return x;
     }
 
     // ---- definitions --------------------------------------------------------------------------------------------
@@ -794,9 +823,9 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         return $"( {lit} ` ( {ofnum} ` {Decimal(value)} ) )";
     }
 
-    /// <summary>The first set variable satisfying the condition, or a refusal when set.mm's 26 are used up.</summary>
-    private static string FirstVar(Func<string, bool> ok) =>
-        SetVars.FirstOrDefault(ok) ?? throw new Refused("more set variables needed than set.mm has");
+    /// <summary>The first set variable satisfying the condition (set.mm's letters, then ours), or a refusal when all are used up.</summary>
+    private string FirstVar(Func<string, bool> ok) =>
+        Declare(SetVars.FirstOrDefault(ok) ?? throw new Refused("more set variables needed than the model declares"));
 
     private static string Decimal(System.Numerics.BigInteger n) => n < 10 ? n.ToString() : $"; {Decimal(n / 10)} {n % 10}";
 
@@ -833,14 +862,15 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     }
 
     /// <summary>A set variable fresh in the whole definition and outside frr2's and exse's reserved names.</summary>
-    private static string PickRecursionVar(Scope sc)
+    private string PickRecursionVar(Scope sc)
     {
-        foreach (string v in Enumerable.Reverse(RecursionPool))   // not the span Reverse, which returns void
+        // Our own set variables appear in no set.mm proof, so frr2 and exse reserve none of them.
+        foreach (string v in Enumerable.Reverse(RecursionPool).Concat(ExtraSetVars))   // not the span Reverse, which returns void
         {
             if (!sc.Bound.Contains(v))
             {
                 sc.Bound.Add(v);
-                return v;
+                return Declare(v);
             }
         }
         throw new Refused("no set variable left for the recursion");
@@ -926,7 +956,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         var setvars = new HashSet<string> { UniverseVar };
         foreach (string tok in toks)
         {
-            setvars.UnionWith(_values[tok].Split(' ').Where(s => SetVars.Contains(s)));
+            setvars.UnionWith(_values[tok].Split(' ').Where(SetVarSet.Contains));
         }
         return [string.Join(' ', setvars.Concat(classVars).Append("U"))];
     }

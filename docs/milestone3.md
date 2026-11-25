@@ -353,7 +353,35 @@ So a literal stays as short as its decimal digits: `UInt8.size` is `… ( lean.N
 | axioms (`propext`, `Classical.choice`, …) and quotients | 109 |
 
 **Next:**
-- **Set variables.** Definitions with many nested binders need more than set.mm's 26. They can be declared by the output itself, as new `$v` and `$f` statements, which add no axioms.
 - **Nested types** (`Lean.Syntax`), through the replayer's existing reduction to a mutual block.
 - **Strings**, as lists of characters.
 - **Axioms**, which are milestone 3's last item: `propext` holds in the model, and `Classical.choice` comes from `set.mm`'s choice.
+
+## Step 3, fifth part: extra set variables (built)
+
+set.mm has 26 set variables, the lowercase letters, and 1,058 definitions in `Init` needed more: a structure with many fields, such as `Lean.Grind.Config`, binds one variable per field in its recursor, inside the motive's and the minor premise's binders.
+
+**The output declares its own,** `xx1`, `xx2`, …, after the letters are used up. No token of `set.mm` is `xx` followed by digits. Each is declared once, at the top level, before the first definition or proof that uses it:
+
+```
+$v xx1 $.
+vxx1 $f setvar xx1 $.
+```
+
+- A `$v` and a `$f` add a variable, not an axiom, so nothing new can be proved about sets.
+- The prover learns each one through `Database.Extend`, as it learns the definitions.
+- The rules for the letters hold for the new variables too. A binder's variable differs from every enclosing binder's and from its own domain's variables, and the `$d` lists name every set variable a definition binds.
+- `frr2` and `exse` reserve none of the new variables, since no `set.mm` proof uses them, so the recursion may take them after its own pool.
+
+**Checked:** `Lean.Grind.Config.casesOn` binds 27 new variables. Its definitional equation states them too: the minor premise ranges over a Π-type of 27 fields. `Lean.Meta.Simp.Config.zeta` binds 10. Both verifiers accept their equations (235,000 proof steps for `casesOn`), and the definitions pass the definition check, in a test and in CI (`tests/fixtures/setvars.ndjson`).
+
+**The effect on `Init`:** 12,178 of 17,590 definitions now translate with everything they use, up from 11,780. 398 of them use the new variables, at most 77 in one definition. No definition stops for lack of set variables any more. The other 660 of the 1,058 now stop at the next blocker in their dependencies, mostly string literals.
+
+| What stops a definition next | Definitions |
+|---|---|
+| the nested type `Lean.Syntax` | 1,483 |
+| string literals | 996 |
+| names with characters a `set.mm` token can't have (`'`, `?`, `₂`) | 750 or more |
+| `Acc` (a premise that is a function into `Acc`) | 325 |
+| axioms and quotients | 112 |
+
