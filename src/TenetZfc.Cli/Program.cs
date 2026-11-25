@@ -72,6 +72,18 @@ if (args.Length >= 5 && args[0] == "define")
     File.WriteAllText(args[3], theorems.ToString());
     return status;
 }
+if (args.Length == 3 && args[0] == "bridge")
+{
+    // Milestone 3: the bridge lemmas recursive types rest on, written as set.mm theorems.
+    var bpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[1]));
+    var rb = new Recursion(bpr);
+    var (stmt, proof, distinct) = rb.RankFr();
+    Console.WriteLine($"lean-rankfr: {stmt} ({proof.Count} proof steps)");
+    var bw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[1]), "tenet-zfc bridge lemmas for recursive types (docs/milestone3.md)");
+    bw.Theorem("lean-rankfr", "Smaller rank is a well-founded relation on any class.", stmt, proof, distinct);
+    File.WriteAllText(args[2], bw.ToString());
+    return 0;
+}
 if (args.Length == 2 && args[0] == "model-survey")
 {
     // Milestone 3: which definitions the generic model translates, and the first thing that stops each of the others.

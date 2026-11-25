@@ -225,3 +225,30 @@ For `Eq.refl`, `HEq.refl`, `True.intro` and `And.intro`, both verifiers accept t
 **Next: recursive types.** set.mm has what's needed to build a recursive type's set: `rec ( F , A )` with `rdg0` and `rdgsuc`, `frfnom`, and `omex`. The type would be the union of an ω-chain of stages, `U_ n e. om ( rec ( G , (/) ) ` n )` with `G = ( X e. _V |-> ( X u. F ( X ) ) )`. It is a set by `iunexg` and `omex`.
 
 The recursor is the real work. Its computation rules need induction, which comes down to the recursion theorem for the type: a function on the fixed point satisfying the constructor equations exists, and it is unique. The plan is to prove that once, in a general form that each recursive type instantiates, rather than generating an induction proof per type.
+
+## Step 3, third part: recursive types (in progress)
+
+**The recursion theorem is already in `set.mm`.** `frr2` is well-founded recursion: for a relation R that is well-founded (`Fr`) and set-like (`Se`) on A, `F = frecs ( R , A , G )` satisfies `( F ` X ) = ( X G ( F |` Pred ( R , A , X ) ) )`. So a recursive type's recursor will be `frecs` over the relation "has smaller rank":
+
+`RankLt = { <. x , y >. | ( rank ` x ) e. ( rank ` y ) }`.
+
+- **Se:** `exse` gives it for any set.
+- **Predecessors:** a recursive field sits inside nested ordered pairs of its value, and each layer raises rank (`opi1`/`opi2`, `snid`/`prid2`, `rankelb`). So a recursive field is always a predecessor of its value, and each computation rule follows from `frr2`.
+- **Fr:** a one-time lemma, proved by `tenet-zfc bridge` and checked by both verifiers in CI.
+
+**The one-time lemma (built):**
+
+`lean-rankfr $p |- { <. x , y >. | ( rank ` x ) e. ( rank ` y ) } Fr A`, in 1,307 steps.
+
+The proof, for a nonempty `w`:
+1. The ranks of its elements, `( rank " w )`, are a nonempty set of ordinals (`imassrn`, `rankf`, `fnimaeq0`).
+2. So they have a least one (`onint`).
+3. Some `v e. w` has it (`fvelimab`).
+4. No `s e. w` has smaller rank (`onnmin`), so `v` is minimal.
+5. `df-fr` turns that into `Fr`.
+
+**Next:**
+- the type, as the union of an ω-chain of stages, `U_ n e. om ( rec ( ( X e. _V |-> ( X u. F ( X ) ) ) , (/) ) ` n )`, which is a set by `iunexg` and `omex`;
+- constructor membership through the stages (`eliun`, `rdgsuc`, `peano2`);
+- the recursor through `frecs`, with `frr2`, `fvres` and `elpred` for the computation rules;
+- first for types with at most one recursive field per constructor (`Nat`, `List`, `Lean.Name`).

@@ -285,6 +285,41 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void SmallerRankIsWellFoundedOnAnyClass()
+    {
+        // The bridge lemma recursive types' recursors rest on: frr2 needs RankLt Fr A.
+        if (SetMm is null)
+        {
+            return;
+        }
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        var (stmt, proof, distinct) = new Recursion(pr).RankFr();
+        Assert.Equal("|- { <. x , y >. | ( rank ` x ) e. ( rank ` y ) } Fr A", stmt.ToString());
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc bridge lemma test");
+        w.Theorem("lean-test-rankfr", "test", stmt, proof, distinct);
+        string file = Path.Combine(SetMm, $"tenet-zfc-rankfr-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mm);
+            Assert.Contains("All proofs in the database were verified", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
     private static string Run(string exe, string dir, string args, out int code)
     {
         var psi = new ProcessStartInfo(exe, args) { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true };

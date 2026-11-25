@@ -83,7 +83,8 @@ jobs:
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/model.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/model.mm" id Function.comp Function.const
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/inductives.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/ind.mm" Bool Bool.false Bool.true Prod Prod.mk Option Option.none Option.some Bool.rec Prod.rec Option.rec
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/props.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/props.mm" Eq Eq.refl Eq.rec HEq HEq.refl HEq.rec False False.rec True True.intro And And.intro And.rec Or Or.inl Or.inr Or.rec Nonempty Nonempty.intro Nonempty.rec
-          for g in model ind props; do
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- bridge "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/bridge.mm"
+          for g in model ind props bridge; do
             out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read $g.mm" "verify proof *" "exit")
             echo "$out" | tail -2
             if echo "$out" | grep -q '?Error'; then exit 1; fi

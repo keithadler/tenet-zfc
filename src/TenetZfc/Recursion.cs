@@ -1,0 +1,109 @@
+using TenetZfc.Metamath;
+using Proof = (System.Collections.Generic.List<string> Proof, TenetZfc.Metamath.Expr Proves);
+
+namespace TenetZfc;
+
+/// <summary>
+/// The bridge lemmas recursive inductive types rest on (docs/milestone3.md, step 3). A recursive type's recursor is
+/// defined by set.mm's well-founded recursion, frecs, over the relation "has smaller rank":
+///
+///   RankLt := { &lt;. x , y &gt;. | ( rank ` x ) e. ( rank ` y ) }
+///
+/// frr2 then gives each computation rule, provided RankLt is well-founded on the type (Fr) and set-like there (Se,
+/// which exse gives for any set). A recursive field sits inside nested ordered pairs of its value, so its rank is
+/// smaller, which is what puts it among the value's predecessors.
+///
+/// These lemmas are proved once, for any class A, and written into each output that uses them as $p theorems.
+/// </summary>
+public sealed class Recursion(Prover pr)
+{
+    private readonly Deduction _d = new(pr);
+
+    /// <summary>The relation, as set.mm text.</summary>
+    public const string RankLt = "{ <. x , y >. | ( rank ` x ) e. ( rank ` y ) }";
+
+    private static Dictionary<string, string> S(params (string Var, string Value)[] xs) => xs.ToDictionary(x => x.Var, x => x.Value);
+
+    /// <summary>
+    /// |- RankLt Fr A: in a nonempty w, an element of least rank exists (the ranks form a nonempty set of ordinals,
+    /// onint, and fvelimab finds an element with the least one), and nothing in w has smaller rank (onnmin).
+    /// </summary>
+    public (TenetZfc.Metamath.Expr Statement, List<string> Proof, string[] Distinct) RankFr()
+    {
+        const string r = RankLt, c = "( rank \" w )", min = "|^| ( rank \" w )";
+        const string ph0 = "( w C_ A /\\ w =/= (/) )";
+        const string goal = "E. v e. w A. s e. w -. s " + r + " v";
+
+        // ( rank " w ) C_ On, and it is nonempty when w is.
+        Proof onss = pr.Apply("sstri", S(("A", c), ("B", "ran rank"), ("C", "On")),
+            pr.Apply("imassrn", S(("A", "rank"), ("B", "w"))),
+            pr.Apply("ax-mp", S(("ph", "rank : U. ( R1 \" On ) --> On"), ("ps", "ran rank C_ On")),
+                pr.Apply("rankf", S()), pr.Apply("frn", S(("F", "rank"), ("A", "U. ( R1 \" On )"), ("B", "On")))));
+        Proof onssH = _d.Lift(ph0, onss);
+        Proof fnAndSs(string bi) => pr.Apply("mp2an", S(("ph", "rank Fn _V"), ("ps", "w C_ _V"), ("ch", bi)),
+            pr.Apply("rankfn", S()), pr.Apply("ssv", S(("A", "w"))),
+            bi.StartsWith("( ( rank", StringComparison.Ordinal)
+                ? pr.Apply("fnimaeq0", S(("F", "rank"), ("A", "_V"), ("B", "w")))
+                : pr.Apply("fvelimab", S(("F", "rank"), ("A", "_V"), ("B", "w"), ("C", min), ("x", "v"))));
+        Proof empty = fnAndSs($"( {c} = (/) <-> w = (/) )");
+        Proof nonempty = pr.Apply("sylibr", S(("ph", ph0), ("ps", "w =/= (/)"), ("ch", $"{c} =/= (/)")),
+            pr.Apply("simpr", S(("ph", "w C_ A"), ("ps", "w =/= (/)"))),
+            pr.Apply("necon3bii", S(("A", c), ("B", "(/)"), ("C", "w"), ("D", "(/)")), empty));
+
+        // The least rank is a rank of something in w.
+        Proof inC = _d.Syl(_d.Jca(onssH, nonempty), pr.Apply("onint", S(("A", c))));
+        Proof some = pr.Apply("sylib", S(("ph", ph0), ("ps", $"{min} e. {c}"), ("ch", $"E. v e. w ( rank ` v ) = {min}")),
+            inC, fnAndSs($"( {min} e. {c} <-> E. v e. w ( rank ` v ) = {min} )"));
+
+        // That element is minimal: for s in w, -. s RankLt v.
+        const string ph1 = "( ( " + ph0 + " /\\ v e. w ) /\\ ( rank ` v ) = " + min + " )";
+        const string ph2 = "( " + ph1 + " /\\ s e. w )";
+        Proof Hyp(string ph, string h) => HypOf(ph, h) ?? throw new InvalidOperationException($"no {h} in {ph}");
+        Proof sRank = pr.Apply("fnfvimad", S(("ph", ph2), ("F", "rank"), ("A", "_V"), ("B", "s"), ("C", "w")),
+            _d.Lift(ph2, pr.Apply("rankfn", S())), _d.Lift(ph2, pr.Apply("vex", S(("x", "s")))), Hyp(ph2, "s e. w"));
+        Proof notBelow = _d.Syl(_d.Jca(_d.Lift(ph2, onss), sRank), pr.Apply("onnmin", S(("A", c), ("B", "( rank ` s )"))));
+        Proof bi = pr.Apply("eleq2d", S(("ph", ph2), ("A", "( rank ` v )"), ("B", min), ("C", "( rank ` s )")),
+            Hyp(ph2, $"( rank ` v ) = {min}"));
+        Proof notLt = pr.Apply("mtbird", S(("ph", ph2), ("ps", "( rank ` s ) e. ( rank ` v )"), ("ch", $"( rank ` s ) e. {min}")), notBelow, bi);
+        Proof notR = pr.Apply("sylnibr", S(("ph", ph2), ("ps", "( rank ` s ) e. ( rank ` v )"), ("ch", $"s {r} v")), notLt, Brab("s", "v"));
+        Proof all = pr.Apply("ralrimiva", S(("ph", ph1), ("ps", $"-. s {r} v"), ("x", "s"), ("A", "w")), notR);
+        Proof step = pr.Apply("ex", S(("ph", $"( {ph0} /\\ v e. w )"), ("ps", $"( rank ` v ) = {min}"), ("ch", $"A. s e. w -. s {r} v")), all);
+        Proof lift = pr.Apply("reximdva", S(("ph", ph0), ("ps", $"( rank ` v ) = {min}"), ("ch", $"A. s e. w -. s {r} v"), ("x", "v"), ("A", "w")), step);
+        Proof found = pr.Apply("mpd", S(("ph", ph0), ("ps", $"E. v e. w ( rank ` v ) = {min}"), ("ch", goal)), some, lift);
+
+        // Generalize over w, and read it as RankLt Fr A by df-fr.
+        Proof gen = pr.Apply("ax-gen", S(("ph", $"( {ph0} -> {goal} )"), ("x", "w")), found);
+        Proof fr = pr.Apply("mpbir", S(("ph", $"{r} Fr A"), ("ps", $"A. w ( {ph0} -> {goal} )")), gen,
+            pr.Apply("df-fr", S(("R", r), ("A", "A"), ("x", "w"), ("y", "v"), ("z", "s"))));
+        return (fr.Proves, fr.Proof, ["x y w v s A"]);
+    }
+
+    /// <summary>|- ( a RankLt b <-> ( rank ` a ) e. ( rank ` b ) ), for set variables a and b, by brab.</summary>
+    public Proof Brab(string a, string b)
+    {
+        string ps = $"( rank ` {a} ) e. ( rank ` y )", ch = $"( rank ` {a} ) e. ( rank ` {b} )";
+        Proof h3 = _d.Congruence("wff", "( rank ` Z ) e. ( rank ` y )", "Z", pr.Apply("id", S(("ph", $"x = {a}"))));
+        Proof h4 = _d.Congruence("wff", $"( rank ` {a} ) e. ( rank ` Z )", "Z", pr.Apply("id", S(("ph", $"y = {b}"))));
+        return pr.Apply("brab", S(("x", "x"), ("y", "y"), ("ph", "( rank ` x ) e. ( rank ` y )"), ("ps", ps), ("ch", ch),
+                ("A", a), ("B", b), ("R", RankLt)),
+            pr.Apply("vex", S(("x", a))), pr.Apply("vex", S(("x", b))), h3, h4, pr.Apply("eqid", S(("A", RankLt))));
+    }
+
+    private Proof? HypOf(string ph, string h)
+    {
+        if (ph == h)
+        {
+            return pr.Apply("id", S(("ph", ph)));
+        }
+        if (pr.Parse("wff", ph.Split(' ')) is not SyntaxTree { Rule.Label: "wa" } n)
+        {
+            return null;
+        }
+        string left = pr.Render(n.Children[0]), right = pr.Render(n.Children[1]);
+        if (right == h)
+        {
+            return pr.Apply("simpr", S(("ph", left), ("ps", right)));
+        }
+        return HypOf(left, h) is Proof p ? _d.Syl(pr.Apply("simpl", S(("ph", left), ("ps", right))), p) : null;
+    }
+}
