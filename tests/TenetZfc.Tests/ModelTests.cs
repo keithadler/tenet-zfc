@@ -92,6 +92,47 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void TheTranslatedDefinitionsPassTheDefinitionCheckerAndABadOneDoesNot()
+    {
+        // mmj2's definitionCheck, through scripts/check-definitions. Needs TENET_ZFC_JAVA (Java 11) and TENET_ZFC_MMJ2.
+        string? java = System.Environment.GetEnvironmentVariable("TENET_ZFC_JAVA");
+        string? mmj2 = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMJ2");
+        if (SetMm is null || java is null || mmj2 is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("model.ndjson"));
+        var m = new Model(t, env, new Prover(Database.Read(Path.Combine(SetMm, "set.mm"))));
+        foreach (string n in new[] { "id", "Function.comp", "Function.const" })
+        {
+            m.Define(t.Of(n));
+        }
+        string script = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "scripts", "check-definitions");
+        string good = Path.Combine(SetMm, $"tenet-zfc-defs-{Guid.NewGuid():N}.mm");
+        string bad = Path.Combine(SetMm, $"tenet-zfc-baddefs-{Guid.NewGuid():N}.mm");
+        var w = new Writer("set.mm", "tenet-zfc definition check test");
+        w.Raw(m.Declarations);
+        File.WriteAllText(good, w.ToString());
+        // The same, plus a definition with a free variable: lean.bad would be a different set for each x.
+        File.WriteAllText(bad, w + "$c lean.bad $.\nclean.bad $a class lean.bad $.\ndf-lean.bad $a |- lean.bad = ( y e. Univ |-> x ) $.\n");
+        try
+        {
+            output.WriteLine(Run(script, SetMm, $"\"{java}\" \"{mmj2}\" \"{good}\"", out int okCode));
+            Assert.Equal(0, okCode);
+            string why = Run(script, SetMm, $"\"{java}\" \"{mmj2}\" \"{bad}\"", out int badCode);
+            output.WriteLine(why);
+            Assert.Equal(1, badCode);
+            Assert.Contains("df-lean.bad has failed the definitional soundness check", why);
+        }
+        finally
+        {
+            File.Delete(good);
+            File.Delete(bad);
+        }
+    }
+
     private static string Run(string exe, string dir, string args, out int code)
     {
         var psi = new ProcessStartInfo(exe, args) { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true };

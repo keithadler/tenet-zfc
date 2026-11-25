@@ -64,7 +64,7 @@ Each replayed step becomes one or more `set.mm` proof steps citing a bridge lemm
 - an equality `a ≡ b` becomes `|- ⟦a⟧ = ⟦b⟧`;
 - a typing `a : T` becomes `|- ⟦a⟧ e. ⟦T⟧`.
 
-The output is a `.mm` file that includes `set.mm` and adds only `$p` theorems. It has no new axioms, and no new definitions until a definition checker is part of the pipeline. Both verifiers must accept it.
+The output is a `.mm` file that includes `set.mm` and adds only `$p` theorems. It has no new axioms. Milestone 3's generic model adds definitions, each checked by mmj2's definition checker (see [milestone3.md](milestone3.md)). Both verifiers must accept it.
 
 Writing `set.mm` proofs mechanically needs one more piece of infrastructure: every `$p` proof must include the syntax proof of each term it mentions (how the class `( A +o B )` is built from `A`, `B` and `+o`). The emitter therefore parses `set.mm`'s syntax axioms and builds those proofs itself.
 

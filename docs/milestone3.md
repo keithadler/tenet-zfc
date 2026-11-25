@@ -1,6 +1,6 @@
 # Milestone 3: from a definition table to the whole kernel
 
-Milestone 3's gate is that all of Lean core translates and verifies. This document measures how far the milestone 2 translator is from that, and says what has to change. Step 1 of the order of work is built (see the end); the rest isn't yet.
+Milestone 3's gate is that all of Lean core translates and verifies. This document measures how far the milestone 2 translator is from that, and says what has to change. Step 1 of the order of work is built, and so is step 2's definition checker (see the end). The rest isn't yet.
 
 ## The survey
 
@@ -106,7 +106,26 @@ Each definition also gets its **definitional equation**, proved by one `fvmptd` 
 Both verifiers accept all three, and CI translates and verifies them again on every push. That meets step 1's gate.
 
 **What step 1 leaves open:**
-- **The definitions are not yet checked.** The `df-lean.*` axioms are new `$a` statements. Until step 2 puts a definition checker in the pipeline, a mistake in one would go unnoticed by both verifiers, which take every `$a` on trust. Step 2 is what makes them safe.
 - **One universe for every level.** Every sort but `Prop` is the same `U`. That's sound for definitional equations, which only apply functions to their arguments. It can't state `Type u : Type (u+1)`, which needs `U e. U`; milestone 4 separates the levels.
 - **What the theorems assume.** The equations assume `U e. Univ`: they hold in every Grothendieck universe, as hypotheses, with no new axiom. ZFC proves such universes exist, for example `( R1 ` om )`, the hereditarily finite sets (`set.mm`'s `omina` with `inagrud`). ZFC doesn't prove that one containing `ω` exists, so a theorem about `Nat` will need the bounded universes of milestone 4.
 - **Not yet in the model:** inductive types, recursors, projections, literals, and Π-types into `Prop`, which should be propositions rather than sets of functions. Each of these is refused with its reason.
+
+## Step 2: the definition checker (built); definitions across `Init.Prelude` (not yet)
+
+The `df-lean.*` axioms are new `$a` statements, which both verifiers take on trust. `scripts/check-definitions` runs mmj2's `definitionCheck` on every output, the same check `set.mm`'s CI runs on its own definitions. It accepts a definition only if it is conservative:
+- the symbol is new, defined once, and used by nothing earlier;
+- no variable is free on the right that isn't on the left;
+- every dummy variable is distinct from the others.
+
+The script also loads the output with mmj2's LR parser, which checks that the new syntax keeps `set.mm`'s grammar unambiguous. Any error or warning fails the run.
+
+It was checked against bad input before being trusted. Three definitions it must refuse, it refused, each for the right reason:
+- a free variable, `lean.bad = ( y e. Univ |-> x )`;
+- dummy variables without their `$d` conditions;
+- a definition that uses its own symbol.
+
+A test repeats the first of these, together with the translator's real output, whenever `TENET_ZFC_JAVA` and `TENET_ZFC_MMJ2` are set. CI runs the check on the model's output on every push, with mmj2 pinned to commit `c8dd055` and Java 11. The macro needs Java's Nashorn engine, which later JDKs dropped.
+
+With this, what an output asks you to trust is the two verifiers, `set.mm`, and mmj2's definition checker. Beyond those, a translated theorem means what its Lean statement means only through the definitions, and those are now computed from Lean's own definitions rather than written by hand.
+
+**Still to do for step 2's gate:** every non-recursive definition in `Init.Prelude` translates. That needs Π-types into `Prop` and projections at least, and it needs inductive types for most definitions, which use them.

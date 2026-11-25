@@ -36,11 +36,17 @@ jobs:
       SETMM_COMMIT: 6315535f37e5e58d14ece8c34ddb204926446264
       METAMATH_EXE_COMMIT: 580b4bd5ae6f2a0d746398b0033cddccba1b418b
       MMVERIFY_COMMIT: 63a2aa3815cd5bf67892dbfc7f2048cbb177524c
+      MMJ2_COMMIT: c8dd05548139c7003220caedde65a7abe44a00bf
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      # mmj2's definitionCheck macro needs a JDK with Nashorn: Java 11, as set.mm's own CI uses.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '11'
       - name: Fetch set.mm and the verifiers
         run: |
           mkdir -p "$RUNNER_TEMP/mm/setmm"
@@ -79,3 +85,10 @@ jobs:
           echo "$out" | tail -2
           if echo "$out" | grep -q '?Error'; then exit 1; fi
           (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" model.mm)
+      - name: Check the translated definitions with mmj2's definitionCheck (milestone 3, step 2)
+        run: |
+          mkdir -p "$RUNNER_TEMP/mm/mmj2/macros"
+          raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
+          curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
+          for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
+          scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/model.mm"
