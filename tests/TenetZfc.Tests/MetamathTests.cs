@@ -79,10 +79,12 @@ public class MetamathTests
     }
 
     [Fact]
-    public void NumeralsAreIteratedSuccessors()
+    public void NumeralsAreDecimal()
     {
-        Assert.Equal("(/)", Bridge.Numeral(0));
-        Assert.Equal("suc suc suc (/)", Bridge.Numeral(3));
+        Assert.Equal("0", Bridge.Numeral(0));
+        Assert.Equal("7", Bridge.Numeral(7));
+        Assert.Equal("; 1 2", Bridge.Numeral(12));
+        Assert.Equal("; ; 1 0 5", Bridge.Numeral(105));
     }
 
     /// <summary>Generated arithmetic theorems, checked by both real verifiers against set.mm.</summary>
@@ -97,11 +99,12 @@ public class MetamathTests
             return;   // set.mm and the verifiers are not available here
         }
         var db = Database.Read(Path.Combine(dir, "set.mm"));
-        var bridge = new Bridge(new Prover(db));
+        var bridge = new Bridge(new Prover(db), db);
         var w = new Writer("set.mm", "tenet-zfc test output");
-        foreach ((long a, long b) in new[] { (0L, 0L), (2L, 2L), (3L, 4L) })
+        // The table as written, the other order through commutativity, and both zero cases.
+        foreach ((long a, long b) in new[] { (0L, 0L), (2L, 2L), (3L, 4L), (7L, 5L), (6L, 0L), (0L, 6L) })
         {
-            var p = bridge.Add(a, b);
+            var p = bridge.Add(a, b)!.Value;
             w.Theorem($"lean-test-add-{a}-{b}", "test", p.Proves, p.Proof);
         }
         string file = Path.Combine(dir, $"tenet-zfc-test-{Guid.NewGuid():N}.mm");

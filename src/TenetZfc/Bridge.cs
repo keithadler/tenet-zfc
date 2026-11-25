@@ -6,51 +6,53 @@ namespace TenetZfc;
 
 /// <summary>
 /// Bridge lemmas generated as set.mm proofs. This first set covers literal arithmetic on Nat, the target of the
-/// replay's NatLitOp steps: a numeral n is ⟦n⟧ = suc applied n times to (/), and Nat.add is ordinal addition +o,
-/// whose set.mm theorems nna0 and nnasuc are exactly Nat.add's defining equations. See docs/interpretation.md.
+/// replay's NatLitOp steps. Nat is set.mm's NN0 (the natural numbers inside the complex numbers, where Word, #
+/// and decimal numerals live), Nat.add is +, and a literal is a decimal numeral: a digit, or ; A B for 10 A + B.
+/// See docs/interpretation.md.
 /// </summary>
-public sealed class Bridge(Prover pr)
+public sealed class Bridge(Prover pr, Database db)
 {
-    private readonly Dictionary<long, Proof> _inOmega = new();
-
-    /// <summary>⟦n⟧: suc applied n times to the empty set.</summary>
-    public static string Numeral(long n) => string.Concat(Enumerable.Repeat("suc ", (int)n)) + "(/)";
+    /// <summary>⟦n⟧: set.mm's decimal numeral.</summary>
+    public static string Numeral(long n) => n < 10 ? n.ToString() : $"; {Numeral(n / 10)} {n % 10}";
 
     private static Dictionary<string, string> S(params (string Var, string Value)[] xs) => xs.ToDictionary(x => x.Var, x => x.Value);
 
-    /// <summary>|- ⟦n⟧ e. _om, from peano1 and peano2.</summary>
-    public Proof InOmega(long n)
-    {
-        if (_inOmega.TryGetValue(n, out Proof known))
-        {
-            return known;
-        }
-        Proof r = n == 0
-            ? (["peano1"], MmExpr.Of("|- (/) e. _om"))
-            : pr.Apply("ax-mp", S(("ph", $"{Numeral(n - 1)} e. _om"), ("ps", $"{Numeral(n)} e. _om")),
-                InOmega(n - 1), pr.Apply("peano2", S(("A", Numeral(n - 1)))));
-        _inOmega[n] = r;
-        return r;
-    }
+    private bool Has(string label) => db.Statements.ContainsKey(label);
 
-    /// <summary>|- ( ⟦a⟧ +o ⟦b⟧ ) = ⟦a + b⟧, by nnasuc b times and then nna0.</summary>
-    public Proof Add(long a, long b)
+    /// <summary>|- ⟦n⟧ e. CC for a digit: set.mm's 0cn, ax-1cn, 2cn, … 9cn.</summary>
+    private static Proof InCC(long n) => ([n == 1 ? "ax-1cn" : $"{n}cn"], MmExpr.Of($"|- {n} e. CC"));
+
+    /// <summary>|- ( ⟦a⟧ + ⟦b⟧ ) = ⟦a + b⟧ for single-digit a and b, from set.mm's addition table; null beyond it.</summary>
+    public Proof? Add(long a, long b)
     {
-        string A = Numeral(a);
+        if (a is < 0 or > 9 || b is < 0 or > 9)
+        {
+            return null;   // multi-digit sums need set.mm's decadd toolkit: not built yet
+        }
+        string A = Numeral(a), B = Numeral(b);
+        string table = $"{a}p{b}e{a + b}";
+        if (Has(table))
+        {
+            return ([table], db[table].Expr);
+        }
         if (b == 0)
         {
-            return pr.Apply("ax-mp", S(("ph", $"{A} e. _om"), ("ps", $"( {A} +o (/) ) = {A}")),
-                InOmega(a), pr.Apply("nna0", S(("A", A))));
+            // ( A + 0 ) = A
+            return pr.Apply("ax-mp", S(("ph", $"{A} e. CC"), ("ps", $"( {A} + 0 ) = {A}")),
+                InCC(a), pr.Apply("addrid", S(("A", A))));
         }
-        string K = Numeral(b - 1), sum = $"( {A} +o {K} )";
-        // ( A +o suc K ) = suc ( A +o K )
-        Proof both = pr.Apply("pm3.2i", S(("ph", $"{A} e. _om"), ("ps", $"{K} e. _om")), InOmega(a), InOmega(b - 1));
-        Proof step = pr.Apply("ax-mp", S(("ph", $"( {A} e. _om /\\ {K} e. _om )"), ("ps", $"( {A} +o suc {K} ) = suc {sum}")),
-            both, pr.Apply("nnasuc", S(("A", A), ("B", K))));
-        // suc ( A +o K ) = suc ⟦a + b - 1⟧
-        Proof rec = Add(a, b - 1);
-        Proof sucRec = pr.Apply("ax-mp", S(("ph", $"{sum} = {Numeral(a + b - 1)}"), ("ps", $"suc {sum} = {Numeral(a + b)}")),
-            rec, pr.Apply("suceq", S(("A", sum), ("B", Numeral(a + b - 1)))));
-        return pr.Apply("eqtri", S(("A", $"( {A} +o {Numeral(b)} )"), ("B", $"suc {sum}"), ("C", Numeral(a + b))), step, sucRec);
+        if (a == 0)
+        {
+            return pr.Apply("ax-mp", S(("ph", $"{B} e. CC"), ("ps", $"( 0 + {B} ) = {B}")),
+                InCC(b), pr.Apply("addlid", S(("A", B))));
+        }
+        string swapped = $"{b}p{a}e{a + b}";
+        if (!Has(swapped))
+        {
+            return null;
+        }
+        // ( A + B ) = ( B + A ) = ⟦a + b⟧
+        Proof comm = pr.Apply("addcomi", S(("A", A), ("B", B)), InCC(a), InCC(b));
+        return pr.Apply("eqtri", S(("A", $"( {A} + {B} )"), ("B", $"( {B} + {A} )"), ("C", Numeral(a + b))), comm, ([swapped], db[swapped].Expr));
     }
 }

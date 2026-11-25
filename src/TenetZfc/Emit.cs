@@ -73,8 +73,8 @@ public sealed class Emitter(Terms t, Prover pr, Bridge bridge)
         return shape switch
         {
             Shape.Literal => Bridge.Numeral(v),
-            Shape.Add => Translate(a!) is string x && Translate(b!) is string y ? $"( {x} +o {y} )" : null,
-            Shape.Succ => Translate(a!) is string z ? $"suc {z}" : null,
+            Shape.Add => Translate(a!) is string x && Translate(b!) is string y ? $"( {x} + {y} )" : null,
+            Shape.Succ => Translate(a!) is string z ? $"( {z} + 1 )" : null,
             _ => null,
         };
     }
@@ -96,9 +96,16 @@ public sealed class Emitter(Terms t, Prover pr, Bridge bridge)
                     {
                         return null;
                     }
-                    // suc ⟦a⟧ = suc ⟦x⟧, which is ⟦x + 1⟧ as written.
-                    Proof p = pr.Apply("ax-mp", S(("ph", $"{Translate(a!)} = {Bridge.Numeral(x)}"), ("ps", $"suc {Translate(a!)} = {Bridge.Numeral(x + 1)}")),
-                        px, pr.Apply("suceq", S(("A", Translate(a!)!), ("B", Bridge.Numeral(x)))));
+                    // ( ⟦a⟧ + 1 ) = ( ⟦x⟧ + 1 ) = ⟦x + 1⟧
+                    if (bridge.Add(x, 1) is not Proof sum1)
+                    {
+                        problems.Add($"{x} + 1 needs multi-digit arithmetic, not built yet");
+                        return null;
+                    }
+                    string ta1 = Translate(a!)!;
+                    Proof one = pr.Apply("eqid", new Dictionary<string, string> { ["A"] = "1" });
+                    Proof cong1 = pr.Apply("oveq12i", S(("A", ta1), ("B", Bridge.Numeral(x)), ("C", "1"), ("D", "1"), ("F", "+")), px, one);
+                    Proof p = pr.Apply("eqtri", S(("A", $"( {ta1} + 1 )"), ("B", $"( {Bridge.Numeral(x)} + 1 )"), ("C", Bridge.Numeral(x + 1))), cong1, sum1);
                     return (x + 1, p);
                 }
             case Shape.Add:
@@ -113,10 +120,14 @@ public sealed class Emitter(Terms t, Prover pr, Bridge bridge)
                         return null;
                     }
                     string ta = Translate(a!)!, tb = Translate(b!)!;
-                    // ( ⟦a⟧ +o ⟦b⟧ ) = ( ⟦x⟧ +o ⟦y⟧ ) = ⟦x + y⟧
-                    Proof cong = pr.Apply("oveq12i", S(("A", ta), ("B", Bridge.Numeral(x)), ("C", tb), ("D", Bridge.Numeral(y)), ("F", "+o")), px, py);
-                    Proof sum = bridge.Add(x, y);
-                    Proof p = pr.Apply("eqtri", S(("A", $"( {ta} +o {tb} )"), ("B", $"( {Bridge.Numeral(x)} +o {Bridge.Numeral(y)} )"), ("C", Bridge.Numeral(x + y))), cong, sum);
+                    // ( ⟦a⟧ + ⟦b⟧ ) = ( ⟦x⟧ + ⟦y⟧ ) = ⟦x + y⟧
+                    if (bridge.Add(x, y) is not Proof sum)
+                    {
+                        problems.Add($"{x} + {y} needs multi-digit arithmetic, not built yet");
+                        return null;
+                    }
+                    Proof cong = pr.Apply("oveq12i", S(("A", ta), ("B", Bridge.Numeral(x)), ("C", tb), ("D", Bridge.Numeral(y)), ("F", "+")), px, py);
+                    Proof p = pr.Apply("eqtri", S(("A", $"( {ta} + {tb} )"), ("B", $"( {Bridge.Numeral(x)} + {Bridge.Numeral(y)} )"), ("C", Bridge.Numeral(x + y))), cong, sum);
                     return (x + y, p);
                 }
             default:

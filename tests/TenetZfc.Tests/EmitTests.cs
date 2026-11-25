@@ -38,8 +38,8 @@ public class EmitTests
         ConstInfo thm = env.Find(t.Of("two_add_two"))!;
         Ops.Spine(thm.Type, out List<TenetZfc.Expr> args);
         var e = new Emitter(t, null!, null!);
-        Assert.Equal("( suc suc (/) +o suc suc (/) )", e.Translate(args[1]));
-        Assert.Equal("suc suc suc suc (/)", e.Translate(args[2]));
+        Assert.Equal("( 2 + 2 )", e.Translate(args[1]));
+        Assert.Equal("4", e.Translate(args[2]));
     }
 
     private static (Emitter Emitter, Prover Prover)? WithSetMm(Terms t)
@@ -48,8 +48,9 @@ public class EmitTests
         {
             return null;
         }
-        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
-        return (new Emitter(t, pr, new Bridge(pr)), pr);
+        var db = Database.Read(Path.Combine(SetMm, "set.mm"));
+        var pr = new Prover(db);
+        return (new Emitter(t, pr, new Bridge(pr, db)), pr);
     }
 
     [Fact]
@@ -63,7 +64,7 @@ public class EmitTests
         DeclTrace d = traces.Single(x => x.Decl.ToString() == "two_add_two");
         (var proof, string? why) = em.EmitEquation(env.Find(d.Decl)!, d);
         Assert.Null(why);
-        Assert.Equal("|- ( suc suc (/) +o suc suc (/) ) = suc suc suc suc (/)", proof!.Value.Proves.ToString());
+        Assert.Equal("|- ( 2 + 2 ) = 4", proof!.Value.Proves.ToString());
 
         string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
         string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
