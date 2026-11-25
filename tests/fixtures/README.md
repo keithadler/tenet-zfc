@@ -1,6 +1,6 @@
 # Fixtures
 
-The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadler/tenet, `tests/fixtures`), which say how each was made, except `quot.ndjson`, `syntax.ndjson`, `gate.ndjson`, `lenapp.ndjson`, `strings.ndjson` and `axioms.ndjson`, made here with [leanout](https://github.com/keithadler/leanout):
+The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadler/tenet, `tests/fixtures`), which say how each was made, except `quot.ndjson`, `syntax.ndjson`, `gate.ndjson`, `lenapp.ndjson`, `tree.ndjson`, `strings.ndjson` and `axioms.ndjson`, made here with [leanout](https://github.com/keithadler/leanout):
 
 | Export | Lean | Format |
 |---|---|---|
@@ -11,6 +11,7 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `quot.ndjson` | 4.36.0 | leanout (`leanout Init -- Quot.sound`): the quotient block, Eq and Quot.sound |
 | `gate.ndjson` | 4.36.0 | `Gate.lean` (here), compiled with `lean -o Gate.olean Gate.lean` and exported with `leanout Gate -- two_add_two`: the milestone 2 gate theorem `2 + 2 = 4` and its 22 dependencies |
 | `lenapp.ndjson` | 4.36.0 | leanout (`leanout Init -- List.length_append`): `List.length_append` and its 59 dependencies, 12 of them theorems |
+| `tree.ndjson` | 4.36.0 | `Tree.lean` (here), compiled with `lean -o Tree.olean Tree.lean` and exported with `leanout Tree -- Tree.rec`: a binary tree, whose `node` has two recursive fields |
 | `strings.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.origin String.instInhabited instToStringBool`): definitions with string literals, and `String.ofList`, `Char.ofNat` and what they use |
 | `axioms.ndjson` | 4.36.0 | leanout (`leanout Init -- Quot.lift Quot.ind propext Classical.choice Classical.choose Classical.propDecidable`): the quotient block, Init's two axioms, and definitions that use choice |
 | `syntax.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Syntax`): the nested inductive `Lean.Syntax` (it holds an `Array Syntax`) with its 272 dependencies; the same file as Tenet's `tests/fixtures/nested/Lean.Syntax.ndjson` |

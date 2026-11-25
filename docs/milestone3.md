@@ -247,7 +247,7 @@ The proof, for a nonempty `w`:
 4. No `s e. w` has smaller rank (`onnmin`), so `v` is minimal.
 5. `df-fr` turns that into `Fr`.
 
-**Recursive types (built)** apply to finitary types, whose recursive fields are the type itself at its own parameters. The computation rules are proved for constructors with at most one recursive field.
+**Recursive types (built)** apply to finitary types, whose recursive fields are the type itself at its own parameters. The computation rules are proved for constructors with any number of recursive fields (trees too: see below).
 
 | Lean | `set.mm` |
 |---|---|
@@ -263,7 +263,7 @@ The proof, for a nonempty `w`:
 - **The simplifier** reads the packed parts back with `op1stg` and `op2ndg`, including inside unions and indexed unions.
 
 **The computation rule** of each constructor follows the plan above:
-1. The value is in the type. Unfold the step at a stage, show the tagged tuple is in the next stage (`rdgsuc`), then in the union (`ssiun2s`, `peano2`). For a recursive field, take the stage it is in (`eliun`, `rexlimdva2`, with the union's variable renamed by `cbviunv`). This runs under only the parameters' and fields' hypotheses.
+1. The value is in the type. Unfold the step at a stage, show the tagged tuple is in the next stage (`rdgsuc`), then in the union (`ssiun2s`, `peano2`). For a recursive field, take the stage it is in (`eliun`, `rexlimdva2`, with the union's variable renamed by `cbviunv`). With several, take each one's stage `m_i` and put them all in the stage `( m_1 u. m_2 u. … )` (`omun`, `ssun1`/`ssun2`, and `lean-stagess` below). This runs under only the parameters' and fields' hypotheses.
 2. `frr2` unfolds the recursion once, with `lean-rankfr` for `Fr` and `exse` for `Se`.
 3. `ovmpog` applies the case analysis, and the simplifier evaluates it on the tag.
 4. The recursion at a recursive field is the recursor there. The field is a predecessor of the value (`elpredg`, `brabga`), since it has smaller rank (`dfopg`, `snidg`/`prid2g`, `rankelb`, `ontr1`), so `fvres` applies.
@@ -277,7 +277,7 @@ lean-List.cons-iota |- ( … ) -> ( … lean.List.rec … ` ( ( ( ( lean.List.co
                              = ( ( ( D ` E ) ` F ) ` ( ( ( ( ( ( lean.List.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` F ) )
 ```
 
-Both verifiers accept them, and the definitions pass the definition check. The proofs are long: 55,000 steps for `Nat.zero`, 122,000 for `Nat.succ` and 311,000 for `List.cons`, because the text repeats every subterm. Sharing them as lemmas is the spec's size work, still to do.
+Both verifiers accept them, and the definitions pass the definition check. The proofs are long: 55,000 steps for `Nat.zero`, 122,000 for `Nat.succ` and 311,000 for `List.cons`, because the text repeats every subterm. Compressed proofs now share the repeats (see [Proof size](#proof-size-compressed-proofs-with-sharing)): `List.cons`'s rule is 5,539 steps.
 
 **The effect on `Init`:** 6,481 of 17,590 definitions now translate with everything they use, up from 5,362.
 
@@ -287,6 +287,39 @@ Both verifiers accept them, and the definitions pass the definition check. The p
 | `Nat` literals | 2,087 |
 | the nested type `Lean.Syntax` | 785 |
 | running out of set variables (set.mm has 26 lowercase ones) | 222 |
+
+### Trees: constructors with several recursive fields (built)
+
+A constructor's value is in the stage after the one holding its recursive fields. With one recursive field that is the field's own stage. With several, say the two subtrees of a binary tree, each field is in a stage of its own, so the proof needs a common one. The stages only grow, so the union of the fields' stages holds them all. That is a second one-time lemma, written into an output the first time a constructor needs it:
+
+```
+lean-stagess.1 $e |- ( ph -> z C_ ( F ` z ) ) $.
+lean-stagess $p |- ( ( ( M e. _om /\ N e. _om ) /\ N C_ M ) -> ( ph -> ( rec ( F , A ) ` N ) C_ ( rec ( F , A ) ` M ) ) ) $.
+```
+
+- **The hypothesis:** in context `ph`, the step's values contain their argument. A stage function `( X e. _V |-> ( lean.I.-step ` <. P , X >. ) )` has this, since its value at `z` is `( z u. … )` (`ssun1`). The context is the parameters' and fields' hypotheses.
+- **The proof** is induction from `N` (`findsg`) on `( ph -> stage N C_ stage x )`. At `N` it is `ssid`. From `y` to `suc y`: `stage suc y` is `F` at `stage y` (`rdgsuc`), which contains `stage y` (the hypothesis at `stage y`, by `vtocl`), and `sstrd` chains the two. 1,481 steps.
+- **In the computation rule:** each recursive field `r_i` is in some stage `m_i` (`eliun`). Under all of these, `b = ( ( m_1 u. m_2 ) u. … )` is in `_om` (`omun`), each `m_i C_ b` (`ssun1`, `ssun2`, `sstri`), so each `r_i` is in stage `b` (`lean-stagess`, `sseld`). The tagged tuple is then in stage `suc b` as before, and `rexlimdva2` discharges the `m_i` one at a time, innermost first.
+- **The rest of the rule needs no change.** The case analysis already passes the recursion at every recursive field, and each field is a predecessor of the value on its own.
+
+**The fixture** is `Tree.lean`, a binary tree exported with leanout (`tests/fixtures/tree.ndjson`):
+
+```lean
+inductive Tree (α : Type u) where
+  | leaf : Tree α
+  | node : Tree α → α → Tree α → Tree α
+```
+
+Its computation rules, with both recursive calls:
+
+```
+lean-Tree.leaf-iota |- ( … ) -> ( … lean.Tree.rec … ` ( ( lean.Tree.leaf ` U ) ` A ) ) = C
+lean-Tree.node-iota |- ( … ) -> ( … lean.Tree.rec … ` ( ( ( ( ( lean.Tree.node ` U ) ` A ) ` E ) ` F ) ` G ) )
+                             = ( ( ( ( ( D ` E ) ` F ) ` G ) ` ( ( ( ( ( ( lean.Tree.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` E ) )
+                                                         ` ( ( ( ( ( ( lean.Tree.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` G ) )
+```
+
+Both verifiers accept them, and the definitions pass the definition check. Uncompressed, `Tree.leaf` takes 132,000 steps and `Tree.node` 798,000.
 
 ## Step 3, fourth part: recursive propositions and `Nat` literals (built)
 
@@ -324,6 +357,48 @@ So a literal stays as short as its decimal digits: `UInt8.size` is `… ( lean.N
 - **Nested types** (`Lean.Syntax`), through the replayer's existing reduction to a mutual block.
 - **Strings**, as lists of characters.
 - **Axioms**, which are milestone 3's last item: `propext` holds in the model, and `Classical.choice` comes from `set.mm`'s choice.
+
+## Proof size: compressed proofs with sharing (built)
+
+The writer used to write each proof as a flat list of labels, so every repeated subterm was proved again in full. It now writes Metamath's compressed format (the Metamath book, appendix B) by default:
+
+```
+lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
+  ( c2 c4 caddc eqid 2p2e4 co eqtr4i eqtri oveq12i ) AACFZBBJJBAAAACADZKIEHBD
+  G $.
+```
+
+- **The format.** The labels in parentheses are numbered after the theorem's mandatory hypotheses. The letters are step numbers, with `A`–`T` as a last digit and `U`–`Y` as earlier digits. `Z` saves the step just made, and later steps refer to it by number.
+- **The sharing.** `CompressedProof.Compress` (in `Metamath.cs`) turns the flat proof into a tree, with equal subproofs as one node. A subproof the written proof meets twice is saved with `Z` the first time and referred to after that. A subproof that repeats only inside a saved one is written once already, so it is not saved. Single steps are not saved, since a reference costs as much as the label. The labels are ordered most-used first, so they get the shortest numbers.
+- **Where.** `emit`, `define` and `bridge` compress. `--uncompressed`, anywhere on the command line, writes flat proofs as before. Theorems inside the model's declarations, like `lean-rankfr`, are compressed by `Writer.Raw`.
+- **Checked:** both verifiers and the definition check accept every CI output in compressed form. A test checks the step numbers against the book's table and that `Expand` inverts `Compress`. Another test checks that both verifiers accept compressed proofs and reject the same file with one letter changed.
+
+**Sizes** of the CI outputs (bytes), flat and compressed:
+
+| Output | Flat | Compressed | Ratio |
+|---|---:|---:|---:|
+| `gate` | 385 | 344 | 1.1× |
+| `lenapp` | 59,251 | 3,759 | 16× |
+| `model` | 54,360 | 5,159 | 11× |
+| `ind` | 711,916 | 36,431 | 20× |
+| `props` | 624,426 | 43,748 | 14× |
+| `rec` | 2,687,598 | 66,101 | 41× |
+| `natle` | 156,074 | 16,267 | 9.6× |
+| `bridge` | 5,200 | 1,202 | 4.3× |
+
+The largest proofs gain the most, because their repeats are the longest. In `rec`, steps written (labels and references to saved steps):
+
+| Theorem | Flat steps | Compressed steps | Saved subproofs |
+|---|---:|---:|---:|
+| `lean-rankfr` | 1,307 | 296 | 42 |
+| `lean-Nat.zero-iota` | 55,416 | 2,742 | 318 |
+| `lean-Nat.succ-iota` | 121,929 | 3,935 | 453 |
+| `lean-List.nil-iota` | 98,655 | 3,771 | 428 |
+| `lean-List.cons-iota` | 310,983 | 5,539 | 623 |
+| `lean-Nat.rec-eq` | 13,332 | 1,115 | 135 |
+| `lean-List.rec-eq` | 24,459 | 1,578 | 192 |
+
+Sharing in the text makes the proofs short, but the proof search still builds the flat proof first. The next size step is to share inside the prover too: prove a repeated equality once, as a lemma or a saved step, instead of building it again.
 
 ## Step 5, first part: strings, axioms, quotients and choice (built)
 
