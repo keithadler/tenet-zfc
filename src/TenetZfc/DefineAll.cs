@@ -12,7 +12,7 @@ namespace TenetZfc;
 /// its constants use, so chunks verify independently and in parallel. A constant the model refuses is reported with
 /// the reason, and the run goes on.
 /// </summary>
-public sealed class DefineAll(Terms t, Environment env, string setmmPath)
+public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool compress = true)
 {
     /// <summary>What happened to one constant.</summary>
     public sealed record Outcome(string Name, string Kind, string Status, int EqSteps, string Iota, int IotaSteps, string Reason, double Seconds);
@@ -38,7 +38,8 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath)
         var model = new Model(t, env, pr);
         string name = $"chunk-{index:D4}";
         var theorems = new Writer(Path.GetFileName(setmmPath),
-            $"tenet-zfc define-all, {name}: {constants.Count} Lean constants translated by the model of docs/milestone3.md, with their equations and computation rules");
+            $"tenet-zfc define-all, {name}: {constants.Count} Lean constants translated by the model of docs/milestone3.md, with their equations and computation rules",
+            compress ? db : null);
         var proved = new List<(string Label, Metamath.Expr Statement, List<string> Proof, string[] Distinct, string Comment)>();
         var outcomes = new List<Outcome>();
         foreach (ConstInfo c in constants)

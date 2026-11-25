@@ -18,8 +18,12 @@ const string Usage = """
                                                          equations and computation rules, as chunk-NNNN.mm files that
                                                          verify independently (scripts/verify-all); refusals are listed
                                                          per constant in chunk-NNNN.tsv
-      tenet-zfc survey <export.ndjson>                  how many theorem statements the translator covers, and
+      tenet-zfc bridge <set.mm> <out.mm>                 milestone 3: the bridge lemmas recursive types rest on
+      tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
                                                          which constants block the rest
+
+    emit, define, define-all and bridge write proofs in Metamath's compressed format, sharing every repeated subproof;
+    add --uncompressed (anywhere) for flat label lists.
 
     make a trace with Tenet (github.com/keithadler/tenet, main):
       tenet check <export.ndjson> --trace <trace.ndjson>
@@ -27,9 +31,14 @@ const string Usage = """
     exit status: 0 no step failed, 1 some step failed, 2 usage or file error
     """;
 
+// Compressed proofs unless --uncompressed: the Writer compresses against the database the proofs were made against.
+bool uncompressed = args.Contains("--uncompressed");
+args = args.Where(a => a != "--uncompressed").ToArray();
+TenetZfc.Metamath.Database? CompressAgainst(TenetZfc.Metamath.Database db) => uncompressed ? null : db;
+
 if (args.Length == 5 && args[0] == "emit")
 {
-    return Emit(args[1], args[2], args[3], args[4]);
+    return Emit(args[1], args[2], args[3], args[4], uncompressed);
 }
 if (args.Length >= 5 && args[0] == "define")
 {
@@ -38,7 +47,7 @@ if (args.Length >= 5 && args[0] == "define")
     TenetZfc.Environment denv = Reader.ReadExport(dt, args[1]);
     var dpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
     var model = new Model(dt, denv, dpr);
-    var theorems = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean definitions translated by tenet-zfc's model (docs/milestone3.md)");
+    var theorems = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean definitions translated by tenet-zfc's model (docs/milestone3.md)", CompressAgainst(dpr.Database));
     var proved = new List<(string Label, TenetZfc.Metamath.Expr Statement, List<string> Proof, string[] Distinct, string Name)>();
     int status = 0;
     foreach (string name in args[4..])
@@ -79,16 +88,17 @@ if (args.Length >= 5 && args[0] == "define")
 }
 if (args.Length >= 4 && args[0] == "define-all")
 {
-    return DefineAllCommand(args[1], args[2], args[3], args[4..]);
+    return DefineAllCommand(args[1], args[2], args[3], args[4..], uncompressed);
 }
 if (args.Length == 3 && args[0] == "bridge")
 {
     // Milestone 3: the bridge lemmas recursive types rest on, written as set.mm theorems.
-    var bpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[1]));
+    var bdb = TenetZfc.Metamath.Database.Read(args[1]);
+    var bpr = new TenetZfc.Metamath.Prover(bdb);
     var rb = new Recursion(bpr);
     var (stmt, proof, distinct) = rb.RankFr();
     Console.WriteLine($"lean-rankfr: {stmt} ({proof.Count} proof steps)");
-    var bw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[1]), "tenet-zfc bridge lemmas for recursive types (docs/milestone3.md)");
+    var bw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[1]), "tenet-zfc bridge lemmas for recursive types (docs/milestone3.md)", CompressAgainst(bdb));
     bw.Theorem("lean-rankfr", "Smaller rank is a well-founded relation on any class.", stmt, proof, distinct);
     File.WriteAllText(args[2], bw.ToString());
     return 0;
@@ -197,7 +207,7 @@ catch (Exception e) when (e is IOException or TenetZfc.FormatException or System
 }
 
 // Milestone 3 at scale: every constant the model handles, in chunks that verify independently (scripts/verify-all).
-static int DefineAllCommand(string export, string setmm, string outDir, string[] opts)
+static int DefineAllCommand(string export, string setmm, string outDir, string[] opts, bool uncompressed)
 {
     int chunkSize = 100, from = 0, to = int.MaxValue - 1;
     for (int i = 0; i < opts.Length; i++)
@@ -221,7 +231,7 @@ static int DefineAllCommand(string export, string setmm, string outDir, string[]
     var terms = new Terms();
     TenetZfc.Environment env = Reader.ReadExport(terms, export);
     Directory.CreateDirectory(outDir);
-    var run = new DefineAll(terms, env, setmm);
+    var run = new DefineAll(terms, env, setmm, compress: !uncompressed);
     List<ConstInfo> targets = run.Targets();
     int chunks = (targets.Count + chunkSize - 1) / chunkSize;
     Console.WriteLine($"read {export} in {sw.Elapsed.TotalSeconds:F0}s: {targets.Count} constants to translate, in {chunks} chunks of {chunkSize}");
@@ -262,7 +272,7 @@ static int DefineAllCommand(string export, string setmm, string outDir, string[]
 }
 
 // Replay a trace, then emit set.mm theorems for the theorems whose trace replayed in full and that the emitter covers.
-static int Emit(string export, string tracePath, string setmm, string output)
+static int Emit(string export, string tracePath, string setmm, string output, bool uncompressed)
 {
     var terms = new Terms();
     TenetZfc.Environment env = Reader.ReadExport(terms, export);
@@ -274,7 +284,7 @@ static int Emit(string export, string tracePath, string setmm, string output)
     var db = TenetZfc.Metamath.Database.Read(setmm);
     var pr = new TenetZfc.Metamath.Prover(db);
     var emitter = new Emitter(terms, pr, new Bridge(pr, db));
-    var w = new TenetZfc.Metamath.Writer(Path.GetFileName(setmm), $"Generated by tenet-zfc emit from {Path.GetFileName(export)}.");
+    var w = new TenetZfc.Metamath.Writer(Path.GetFileName(setmm), $"Generated by tenet-zfc emit from {Path.GetFileName(export)}.", uncompressed ? null : db);
     int emitted = 0, matched = 0;
     var statements = new StatementTranslator(terms);
     var listInduction = new ListInduction(terms, env, pr);

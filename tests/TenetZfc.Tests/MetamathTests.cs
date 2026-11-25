@@ -87,6 +87,118 @@ public class MetamathTests
         Assert.Equal("; ; 1 0 5", Bridge.Numeral(105));
     }
 
+    [Theory]
+    [InlineData(1, "A")]
+    [InlineData(20, "T")]
+    [InlineData(21, "UA")]
+    [InlineData(40, "UT")]
+    [InlineData(41, "VA")]
+    [InlineData(120, "YT")]
+    [InlineData(121, "UUA")]
+    [InlineData(620, "YYT")]
+    [InlineData(621, "UUUA")]
+    public void StepNumbersAreWrittenAsTheMetamathBookSays(int number, string letters)
+    {
+        var sb = new System.Text.StringBuilder();
+        CompressedProof.AppendNumber(sb, number);
+        Assert.Equal(letters, sb.ToString());
+    }
+
+    private static Func<string, int> ArityIn(Database db) => l => db[l].Kind is 'a' or 'p' ? db[l].Hyps.Count : 0;
+
+    [Fact]
+    public void ARepeatedSubproofIsWrittenOnceAndReferredTo()
+    {
+        Database db = TinyDb();
+        // ( ( p -> q ) -> ( p -> q ) ): the subproof of ( p -> q ) twice. p and q are the mandatory hypotheses 1 and 2,
+        // wi is label 3, and the saved ( p -> q ) is step 4.
+        var flat = new Prover(db).SyntaxProof(MmExpr.Of("wff ( ( p -> q ) -> ( p -> q ) )"));
+        Assert.Equal(["wp", "wq", "wi", "wp", "wq", "wi", "wi"], flat);
+        var (labels, letters) = CompressedProof.Compress(flat, ["wp", "wq"], ArityIn(db));
+        Assert.Equal(["wi"], labels);
+        Assert.Equal("ABCZDC", letters);
+        Assert.Equal(flat, CompressedProof.Expand(labels, letters, ["wp", "wq"], ArityIn(db)));
+    }
+
+    [Fact]
+    public void CompressionRoundTripsAndSharesNestedRepeats()
+    {
+        Database db = TinyDb();
+        var pr = new Prover(db);
+        // A wff whose repeats nest: X = ( p -> ( q -> r ) ), Y = ( X -> X ), and the whole is ( Y -> ( Y -> X ) ).
+        string x = "( p -> ( q -> r ) )", y = $"( {x} -> {x} )";
+        var flat = pr.SyntaxProof(MmExpr.Of($"wff ( {y} -> ( {y} -> {x} ) )"));
+        var mandatory = db.MandatoryHyps(MmExpr.Of($"|- ( {y} -> ( {y} -> {x} ) )")).Select(h => h.Label).ToList();
+        Assert.Equal(["wp", "wq", "wr"], mandatory);
+        var (labels, letters) = CompressedProof.Compress(flat, mandatory, ArityIn(db));
+        Assert.Equal(flat, CompressedProof.Expand(labels, letters, mandatory, ArityIn(db)));
+        // X is built once and saved (E), then Y from it and saved (F); ( q -> r ) repeats only inside X, so it is not.
+        Assert.Equal(29, flat.Count);
+        Assert.Equal("ABCDDZEDZFEDD", letters);
+    }
+
+    [Fact]
+    public void AProofThatDoesNotLeaveOneExpressionIsRefused()
+    {
+        Database db = TinyDb();
+        Assert.Throws<InvalidOperationException>(() => CompressedProof.Compress(["wp", "wq"], [], ArityIn(db)));
+        Assert.Throws<InvalidOperationException>(() => CompressedProof.Compress(["wp", "wi"], [], ArityIn(db)));
+    }
+
+    /// <summary>
+    /// Compressed proofs, checked by both real verifiers against set.mm; and the same file with one letter of a proof
+    /// changed, which both must reject.
+    /// </summary>
+    [Fact]
+    public void CompressedProofsPassBothVerifiersAndACorruptedOneFails()
+    {
+        string? dir = System.Environment.GetEnvironmentVariable("TENET_ZFC_SETMM");
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (dir is null || metamath is null || mmverify is null)
+        {
+            return;   // set.mm and the verifiers are not available here
+        }
+        var db = Database.Read(Path.Combine(dir, "set.mm"));
+        var bridge = new Bridge(new Prover(db), db);
+        var w = new Writer("set.mm", "tenet-zfc compressed proof test", db);
+        foreach ((long a, long b) in new[] { (2L, 2L), (7L, 5L), (0L, 6L) })
+        {
+            var p = bridge.Add(a, b)!.Value;
+            w.Theorem($"lean-test-cadd-{a}-{b}", "test", p.Proves, p.Proof);
+        }
+        string text = w.ToString();
+        Assert.Matches(@"\$=\s+\( ", text);
+        // Corrupt the first theorem's proof: its last step (the final assertion) becomes the step before it.
+        int start = text.IndexOf("$=", StringComparison.Ordinal);
+        int end = text.IndexOf(" $.", start, StringComparison.Ordinal);
+        int last = end - 1;
+        char wrong = text[last] == 'A' ? 'B' : (char)(text[last] - 1);
+        string corrupted = text[..last] + wrong + text[(last + 1)..];
+        string good = Path.Combine(dir, $"tenet-zfc-test-{Guid.NewGuid():N}.mm");
+        string bad = Path.Combine(dir, $"tenet-zfc-test-bad-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(good, text);
+        File.WriteAllText(bad, corrupted);
+        try
+        {
+            string mmOut = Run(metamath, dir, $"\"read {Path.GetFileName(good)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mmOut);
+            Assert.Contains("verified", mmOut);
+            Run("python3", dir, $"-I \"{mmverify}\" \"{Path.GetFileName(good)}\"", out int code);
+            Assert.Equal(0, code);
+
+            string badOut = Run(metamath, dir, $"\"read {Path.GetFileName(bad)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.Contains("?Error", badOut);
+            Run("python3", dir, $"-I \"{mmverify}\" \"{Path.GetFileName(bad)}\"", out int badCode);
+            Assert.NotEqual(0, badCode);
+        }
+        finally
+        {
+            File.Delete(good);
+            File.Delete(bad);
+        }
+    }
+
     /// <summary>Generated arithmetic theorems, checked by both real verifiers against set.mm.</summary>
     [Fact]
     public void GeneratedArithmeticPassesBothVerifiers()
