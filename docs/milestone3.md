@@ -247,7 +247,7 @@ The proof, for a nonempty `w`:
 4. No `s e. w` has smaller rank (`onnmin`), so `v` is minimal.
 5. `df-fr` turns that into `Fr`.
 
-**Recursive types (built)** apply to finitary types, whose recursive fields are the type itself at its own parameters. The computation rules are proved for constructors with at most one recursive field.
+**Recursive types (built)** apply to finitary types, whose recursive fields are the type itself at its own parameters. The computation rules are proved for constructors with any number of recursive fields (trees too: see below).
 
 | Lean | `set.mm` |
 |---|---|
@@ -263,7 +263,7 @@ The proof, for a nonempty `w`:
 - **The simplifier** reads the packed parts back with `op1stg` and `op2ndg`, including inside unions and indexed unions.
 
 **The computation rule** of each constructor follows the plan above:
-1. The value is in the type. Unfold the step at a stage, show the tagged tuple is in the next stage (`rdgsuc`), then in the union (`ssiun2s`, `peano2`). For a recursive field, take the stage it is in (`eliun`, `rexlimdva2`, with the union's variable renamed by `cbviunv`). This runs under only the parameters' and fields' hypotheses.
+1. The value is in the type. Unfold the step at a stage, show the tagged tuple is in the next stage (`rdgsuc`), then in the union (`ssiun2s`, `peano2`). For a recursive field, take the stage it is in (`eliun`, `rexlimdva2`, with the union's variable renamed by `cbviunv`). With several, take each one's stage `m_i` and put them all in the stage `( m_1 u. m_2 u. … )` (`omun`, `ssun1`/`ssun2`, and `lean-stagess` below). This runs under only the parameters' and fields' hypotheses.
 2. `frr2` unfolds the recursion once, with `lean-rankfr` for `Fr` and `exse` for `Se`.
 3. `ovmpog` applies the case analysis, and the simplifier evaluates it on the tag.
 4. The recursion at a recursive field is the recursor there. The field is a predecessor of the value (`elpredg`, `brabga`), since it has smaller rank (`dfopg`, `snidg`/`prid2g`, `rankelb`, `ontr1`), so `fvres` applies.
@@ -287,6 +287,39 @@ Both verifiers accept them, and the definitions pass the definition check. The p
 | `Nat` literals | 2,087 |
 | the nested type `Lean.Syntax` | 785 |
 | running out of set variables (set.mm has 26 lowercase ones) | 222 |
+
+### Trees: constructors with several recursive fields (built)
+
+A constructor's value is in the stage after the one holding its recursive fields. With one recursive field that is the field's own stage. With several, say the two subtrees of a binary tree, each field is in a stage of its own, so the proof needs a common one. The stages only grow, so the union of the fields' stages holds them all. That is a second one-time lemma, written into an output the first time a constructor needs it:
+
+```
+lean-stagess.1 $e |- ( ph -> z C_ ( F ` z ) ) $.
+lean-stagess $p |- ( ( ( M e. _om /\ N e. _om ) /\ N C_ M ) -> ( ph -> ( rec ( F , A ) ` N ) C_ ( rec ( F , A ) ` M ) ) ) $.
+```
+
+- **The hypothesis:** in context `ph`, the step's values contain their argument. A stage function `( X e. _V |-> ( lean.I.-step ` <. P , X >. ) )` has this, since its value at `z` is `( z u. … )` (`ssun1`). The context is the parameters' and fields' hypotheses.
+- **The proof** is induction from `N` (`findsg`) on `( ph -> stage N C_ stage x )`. At `N` it is `ssid`. From `y` to `suc y`: `stage suc y` is `F` at `stage y` (`rdgsuc`), which contains `stage y` (the hypothesis at `stage y`, by `vtocl`), and `sstrd` chains the two. 1,481 steps.
+- **In the computation rule:** each recursive field `r_i` is in some stage `m_i` (`eliun`). Under all of these, `b = ( ( m_1 u. m_2 ) u. … )` is in `_om` (`omun`), each `m_i C_ b` (`ssun1`, `ssun2`, `sstri`), so each `r_i` is in stage `b` (`lean-stagess`, `sseld`). The tagged tuple is then in stage `suc b` as before, and `rexlimdva2` discharges the `m_i` one at a time, innermost first.
+- **The rest of the rule needs no change.** The case analysis already passes the recursion at every recursive field, and each field is a predecessor of the value on its own.
+
+**The fixture** is `Tree.lean`, a binary tree exported with leanout (`tests/fixtures/tree.ndjson`):
+
+```lean
+inductive Tree (α : Type u) where
+  | leaf : Tree α
+  | node : Tree α → α → Tree α → Tree α
+```
+
+Its computation rules, with both recursive calls:
+
+```
+lean-Tree.leaf-iota |- ( … ) -> ( … lean.Tree.rec … ` ( ( lean.Tree.leaf ` U ) ` A ) ) = C
+lean-Tree.node-iota |- ( … ) -> ( … lean.Tree.rec … ` ( ( ( ( ( lean.Tree.node ` U ) ` A ) ` E ) ` F ) ` G ) )
+                             = ( ( ( ( ( D ` E ) ` F ) ` G ) ` ( ( ( ( ( ( lean.Tree.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` E ) )
+                                                         ` ( ( ( ( ( ( lean.Tree.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` G ) )
+```
+
+Both verifiers accept them, and the definitions pass the definition check. Uncompressed, `Tree.leaf` takes 132,000 steps and `Tree.node` 798,000.
 
 ## Step 3, fourth part: recursive propositions and `Nat` literals (built)
 
