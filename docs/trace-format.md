@@ -111,14 +111,14 @@ What is checked:
 - **Inductive blocks.**
   - **Types.** Every type, constructor type and recursor type in the block must be checked by the trace to be a type.
   - **Structure, rechecked from the export.** The block's types share their parameters, and each constructor takes exactly those parameters. Each field is strictly positive: a type of the block appears only as I params indices, at the end of the field's arrows. Each field's universe fits within the type's, unless the type is a Prop; the field universes come from the trace's checking-mode facts about the constructor's type. Each constructor returns its own type applied to the parameters.
-  - Tenet's non-positive `Bad` from its negative corpus is rejected by this recheck alone.
+  - **Recursors, derived here.** Each recursor's type and computation rules are derived from the block the way the kernel derives them, and must match the export's exactly (up to binder names). That covers motives, minor premises, induction hypotheses for recursive fields, elimination into Prop only versus into any universe, rule K, and annotation stripping on the derivation's locals (only for `optParam`, `autoParam`, `outParam` and `semiOutParam` defined as the identity). Iota steps therefore use rules the replayer has rederived, not just the exporter's.
+  - Tenet's non-positive `Bad` from its negative corpus is rejected by the structural recheck alone, and a recursor rule swapped for another constructor's is caught.
 - **Each declaration.** Its trace must conclude, from checking-mode facts, what the kernel checks of it: its type is a type, and the value of a definition, theorem or opaque constant has that type. Without this check, a trace of valid steps that didn't add up to the declaration would pass. Infer-only facts don't count here, because they assume the term is well typed.
 
 Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `mk_imax`, because the kernel's reduct carries the simplified level.
 
 ## What replay does not establish yet
 
-- **Recursors are not derived.** The replayer rechecks a block's structure, but not that its recursors (their types and computation rules) are the ones the block determines. Iota steps use the export's recursor rules as given.
 - **Nested inductive blocks** (such as `Lean.Syntax`, which holds an `Array Syntax`) aren't replayed. The kernel checks them by translating to auxiliary mutual types that aren't in the export, and Tenet doesn't trace those auxiliary types or the translation. Their steps are reported as unsupported.
 - **Quotient blocks.** The four quotient constants are built in by the kernel, and the trace concludes nothing about them.
 - **Structural cases not handled.** A field whose block-type occurrence is hidden behind a definition, or parameters that differ only up to definitional equality, are reported as unsupported rather than decided.

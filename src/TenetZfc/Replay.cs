@@ -32,8 +32,8 @@ public sealed class ReplayReport
     public int Concluded { get; internal set; }
 
     /// <summary>
-    /// Inductive blocks whose every type is checked by the trace and whose structure is rechecked here: constructor
-    /// shapes, strict positivity and field universes. Their recursors are not derived.
+    /// Inductive blocks whose every type is checked by the trace, whose structure is rechecked here (constructor
+    /// shapes, strict positivity, field universes), and whose recursors are derived here and match the export's.
     /// </summary>
     public int BlocksChecked { get; internal set; }
 
@@ -66,7 +66,7 @@ public sealed class ReplayReport
     {
         var sb = new StringBuilder();
         sb.AppendLine($"{Declarations} declarations, {Steps} steps");
-        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksChecked} inductive blocks checked (types, constructors, positivity, universes; recursors not derived); {BlocksTypesChecked} with only their types checked; {BlocksNested} nested inductive blocks not replayed; {BlocksNotTraced} blocks not concluded");
+        sb.AppendLine($"  {Concluded} declarations concluded by their trace; {BlocksChecked} inductive blocks checked (types, constructors, positivity, universes, recursors); {BlocksTypesChecked} with only their types checked; {BlocksNested} nested inductive blocks not replayed; {BlocksNotTraced} blocks not concluded");
         sb.AppendLine($"  verified {Count(Verdict.Verified)}, failed {Count(Verdict.Failed)}, unsupported {Count(Verdict.Unsupported)}, not yet replayed {Count(Verdict.NotYet)}");
         sb.AppendLine();
         sb.AppendLine($"  {"step",-24}{"verified",10}{"failed",8}{"unsupp.",9}{"not yet",9}");
@@ -183,9 +183,16 @@ public sealed partial class Replayer
                 if (block.BlockMembers.All(m => _env.Find(m) is ConstInfo c && CheckedSortOf(c.Type, state) is not null))
                 {
                     BlockCheck bc = CheckBlock(block, d.Steps, state);
-                    if (bc.Ok)
+                    _fieldSteps = d.Steps;
+                    string? recs = bc.Ok ? CheckRecursors(block, state) : null;
+                    _fieldSteps = null;
+                    if (bc.Ok && recs is null)
                     {
                         report.BlocksChecked++;
+                    }
+                    else if (bc.Ok)
+                    {
+                        report.Failures.Add(new StepFailure(d.Decl, -1, "decl", recs!));
                     }
                     else if (bc.Unsupported)
                     {

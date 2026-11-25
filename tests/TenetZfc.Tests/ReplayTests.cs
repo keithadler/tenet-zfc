@@ -262,6 +262,25 @@ public class ReplayTests
     }
 
     [Fact]
+    public void AChangedRecursorRuleIsCaught()
+    {
+        // The rules iota uses come from the export; the replayer derives them from the block and requires a match.
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        ConstInfo rec = env.Find(t.Of("Nat.rec"))!;
+        RecRule saved = rec.Rules[1];
+        rec.Rules[1] = saved with { Rhs = rec.Rules[0].Rhs };   // succ's rule replaced by zero's
+        try
+        {
+            ReplayReport r = new Replayer(t, env).Replay(traces);
+            Assert.Contains(r.Failures, f => f.Decl.ToString() == "Nat" && f.Reason.Contains("Nat.rec"));
+        }
+        finally
+        {
+            rec.Rules[1] = saved;
+        }
+    }
+
+    [Fact]
     public void AStepAboutAnUndeclaredDeclarationIsCaught()
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
