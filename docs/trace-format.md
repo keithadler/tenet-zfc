@@ -31,6 +31,10 @@ Definitional equality backtracks: lazy delta, proof irrelevance and eta are trie
 | `DefEq` | t ≡ s | t, s |
 | `Local` | a free variable enters the context | the variable, its type (`v`: its value, for a `let`) |
 
+A step may instead recall an earlier one. Tenet remembers each result by the step that concluded it, and when the same inference, normalization or equality is asked for again, it records a step of the same kind with `"of": j` instead of deriving the result again. Before each recall it checks that step j is still in the trace and still says the same thing, because a rollback can remove it. Replay checks the same: step j comes earlier, has the same kind, and concludes the same thing (for an equality, in either order).
+
+This is what keeps traces finite in practice. Tracing has to bypass the kernel's own caches, because a cache hit skips the steps that justify it, and without recall some declarations redo the same work until the trace runs to many gigabytes. On a 998-declaration sample of `Init`, recall took the trace from 13,955,110 steps (826 MB) to 1,184,351 steps (117 MB).
+
 Steps are stored in the order they finish, so premises always come before the step that uses them. Each step's premises are the steps from its `from` index up to the step itself. Its direct premises are found by walking back from the step before it, jumping to each premise's own `from`.
 
 ## File format
@@ -46,6 +50,7 @@ Newline-delimited JSON. Names, levels and expressions use the same shapes as lea
 {"s":0,"k":"Local","a":3,"b":2}                            step 0
 {"s":5,"k":"Rule","r":"Beta","a":9,"b":11}                 step 5: expression 9 beta-reduces to 11
 {"s":9,"k":"DefEq","a":4,"b":12,"from":0}                  step 9: 4 ≡ 12, premises are steps 0..8
+{"s":40,"k":"Whnf","a":17,"b":21,"of":12}                  step 40: 17 ↝* 21, as step 12 already concluded
 ```
 
 Step numbers restart at 0 for each declaration. Free variables are written by their numeric id (`{"fvar":n}`), and each is introduced by a `Local` step before any step mentions it.
@@ -101,6 +106,7 @@ What is checked:
 - **Typing.**
   - `Infer`: the type is recomputed the way the kernel computes it for every form of term: sorts, constants, locals, literals, applications, lambdas and Pis (with their locals), lets (dead lets removed), and projections.
   - `Check`: the same computation, from checking-mode facts about the term's parts. It also requires the checks that mode adds. An argument's checked type must be recorded equal to its domain. Every binder domain and `let` type must be checked to be a type. A `let` value must have its type. Universe levels may use only the declaration's parameters; for an inductive block, that means the parameters of any of its types, constructors or recursors.
+- **Recalls.** A step with `"of"` must name an earlier step of the same kind that concludes the same thing.
 - **Locals.** Each must be fresh, and nothing may use a variable before its `Local` step.
 - **Inductive blocks.**
   - **Types.** Every type, constructor type and recursor type in the block must be checked by the trace to be a type.
@@ -117,7 +123,7 @@ Delta and iota substitute universe levels with Lean's simplifying `mk_max` and `
 - **Quotient blocks.** The four quotient constants are built in by the kernel, and the trace concludes nothing about them.
 - **Structural cases not handled.** A field whose block-type occurrence is hidden behind a definition, or parameters that differ only up to definitional equality, are reported as unsupported rather than decided.
 - **Safety flags.** Checking mode also rejects unsafe and partial constants used from safe declarations. Those flags aren't in the trace or read by the replayer.
-- **`Check` needs Tenet's `trace-check-mode` branch.** Tenet's main branch writes every inferred type as `Infer`. Traces from it replay step by step, but no declaration in them is concluded.
+- **`Check` and recall need Tenet's `trace-recall` branch.** Tenet's main branch writes every inferred type as `Infer` and doesn't recall. Traces from it replay step by step, but no declaration in them is concluded, and some traces get very large.
 - **Nat operations** are taken to mean what their names say. Tenet checks that against their definitions once per environment, and that check isn't in the trace.
 - **Rule K** is checked for the reduct only. The kernel's check on the major premise's type is a typing fact the step doesn't cite.
 - **String literals** (`StringLitToCtor`, `DefEqStringLit`) are reported as unsupported.

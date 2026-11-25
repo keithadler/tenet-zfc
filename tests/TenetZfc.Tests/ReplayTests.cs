@@ -239,6 +239,29 @@ public class ReplayTests
     }
 
     [Fact]
+    public void ARecallOfTheWrongStepIsCaught()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        (int d, int i) = Find(traces, s => s.Of >= 0);
+        Step s = traces[d].Steps[i];
+        // Point it at an earlier step that concludes something else.
+        int other = traces[d].Steps.Take(i).Last(o => o.Kind != StepKind.Local && !(ReferenceEquals(o.A, s.A) && ReferenceEquals(o.B, s.B))).Index;
+        Replace(traces, d, i, s with { Of = other });
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Step == i && f.Reason.Contains("recalls"));
+    }
+
+    [Fact]
+    public void ARecallingStepWithAChangedResultIsCaught()
+    {
+        (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");
+        (int d, int i) = Find(traces, s => s.Of >= 0);
+        Replace(traces, d, i, traces[d].Steps[i] with { B = t.Nat(424242) });
+        ReplayReport r = new Replayer(t, env).Replay(traces);
+        Assert.Contains(r.Failures, f => f.Step == i);
+    }
+
+    [Fact]
     public void AStepAboutAnUndeclaredDeclarationIsCaught()
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load("Nat.add_succ");

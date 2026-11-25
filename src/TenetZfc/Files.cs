@@ -62,7 +62,11 @@ public sealed class Environment
 public enum StepKind : byte { Rule, Infer, WhnfCore, Whnf, DefEq, Local, Check }
 
 /// <summary>One step of a trace. <see cref="From"/> is the first of its premises; a step with none has From = its own index.</summary>
-public sealed record Step(int Index, StepKind Kind, string? Rule, Expr A, Expr? B, Expr? V, int From);
+/// <summary>
+/// One step of a trace. <see cref="From"/> is the first of its premises; a step with none has From = its own index.
+/// <see cref="Of"/>, when not -1, says the step recalls the earlier step it names instead of deriving its result again.
+/// </summary>
+public sealed record Step(int Index, StepKind Kind, string? Rule, Expr A, Expr? B, Expr? V, int From, int Of = -1);
 
 public sealed record DeclTrace(Name Decl, IReadOnlyList<Step> Steps);
 
@@ -177,7 +181,12 @@ public sealed class Reader
                 {
                     throw new FormatException(r._line, $"step {i} has premises from {from}");
                 }
-                steps.Add(new Step(i, kind, rule, a, b, v, from));
+                int of = o.TryGetProperty("of", out JsonElement ofe) ? ofe.GetInt32() : -1;
+                if (of >= i)
+                {
+                    throw new FormatException(r._line, $"step {i} recalls step {of}, which does not come before it");
+                }
+                steps.Add(new Step(i, kind, rule, a, b, v, from, of));
                 continue;
             }
             throw new FormatException(r._line, "unknown line");

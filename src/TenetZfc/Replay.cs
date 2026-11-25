@@ -325,6 +325,10 @@ public sealed partial class Replayer
         {
             return (Verdict.Failed, open);
         }
+        if (s.Of >= 0)
+        {
+            return Recall(s, steps);
+        }
         switch (s.Kind)
         {
             case StepKind.Local:
@@ -372,6 +376,16 @@ public sealed partial class Replayer
             "NativeReduce" or "InferBVar" => (Verdict.Failed, "this rule never appears in a successful check"),
             _ => PremiseRule(s, steps, st),
         };
+    }
+
+    /// <summary>A recalled result: the step it names comes earlier, is of the same kind, and concludes the same thing.</summary>
+    private static (Verdict, string?) Recall(Step s, IReadOnlyList<Step> steps)
+    {
+        Step o = steps[s.Of];
+        bool same = o.Kind == s.Kind && o.Kind != StepKind.Local && o.Kind != StepKind.Rule
+            && (ReferenceEquals(o.A, s.A) && ReferenceEquals(o.B, s.B)
+                || (s.Kind == StepKind.DefEq && ReferenceEquals(o.A, s.B) && ReferenceEquals(o.B, s.A)));
+        return same ? (Verdict.Verified, null) : (Verdict.Failed, $"recalls step {s.Of}, which concludes something else");
     }
 
     private static (Verdict, string?) Same(Expr expected, Expr recorded) =>
