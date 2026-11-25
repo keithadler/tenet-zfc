@@ -1,52 +1,76 @@
-# Trace format (draft, milestone 1)
+# Trace format (milestone 1)
 
-Milestone 1 adds tracing to Tenet: every step Tenet takes while checking a declaration is written to a certificate that can be replayed without Tenet's search. This file is the draft format. Nothing here is implemented yet.
-
-## Where it hooks in
-
-Tenet calls `Rules.Hit(Rule r)` at every place a kernel rule fires (about 40 call sites, almost all in `TypeChecker.cs`). Today that only increments a counter. Tracing widens the call to carry the terms involved:
-
-```csharp
-// in Tenet.Kernel (proposed)
-public interface ITraceSink
-{
-    // e ↝ e'  or  t ≡ s  or  Γ ⊢ e : T, depending on the rule
-    void Step(Rule rule, Expr lhs, Expr rhs, ReadOnlySpan<int> premises);
-}
-```
-
-`Rules.Hit` stays as it is for counting. A traced run passes an `ITraceSink` to the `TypeChecker`; an untraced run passes none and pays one null check per step. This change belongs in Tenet itself, as a pull request there, so it ships with Tenet's own tests and CI.
-
-## What a step records
-
-Each step gets an integer id, in the order it was proved.
+Milestone 1 adds tracing to Tenet: every step Tenet takes while accepting a declaration is written to a file that can later be replayed without Tenet's search. Recording is implemented on Tenet's `trace-sink` branch. Replay, the milestone 1 gate, is not built yet.
 
 ```
-<id> <rule> <lhs-term-id> <rhs-term-id> [<premise-id> ...]
+tenet check Foo.ndjson --trace Foo.trace.ndjson
 ```
 
-- `rule`: the `Rule` enum name, for example `Beta`, `DefEqProofIrrel`, `InferApp`.
-- Terms are hash-consed: each distinct `Expr` is written once in a term table and referred to by id. That is what keeps the trace (and later the `set.mm` output) near linear rather than exponential; see the spec's Size and performance section.
-- Premises are the ids of earlier steps this one depends on (for `DefEqApp`, the step for the heads and one per argument; for `InferApp`, the typing of `f`, the typing of `a`, and the domain equality).
-- Failed branches are not recorded. Tenet's definitional-equality check tries things and backtracks (lazy delta, eta, proof irrelevance); the trace keeps only the derivation that succeeded.
+`--trace` works on export files. It checks declarations one at a time, in order, and bypasses the kernel's caches, so it is much slower than a normal check. Without `--trace`, Tenet behaves exactly as before.
 
-Per declaration:
+## How it hooks in
+
+- `KernelTrace` (in `Tenet.Kernel`) holds the steps of one declaration. `KernelTrace.Scope` attaches one to the current thread.
+- A `TypeChecker` created while a scope is open records into it. It also skips its inference, normalization and success caches, because a cache hit would skip the steps that justify the result. A checker created with no scope open records nothing and pays one null check per step.
+- Code that has no checker at hand (`Inductive.cs` for iota, `Quot.cs` for quotient reduction, `LocalContext` for new variables) records through the thread's current trace.
+- Every place Tenet already calls `Rules.Hit(rule)` on a successful path also records a step that carries the terms involved.
+
+## Only the successful derivation is kept
+
+Definitional equality backtracks: lazy delta, proof irrelevance and eta are tried and abandoned. Each `IsDefEqCore` call takes a mark on entry. On success it records a `DefEq` conclusion over everything since the mark. On failure it rolls back to the mark. Normalization does the same: a `Whnf` or `WhnfCore` call that changes nothing leaves no steps behind. If Tenet's fast mode rejects a declaration and re-checks it in faithful mode, the first attempt's steps are discarded too.
+
+## Step kinds
+
+| Kind | Meaning | Lhs / Rhs |
+|---|---|---|
+| `Rule` | One kernel rule fired; `r` names it (Tenet's `Rule` enum, see [rule-map.md](rule-map.md)) | the rule's two terms, such as redex and reduct |
+| `Infer` | Γ ⊢ e : T | e, T |
+| `WhnfCore` | e ↝* e' without unfolding definitions | e, e' |
+| `Whnf` | e ↝* e' with unfolding and literal arithmetic | e, e' |
+| `DefEq` | t ≡ s | t, s |
+| `Local` | a free variable enters the context | the variable, its type (`v`: its value, for a `let`) |
+
+Steps are stored in the order they finish, so premises always come before the step that uses them. Each step's premises are the steps from its `from` index up to the step itself. Its direct premises are found by walking back from the step before it, jumping to each premise's own `from`.
+
+## File format
+
+Newline-delimited JSON. Names, levels and expressions use the same shapes as lean4export, and each is written once for the whole file, the first time it is needed:
 
 ```
-decl <name> <levels>
-term <id> <expr>          # term table, lean4export-style expression encoding
-step ...                  # the steps above
-root <step-id>            # the step that proves the declaration's value has its declared type
+{"trace":"tenet","version":1}
+{"in":1,"str":{"pre":0,"str":"Nat"}}                      name 1
+{"il":0,"zero":true}                                       level 0
+{"ie":7,"app":{"fn":5,"arg":6}}                            expression 7
+{"decl":1,"steps":78}                                      a declaration, by name id, and its step count
+{"s":0,"k":"Local","a":3,"b":2}                            step 0
+{"s":5,"k":"Rule","r":"Beta","a":9,"b":11}                 step 5: expression 9 beta-reduces to 11
+{"s":9,"k":"DefEq","a":4,"b":12,"from":0}                  step 9: 4 ≡ 12, premises are steps 0..8
 ```
 
-## Replay (the milestone 1 gate)
+Step numbers restart at 0 for each declaration. Free variables are written by their numeric id (`{"fvar":n}`), and each is introduced by a `Local` step before any step mentions it.
 
-A separate replayer, which does not call Tenet's search, reads a trace and checks each step locally: that the rule applies to the recorded terms, and that its premises are earlier steps proving what this step needs. The gate is that replay re-derives every check Tenet made on all of Lean core.
+## Tested
 
-The replayer is also the template for the emitter: replay checks a step, emission prints the `set.mm` lemma application for it.
+Tenet's `TraceTests` cover all 16 export fixtures in its repository, including the negative corpus:
 
-## Open points
+- Tracing never changes a verdict: the same declarations are accepted and rejected with and without it.
+- There is one trace per accepted declaration and none for a rejected one.
+- Every trace is closed: premises come first, and every free variable is introduced before it is used.
+- A failed equality leaves no steps. A successful one ends in its own `DefEq` conclusion, whose derivation is the whole trace.
+- The writer writes each expression once.
 
-- Lazy delta records each unfolding as a `Delta` step; does the replayer need the height heuristic, or only the unfoldings? (Only the unfoldings, if failed branches are dropped.)
-- Level normalization for `DefEqSort` and `DefEqConst`: record it, or require universe elimination first so levels are numerals? See [rule-map.md](rule-map.md#not-in-the-enum).
-- Nat literal arithmetic (`NatLitOp`): record the operands and result only, and leave the proof to the decimal-arithmetic library at emission.
+On `Nat.add_succ.ndjson` (20 declarations), the trace has 2,200 steps, and 13 of Tenet's rules fire.
+
+## Not yet recorded
+
+These gaps are for the replayer to settle:
+
+- **Congruence is implicit.** When normalization rewrites the head of an application, or lazy delta unfolds one side, the trace records the inner step but not the congruence that lifts it to the whole term. The replayer has to supply it.
+- **Literal ↔ constructor.** A Nat literal used as a recursor's major premise is turned into `Nat.succ` form with no step of its own. It shows up only in the iota step's terms.
+- **Primitive checks.** Tenet checks once per environment that `Nat.add` and the rest are the primitives they claim to be. Those checks are cached on the environment, so they are recorded in whichever declaration first needs them, or not at all if that happened inside a branch that was rolled back.
+- **Level equivalence.** `DefEqSort` and `DefEqConst` steps assert that two universe levels are equivalent without recording why. This stops mattering once universe elimination makes every level a numeral.
+- **Inductive declarations.** Positivity, universe constraints and recursor derivation are checked but traced only as the inference and equality steps they use, not as one "this inductive is well formed" conclusion.
+
+## Next: replay
+
+The replayer reads a trace and checks each step locally, without Tenet's search: that the rule applies to the recorded terms, and that the premises prove what the step needs. The milestone 1 gate is that replay re-derives every check Tenet made on all of Lean core. The replayer is also the template for the emitter: where replay checks a step, emission prints the `set.mm` proof step for it.
