@@ -201,6 +201,8 @@ public sealed class Deduction(Prover pr)
                 return PairWff("imbi1d", "imbi2d", "imbi12d", "ph", "ps");
             case "wa":   // ( ph /\ ps )
                 return PairWff("anbi1d", "anbi2d", "anbi12d", "ph", "ps");
+            case "wo":   // ( ph \/ ps )
+                return PairWff("orbi1d", "orbi2d", "orbi12d", "ph", "ps");
         }
         throw new InvalidOperationException($"no congruence rule for {n.Rule.Label} (in {Render(n, hole, a)})");
 

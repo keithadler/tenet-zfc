@@ -26,6 +26,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     private static readonly string[] ClassVars = "A B C D E F G H I J K L M N O P Q R S T".Split(' ');   // U is the universe, Z a hole
 
     private readonly Ops _ops = new(t);
+    private readonly Typing _typing = new(t, env);
     private readonly Deduction _d = new(pr);
     private readonly HashSet<Name> _defined = new(ReferenceEqualityComparer.Instance);
     private readonly StringBuilder _out = new();
@@ -52,7 +53,9 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     {
         public string Universe { get; } = universe;
         public Dictionary<ulong, string> Vars { get; } = new();
-        public List<string> Bound { get; } = new();   // setvars in use, outermost first
+        public Dictionary<ulong, Expr> Types { get; } = new();   // each local's Lean type, for telling proofs from data
+        public List<string> Bound { get; } = new();   // every setvar the definition binds (for its $d list)
+        public List<string> Active { get; } = new();  // the binders enclosing the current position
     }
 
     /// <summary>⟦e⟧ as a set.mm class, with the universe written as <paramref name="universe"/> and the free variables as bound.</summary>
@@ -68,6 +71,11 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
 
     private string Tr(Expr e, Scope sc)
     {
+        // Proof irrelevance: every proof is (/). Types (sorts, Π-types) are never proofs, so they skip the check.
+        if (e is not Sort and not Binder { IsPi: true } && _typing.IsProof(e, sc.Types) == true)
+        {
+            return "(/)";
+        }
         switch (e)
         {
             case FVar f:
@@ -86,15 +94,28 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                     {
                         return $"( {Tr(b.Body, sc)} ^m {dom} )";
                     }
-                    string x = Fresh(sc);
+                    string x = Fresh(sc, dom);
                     Expr fv = t.FVar(_fresh++);
                     sc.Vars[((FVar)fv).Id] = x;
-                    sc.Bound.Add(x);
+                    sc.Types[((FVar)fv).Id] = b.Domain;
+                    if (!sc.Bound.Contains(x))
+                    {
+                        sc.Bound.Add(x);
+                    }
+                    sc.Active.Add(x);
                     string body = Tr(_ops.Instantiate(b.Body, [fv]), sc);
+                    sc.Active.RemoveAt(sc.Active.Count - 1);
+                    sc.Vars.Remove(((FVar)fv).Id);
                     return b.IsPi ? $"X_ {x} e. {dom} {body}" : $"( {x} e. {dom} |-> {body} )";
                 }
             case Let l:
                 return Tr(_ops.Instantiate(l.Body, [l.Value]), sc);
+            case Proj p:
+                {
+                    // A structure's value is <. (/) , fields >. (one constructor, tag (/)): field i of its second part.
+                    Define(p.StructName);
+                    return Field($"( 2nd ` {Tr(p.Struct, sc)} )", p.Idx);
+                }
             default:
                 throw new Refused($"not yet in the model: {e.GetType().Name} ({e})");
         }
@@ -102,12 +123,14 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
 
     private static bool IsZero(Level l) => l is LZero;
 
-    private string Fresh(Scope sc)
+    private string Fresh(Scope sc, string domain)
     {
-        // Each binder gets its own setvar, so that substituting for one never captures another.
+        // A binder's setvar differs from every enclosing binder's, so substituting for one never captures another,
+        // and from every variable in its own domain (mptexd, fvmptd3, iunexg and ixpexg need x disjoint from it).
+        var inDomain = domain.Split(' ').ToHashSet();
         foreach (string x in SetVars)
         {
-            if (!sc.Bound.Contains(x) && !sc.Vars.ContainsValue(x))
+            if (!sc.Active.Contains(x) && !sc.Vars.ContainsValue(x) && !inDomain.Contains(x))
             {
                 return x;
             }
@@ -117,7 +140,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
 
     // ---- definitions --------------------------------------------------------------------------------------------
 
-    private readonly Dictionary<string, string> _values = new();   // token → its value, with the universe written u
+    private readonly Dictionary<string, string> _values = new();
+    private readonly HashSet<string> _intoPropOnly = new();   // recursors of propositions that eliminate only into Prop   // token → its value, with the universe written u
 
     /// <summary>
     /// Declare lean.c and define it, after the constants its value uses: $c, a syntax axiom, and
@@ -135,12 +159,15 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         switch (c.Kind)
         {
             case ConstKind.Definition when c.Value is not null:
+            case ConstKind.Opaque when c.OpaqueValue is not null:
                 {
+                    // An opaque constant is defined by its value, which the kernel checked has its type. Lean can't
+                    // unfold it, so a Lean theorem about it uses only its type, and any value of that type is faithful.
                     string tok = Token(n) ?? throw new Refused($"{n}: the name has characters a set.mm token can't");
                     var sc = NewScope();
-                    string body = Tr(c.Value, sc);   // defines what it uses first
+                    string body = Tr(c.Value ?? c.OpaqueValue!, sc);   // defines what it uses first
                     _defined.Add(n);
-                    Emit(n, tok, body, sc, "definition");
+                    Emit(n, tok, body, sc, c.Kind == ConstKind.Opaque ? "opaque constant" : "definition");
                     return;
                 }
             case ConstKind.Inductive:
@@ -160,6 +187,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
     {
         var sc = new Scope(UniverseVar);
         sc.Bound.Add(UniverseVar);
+        sc.Active.Add(UniverseVar);
         return sc;
     }
 
@@ -202,10 +230,15 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 continue;
             }
             string dom = Tr(b.Domain, sc);
-            string x = Fresh(sc);
+            string x = Fresh(sc, dom);
             fv = t.FVar(_fresh++);
             sc.Vars[((FVar)fv).Id] = x;
-            sc.Bound.Add(x);
+            sc.Types[((FVar)fv).Id] = b.Domain;
+            if (!sc.Bound.Contains(x))
+            {
+                sc.Bound.Add(x);
+            }
+            sc.Active.Add(x);   // a telescope's binders enclose everything after them
             fvars?.Add(fv);
             r.Add((x, dom));
             ty = _ops.Instantiate(b.Body, [fv]);
@@ -241,10 +274,6 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         {
             throw new Refused($"{n} is a recursive inductive type; only non-recursive ones are in the model so far");
         }
-        if (ind.NumIndices > 0)
-        {
-            throw new Refused($"{n} is an indexed inductive type; not in the model yet");
-        }
         if (ind.NumNested > 0 || ind.BlockMembers.Count(m => env.Find(m)?.Kind == ConstKind.Inductive) > 1)
         {
             throw new Refused($"{n} is a mutual or nested inductive type; not in the model yet");
@@ -256,7 +285,12 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         }
         if (target is Sort { Level: LZero })
         {
-            throw new Refused($"{n} is an inductive proposition; not in the model yet");
+            DefineProposition(ind, itok);
+            return;
+        }
+        if (ind.NumIndices > 0)
+        {
+            throw new Refused($"{n} is an indexed inductive type (not a proposition); not in the model yet");
         }
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
         ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
@@ -277,7 +311,6 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 Expr cty = ctors[j].Type;
                 Telescope(ref cty, ind.NumParams, sc, reuse: pfv);
                 var fs = Telescope(ref cty, ctors[j].NumFields, sc);
-                RefuseBinders(fs, ctors[j].Name);
                 string part = $"{{ {Tag(j, Tuple(fs.Select(f => f.Var).ToList()))} }}";
                 parts.Add(fs.AsEnumerable().Reverse().Aggregate(part, (acc, f) => $"U_ {f.Var} e. {f.Dom} {acc}"));
             }
@@ -314,6 +347,90 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             }
             _defined.Add(rec.Name);
             Emit(rec.Name, Token(rec.Name)!, Maps(bs, Case(0, major)), sc, "recursor");
+        }
+    }
+
+    /// <summary>
+    /// A non-recursive inductive proposition, indexed or not: ( params |-> ( indices |-> if ( φ , 1o , (/) ) ) ), where φ
+    /// says some constructor applies: E. fields ( indices = the constructor's indices ). Its constructors build (/)
+    /// (every proof is (/)). Its recursor is (/) when it eliminates only into Prop; when it eliminates into any sort
+    /// (one constructor whose fields are proofs, like Eq, And, True; or none, like False), it is that constructor's
+    /// minor premise applied to (/) for each field, or (/) when there is no constructor.
+    /// </summary>
+    private void DefineProposition(ConstInfo ind, string itok)
+    {
+        Name n = ind.Name;
+        List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
+        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        foreach (ConstInfo c in ctors.Append(rec))
+        {
+            _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
+        }
+
+        // The proposition.
+        {
+            var sc = NewScope();
+            var pfv = new List<Expr>();
+            Expr ty = ind.Type;
+            var ps = Telescope(ref ty, ind.NumParams, sc, pfv);
+            var ifv = new List<Expr>();
+            var ixs = Telescope(ref ty, ind.NumIndices, sc, ifv);
+            var cases = new List<string>();
+            foreach (ConstInfo c in ctors)
+            {
+                Expr cty = c.Type;
+                Telescope(ref cty, ind.NumParams, sc, reuse: pfv);
+                var fs = Telescope(ref cty, c.NumFields, sc);
+                Ops.Spine(cty, out List<Expr> resultArgs);
+                var eqs = ixs.Select((ix, i) => $"{ix.Var} = {Tr(resultArgs[ind.NumParams + i], sc)}").ToList();
+                string body = eqs.Count == 0 ? "T." : eqs.Skip(1).Aggregate(eqs[0], (acc, e) => $"( {acc} /\\ {e} )");
+                cases.Add(fs.AsEnumerable().Reverse().Aggregate(body, (acc, f) => $"E. {f.Var} e. {f.Dom} {acc}"));
+            }
+            string set = cases.Count == 0 ? "(/)" : $"if ( {cases.Skip(1).Aggregate(cases[0], (acc, c) => $"( {acc} \\/ {c} )")} , 1o , (/) )";
+            _defined.Add(n);
+            Emit(n, itok, Maps(ps.Concat(ixs), set), sc, "inductive proposition");
+        }
+
+        // The constructors: proofs, so (/).
+        foreach (ConstInfo c in ctors)
+        {
+            var sc = NewScope();
+            Expr cty = c.Type;
+            var bs = Telescope(ref cty, ind.NumParams + c.NumFields, sc);
+            _defined.Add(c.Name);
+            Emit(c.Name, Token(c.Name)!, Maps(bs, "(/)"), sc, "constructor");
+        }
+
+        // The recursor.
+        {
+            var sc = NewScope();
+            Expr rty = rec.Type;
+            var mfv = new List<Expr>();
+            var bs = Telescope(ref rty, ind.NumParams + rec.NumMotives + rec.NumMinors + ind.NumIndices + 1, sc, mfv);
+            Expr motive = mfv[ind.NumParams];
+            Expr mt = sc.Types[((FVar)motive).Id];
+            while (mt is Binder { IsPi: true } mb)
+            {
+                mt = mb.Body;
+            }
+            bool large = mt is not Sort { Level: LZero };
+            if (!large)
+            {
+                _intoPropOnly.Add(Token(rec.Name)!);
+            }
+            string body = "(/)";
+            if (large && ctors.Count == 1)
+            {
+                // Subsingleton elimination: the one minor premise, at (/) for each field (all proofs).
+                string minor = bs[ind.NumParams + rec.NumMotives].Var;
+                body = Enumerable.Range(0, ctors[0].NumFields).Aggregate(minor, (acc, _) => $"( {acc} ` (/) )");
+            }
+            else if (large && ctors.Count > 1)
+            {
+                throw new Refused($"{n} eliminates into any sort with more than one constructor; not in the model yet");
+            }
+            _defined.Add(rec.Name);
+            Emit(rec.Name, Token(rec.Name)!, Maps(bs, body), sc, "recursor");
         }
     }
 
@@ -439,6 +556,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         }
         ConstInfo ind = env.Find(ctor.Induct!)!;
         ConstInfo rec = env.Find(t.Of($"{ind.Name}.rec"))!;
+        if (IsProposition(ind))
+        {
+            return PropositionIota(ctor, ind, rec);
+        }
         string itok = Token(ind.Name)!, ctok = Token(ctorName)!, rtok = Token(rec.Name)!;
         int j = Array.FindIndex(ind.Ctors, c => ReferenceEquals(c, ctorName));
         int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors, nf = ctor.NumFields;
@@ -456,6 +577,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         List<string> rdoms = Domains(rtok, recArgs, nrec);
         hyps.AddRange(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}"));
         List<string> cdoms = Domains(ctok, ctorArgs, np + nf);
+        RefuseBinders(cdoms.Skip(np).Select(d => ("", d)).ToList(), ctorName);
         hyps.AddRange(fields.Select((a, i) => $"{a} e. {cdoms[np + i]}"));
         string ph = Conj(hyps);
         Proof Pick(int _, string h) => Hyp(ph, h) ?? throw new Refused($"no hypothesis {h}");
@@ -488,6 +610,148 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             throw new InvalidOperationException($"the computation rule came out as {Rhs(cur)}, not {want}");
         }
         return (cur.Proves, cur.Proof, DistinctFor([itok, ctok, rtok], recArgs.Concat(fields)));
+    }
+
+    private static bool IsProposition(ConstInfo ind)
+    {
+        Expr target = ind.Type;
+        while (target is Binder { IsPi: true } pb)
+        {
+            target = pb.Body;
+        }
+        return target is Sort { Level: LZero };
+    }
+
+    /// <summary>
+    /// The computation rule of a constructor of an inductive proposition whose recursor eliminates into any sort (one
+    /// constructor, fields all proofs): I.rec params motive minor indices c = minor applied to (/) for each field, at
+    /// the constructor's own indices. Every proof is (/), so the major premise is (/), and it is in the proposition
+    /// because the constructor applies: the hypotheses say each field's proposition holds, ( (/) e. ⟦T⟧ ).
+    /// When the recursor eliminates only into Prop, both sides of the rule are proofs, (/) = (/), and there is
+    /// nothing to prove.
+    /// </summary>
+    private (MmExpr Statement, List<string> Proof, string[] Distinct) PropositionIota(ConstInfo ctor, ConstInfo ind, ConstInfo rec)
+    {
+        string itok = Token(ind.Name)!, rtok = Token(rec.Name)!;
+        if (_intoPropOnly.Contains(rtok))
+        {
+            throw new Refused($"{rec.Name} eliminates only into Prop: both sides of its computation rule are proofs, (/)");
+        }
+        int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors;
+        List<string> recArgs = ClassVars.Take(nrec).ToList();
+
+        // The constructor's indices, with the parameters as the class variables and every field (a proof) as (/).
+        var vars = new Dictionary<ulong, string>();
+        var types = new Dictionary<ulong, Expr>();
+        Expr cty = ctor.Type;
+        var fieldTypes = new List<Expr>();
+        for (int i = 0; i < np + ctor.NumFields; i++)
+        {
+            var b = (Binder)cty;
+            Expr fv = t.FVar(_fresh++);
+            vars[((FVar)fv).Id] = i < np ? recArgs[i] : "(/)";
+            types[((FVar)fv).Id] = b.Domain;
+            if (i >= np)
+            {
+                fieldTypes.Add(b.Domain);
+            }
+            cty = _ops.Instantiate(b.Body, [fv]);
+        }
+        Ops.Spine(cty, out List<Expr> result);
+        var sc = new Scope("U");
+        foreach (var kv in vars)
+        {
+            sc.Vars[kv.Key] = kv.Value;
+        }
+        foreach (var kv in types)
+        {
+            sc.Types[kv.Key] = kv.Value;
+        }
+        List<string> indices = result.Skip(np).Select(e => Tr(e, sc)).ToList();
+        List<string> fieldProps = fieldTypes.Select(ft => Tr(ft, sc)).ToList();   // ⟦T⟧ for each field, each in 2o
+
+        var hyps = new List<string> { "U e. Univ" };
+        List<string> rdoms = Domains(rtok, recArgs, nrec);
+        hyps.AddRange(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}"));
+        hyps.AddRange(fieldProps.Select(p => $"(/) e. {p}"));
+        string ph = Conj(hyps.Distinct());
+        Proof Pick(string h) => Hyp(ph, h) ?? throw new Refused($"no hypothesis {h}");
+
+        var allArgs = recArgs.Concat(indices).Append("(/)").ToList();
+        Proof ArgIn(int i, string dom)
+        {
+            if (i < nrec + indices.Count)
+            {
+                return Pick($"{allArgs[i]} e. {dom}");
+            }
+            // The major premise: (/) is in the proposition at these indices, because the constructor applies.
+            List<string> ps = recArgs.Take(np).Concat(indices).ToList();
+            (Proof eqT, _, _) = Unfold(ph, itok, ps, (k, d) => Pick($"{ps[k]} e. {d}"));
+            string iff = Rhs(eqT);
+            SyntaxTree n = pr.Parse("class", iff.Split(' '))!;
+            string cond = pr.Render(n.Children[0]);
+            // Proved under the field hypotheses alone (or T.): rspcedvd needs its bound variable disjoint from the
+            // context, and the full hypotheses may mention it inside an X_.
+            var need = fieldProps.Select(p => $"(/) e. {p}").Distinct().ToList();
+            string ph2 = need.Count == 0 ? "T." : Conj(need);
+            Proof holds2 = ProveCase(ph2, cond, Array.IndexOf(ind.Ctors, ctor.Name), ind.Ctors.Length);
+            Proof holds = need.Count == 0
+                ? _d.Lift(ph, pr.Apply("mptru", S(("ph", cond)), holds2))
+                : _d.Syl(need.Skip(1).Aggregate(Pick(need[0]), (acc, h) => _d.Jca(acc, Pick(h))), holds2);
+            Proof isOne = pr.Apply("iftrued", S(("ph", ph), ("ch", cond), ("A", "1o"), ("B", "(/)")), holds);
+            Proof toOne = _d.Trans(eqT, isOne);
+            Proof inOne = _d.Lift(ph, pr.Apply("0lt1o", S()));
+            Proof bi = pr.Apply("eleq2d", S(("ph", ph), ("A", Lhs(eqT)), ("B", "1o"), ("C", "(/)")), toOne);
+            return pr.Apply("mpbird", S(("ph", ph), ("ps", $"(/) e. {Lhs(eqT)}"), ("ch", "(/) e. 1o")), inOne, bi);
+        }
+        (Proof eqR, _, _) = Unfold(ph, rtok, allArgs, ArgIn);
+        string minor = recArgs[np + rec.NumMotives];
+        string want = Enumerable.Range(0, ctor.NumFields).Aggregate(minor, (acc, _) => $"( {acc} ` (/) )");
+        if (Rhs(eqR) != want)
+        {
+            throw new InvalidOperationException($"the computation rule came out as {Rhs(eqR)}, not {want}");
+        }
+        return (eqR.Proves, eqR.Proof, DistinctFor([itok, rtok], recArgs));
+    }
+
+    /// <summary>( ph -> φ ) for the case of constructor j in a proposition's disjunction of cases, its fields all (/).</summary>
+    private Proof ProveCase(string ph, string cond, int j, int count)
+    {
+        if (count > 1)
+        {
+            SyntaxTree n = pr.Parse("wff", cond.Split(' '))!;
+            string l = pr.Render(n.Children[0]), r = pr.Render(n.Children[1]);
+            return j == count - 1
+                ? pr.Apply("olcd", S(("ph", ph), ("ps", r), ("ch", l)), ProveWff(ph, r))
+                : pr.Apply("orcd", S(("ph", ph), ("ps", l), ("ch", r)), ProveCase(ph, l, j, count - 1));
+        }
+        return ProveWff(ph, cond);
+    }
+
+    /// <summary>( ph -> w ) for T., A = A, conjunctions, and E. x e. T w' witnessed by (/) (a proof field).</summary>
+    private Proof ProveWff(string ph, string w)
+    {
+        SyntaxTree n = pr.Parse("wff", w.Split(' '))!;
+        switch (n.Rule.Label)
+        {
+            case "wtru":
+                return pr.Apply("trud", S(("ph", ph)));
+            case "wceq" when pr.Render(n.Children[0]) == pr.Render(n.Children[1]):
+                return _d.Refl(ph, pr.Render(n.Children[0]));
+            case "wa":
+                return _d.Jca(ProveWff(ph, pr.Render(n.Children[0])), ProveWff(ph, pr.Render(n.Children[1])));
+            case "wrex":
+                {
+                    string body = pr.Render(n.Children[0]), x = pr.Render(n.Children[1]), dom = pr.Render(n.Children[2]);
+                    string inst = Subst(body, x, "(/)");
+                    Proof sub = body.Split(' ').Contains(x)
+                        ? _d.Congruence("wff", Subst(body, x, "Z"), "Z", pr.Apply("simpr", S(("ph", ph), ("ps", $"{x} = (/)"))))
+                        : _d.BiRefl($"( {ph} /\\ {x} = (/) )", body);
+                    return pr.Apply("rspcedvd", S(("ph", ph), ("x", x), ("A", "(/)"), ("B", dom), ("ps", body), ("ch", inst)),
+                        Hyp(ph, $"(/) e. {dom}") ?? throw new Refused($"no hypothesis (/) e. {dom}"), sub, ProveWff(ph, inst));
+                }
+        }
+        throw new Refused($"can't prove {w} yet");
     }
 
     private (string L, string R) Eq(Proof p) => _d.Sides(_d.Split(p.Proves).X) is var (l, r, _) ? (l, r) : default;

@@ -46,9 +46,16 @@ if (args.Length >= 5 && args[0] == "define")
             if (denv.Find(dt.Of(name))?.Kind == ConstKind.Constructor)
             {
                 // A constructor also has its computation rule: the recursor on it reduces to its minor premise.
-                var (istmt, iproof, idistinct) = model.Iota(dt.Of(name));
-                proved.Add(($"lean-{name}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {name}."));
-                Console.WriteLine($"{name} (computation rule): {istmt} ({iproof.Count} proof steps)");
+                try
+                {
+                    var (istmt, iproof, idistinct) = model.Iota(dt.Of(name));
+                    proved.Add(($"lean-{name}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {name}."));
+                    Console.WriteLine($"{name} (computation rule): {istmt} ({iproof.Count} proof steps)");
+                }
+                catch (Model.Refused e) when (e.Message.Contains("only into Prop"))
+                {
+                    Console.WriteLine($"{name} (computation rule): none needed: {e.Message}");
+                }
             }
         }
         catch (Model.Refused e)

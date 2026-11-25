@@ -182,4 +182,46 @@ For `Bool`, `Prod` and `Option`, the type, constructor and recursor definitions 
 | a structure field whose type binds a variable (`Functor.mk`) | 476 |
 | `False` (proposition) | 304 |
 
-**Next:** recursive types (`Nat`, `List`), with the type as a least fixed point and the recursor by well-founded recursion. Then inductive propositions and projections. Fields whose types bind variables are refused for now, because the computation rule matches hypotheses as text; they need matching up to renaming of bound variables.
+## Step 3, second part: proofs, propositions, projections (built)
+
+**Proof irrelevance.** Every proof now translates to `(/)`. Telling a proof from data needs a term's type, so the model has a small type inferencer of its own (`Typing.cs`): structural inference, with types normalized by beta, delta and zeta. The replayer only checks the types the trace records.
+
+The inferencer isn't trusted. A wrong answer changes what a translated definition says, and its equations then fail to verify; it can't make a verifier accept a false theorem. Whether a definition means what the Lean one means is a separate question. It is checked, for the constants a headline statement uses, by bridge theorems such as `⟦Nat.add⟧ = +`.
+
+A side effect: theorems used inside definitions become `(/)`, so they never need translating.
+
+**Inductive propositions**, indexed or not, if they aren't recursive:
+- **The proposition:** `( params |-> ( indices |-> if ( φ , 1o , (/) ) ) )`, where φ says some constructor applies, `E. fields ( indices = the constructor's indices )`. So `Eq α a b` is `if ( b = a , 1o , (/) )`, `And p q` is `if ( E. z e. p E. w e. q T. , 1o , (/) )`, and `False` is `(/)`.
+- **Constructors:** proofs, so `(/)`.
+- **A recursor that eliminates only into `Prop`:** `(/)`. Both sides of its computation rule are proofs, so there is nothing to prove.
+- **A recursor that eliminates into any sort** (`Eq`, `HEq`, `And`, `True`: one constructor whose fields are proofs): the minor premise applied to `(/)` for each field. With no constructor (`False`), it is `(/)`.
+
+Its computation rule is proved in three steps:
+1. unfold the recursor at the constructor's indices;
+2. show `(/)` is in the proposition by proving the constructor's case of φ (`rspcedvd` with witness `(/)`, `trud`, `eqidd`, `orcd`/`olcd`), then `iftrued` and `0lt1o`;
+3. check that the result is the minor premise.
+
+For `Eq.refl`, `HEq.refl`, `True.intro` and `And.intro`, both verifiers accept the computation rule. Every definition passes the definition check.
+
+**Projections** out of a structure read field *i* from its tagged tuple: `1st` after *i* applications of `2nd`, on `( 2nd ` s )`.
+
+**Also:**
+- Opaque constants are defined by their checked value. Lean can't unfold them, so a Lean theorem about one uses only its type, and any value of that type is faithful.
+- Binders in sibling scopes may share a set variable. A binder must still differ from every enclosing binder, which keeps substitution capture-free, and from every variable in its own domain. `mptexd`, `fvmptd3`, `iunexg` and `ixpexg` need the latter, and all three checkers caught a first version that missed it.
+- Fields whose types bind variables are refused only where it matters, in the computation rule, which matches hypotheses as text.
+
+**The effect on `Init`:** 5,362 of 17,590 definitions now translate with everything they use. That's up from 1,468 after the first part and 48 before step 3. Nearly every blocker left is a recursive type:
+
+| What stops a definition next | Definitions |
+|---|---|
+| `Nat` | 4,747 |
+| `List` | 2,888 |
+| `Lean.Syntax` | 686 |
+| `Lean.ParserDescr` | 647 |
+| `Lean.Name` | 237 |
+| `Nat` literals | 187 |
+| `Acc` | 113 |
+
+**Next: recursive types.** set.mm has what's needed to build a recursive type's set: `rec ( F , A )` with `rdg0` and `rdgsuc`, `frfnom`, and `omex`. The type would be the union of an ω-chain of stages, `U_ n e. om ( rec ( G , (/) ) ` n )` with `G = ( X e. _V |-> ( X u. F ( X ) ) )`. It is a set by `iunexg` and `omex`.
+
+The recursor is the real work. Its computation rules need induction, which comes down to the recursion theorem for the type: a function on the fixed point satisfying the constructor equations exists, and it is unique. The plan is to prove that once, in a general form that each recursive type instantiates, rather than generating an induction proof per type.

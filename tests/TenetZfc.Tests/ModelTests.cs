@@ -201,6 +201,90 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void ProofsAreEmptyAndPropositionsAreInTwoO()
+    {
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("props.ndjson"));
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        foreach (string n in new[] { "Eq.rec", "And.rec", "False.rec", "Or.rec" })
+        {
+            m.Define(t.Of(n));
+        }
+        string d = m.Declarations;
+        output.WriteLine(d);
+        // Eq α a b is 1o when b = a and (/) otherwise; its one proof is (/).
+        Assert.Contains("df-lean.Eq $a |- lean.Eq = ( u e. Univ |-> ( x e. u |-> ( y e. x |-> ( z e. x |-> if ( z = y , 1o , (/) ) ) ) ) ) $.", d);
+        Assert.Contains("df-lean.Eq.refl $a |- lean.Eq.refl = ( u e. Univ |-> ( x e. u |-> ( y e. x |-> (/) ) ) ) $.", d);
+        // Eq.rec eliminates into any sort: it is its minor premise. Or.rec only into Prop: it is a proof, (/).
+        Assert.Matches(@"df-lean\.Eq\.rec .* \|-> (\w) \) \) \) \) \) \) \) \$\.", d);
+        Assert.Contains("df-lean.False $a |- lean.False = ( u e. Univ |-> (/) ) $.", d);
+    }
+
+    [Fact]
+    public void TheInferencerTellsProofsFromData()
+    {
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("props.ndjson"));
+        var ty = new Typing(t, env);
+        var ctx = new Dictionary<ulong, TenetZfc.Expr>();
+        // True.intro : True : Prop is a proof; True itself is a proposition, not a proof.
+        Assert.True(ty.IsProof(t.Const(t.Of("True.intro"), []), ctx));
+        Assert.False(ty.IsProof(t.Const(t.Of("True"), []), ctx));
+        Assert.True(ty.IsProposition(t.Const(t.Of("True"), []), ctx));
+    }
+
+    [Fact]
+    public void TheComputationRulesOfEqAndAndVerify()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("props.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        var m = new Model(t, env, pr);
+        var rules = new List<(string, Metamath.Expr, List<string>, string[])>();
+        foreach (string c in new[] { "Eq.refl", "And.intro", "True.intro" })
+        {
+            var (stmt, proof, distinct) = m.Iota(t.Of(c));
+            output.WriteLine($"{c}: {stmt} ({proof.Count} steps)");
+            rules.Add(($"lean-test-{c}-iota", stmt, proof, distinct));
+        }
+        // Eq.rec … motive m a (refl) = m; And.rec … (intro h1 h2) = minor (/) (/).
+        Assert.EndsWith("` B ) ` (/) ) = D )", rules[0].Item2.ToString());
+        Assert.EndsWith(") = ( ( D ` (/) ) ` (/) ) )", rules[1].Item2.ToString());
+        Assert.Throws<Model.Refused>(() => m.Iota(t.Of("Or.inl")));   // into Prop only: nothing to prove
+
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc inductive propositions test");
+        w.Raw(m.Declarations);
+        foreach (var (label, stmt, proof, distinct) in rules)
+        {
+            w.Theorem(label, "test", stmt, proof, distinct);
+        }
+        string file = Path.Combine(SetMm, $"tenet-zfc-props-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mm);
+            Assert.Contains("All proofs in the database were verified", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
     private static string Run(string exe, string dir, string args, out int code)
     {
         var psi = new ProcessStartInfo(exe, args) { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true };
