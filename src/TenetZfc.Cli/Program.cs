@@ -84,6 +84,39 @@ if (args.Length == 3 && args[0] == "bridge")
     File.WriteAllText(args[2], bw.ToString());
     return 0;
 }
+if (args.Length >= 4 && args[0] == "nat-bridge")
+{
+    // Milestone 3: bridge theorems from the model's Nat to set.mm's NN0 (docs/bridges.md).
+    var nt = new Terms();
+    TenetZfc.Environment nenv = Reader.ReadExport(nt, args[1]);
+    var npr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
+    var nmodel = new Model(nt, nenv, npr);
+    var bridge = new NatBridge(npr);
+    try
+    {
+        foreach (string c in new[] { "Nat", "Nat.zero", "Nat.succ", "Nat.add" })
+        {
+            nmodel.Define(nt.Of(c));
+        }
+        nmodel.Class(nt.Nat(2), "U", new Dictionary<ulong, string>());   // declares the literal maps
+        var numerals = args[4..].Select(System.Numerics.BigInteger.Parse).ToList();
+        bridge.ProveAll(numerals);
+    }
+    catch (Model.Refused e)
+    {
+        Console.Error.WriteLine($"refused: {e.Message}");
+        return 1;
+    }
+    var nw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "tenet-zfc bridge theorems: the model's Nat is NN0 (docs/bridges.md)");
+    nw.Raw(nmodel.Declarations);
+    foreach (var th in bridge.Theorems)
+    {
+        nw.Theorem(th.Label, th.Comment, th.Statement, th.Proof, th.Distinct);
+        Console.WriteLine($"{th.Label}: {th.Statement} ({th.Proof.Count} proof steps)");
+    }
+    File.WriteAllText(args[3], nw.ToString());
+    return 0;
+}
 if (args.Length == 2 && args[0] == "model-survey")
 {
     // Milestone 3: which definitions the generic model translates, and the first thing that stops each of the others.
