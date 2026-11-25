@@ -1048,10 +1048,6 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         int j = Array.FindIndex(ind.Ctors, c => ReferenceEquals(c, ctor.Name));
         int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors, nf = ctor.NumFields;
         List<int> rf = info.RecFields[j];
-        if (rf.Count > 1)
-        {
-            throw new Refused($"{ctor.Name} has more than one recursive field; not in the model yet");
-        }
         if (nrec + nf > ClassVars.Length)
         {
             throw new Refused("more arguments than class variables");
@@ -1102,14 +1098,14 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             return Simp(ctx, Rhs(cur2)) is Proof sp ? _d.Trans(cur2, sp) : cur2;
         }
 
-        Proof TagInStage(string ctx, string b, Proof bInOm, Proof? rIn)
+        Proof TagInStage(string ctx, string b, Proof bInOm, Func<int, Proof>? rIn)
         {
             string sb = Stage(b);
             Proof eqStep = StepAt(ctx, sb);
             string un = Rhs(eqStep);
             string fsb = Part(un, "B");
             Proof inF = MemberUnion(ctx, tag, fsb, ind.Ctors.Length, j, fields,
-                (kk, h) => rf.Contains(kk) ? rIn!.Value : Pick(ctx, h));
+                (kk, h) => rf.Contains(kk) ? rIn!(kk) : Pick(ctx, h));
             Proof inUn = _d.Syl(inF, pr.Apply("elun2", S(("A", tag), ("B", fsb), ("C", sb))));
             Proof inStep = pr.Apply("eleqtrrd", S(("ph", ctx), ("A", tag), ("B", un), ("C", Lhs(eqStep))), inUn, eqStep);
             Proof rdg = _d.Syl(_d.Syl(bInOm, pr.Apply("nnon", S(("A", b)))), pr.Apply("rdgsuc", S(("B", b), ("F", stepApp), ("A", "(/)"))));
@@ -1131,22 +1127,79 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         }
         else
         {
-            // r is in some stage m (a variable of its own: ssiun2s needs the union's k disjoint from suc m).
-            string r = fields[rf[0]];
+            // Each recursive field r_i is in some stage m_i (a variable of its own: ssiun2s needs the union's k disjoint
+            // from suc m_i). Under ctx_i = ( ( ctx_i-1 /\ m_i e. _om ) /\ r_i e. stage m_i ), all of them are in the stage
+            // b = ( ( m_1 u. m_2 ) u. … ), by lean-stagess; the tag is in the next one, and rexlimdva2 discharges the m_i.
             var stepVars = _values[info.StepTok].Split(' ').ToHashSet();
-            string m = FirstVar(x => x != k && !set.Split(' ').Contains(x) && !small.Split(' ').Contains(x) && !stepVars.Contains(x));
-            string setM = $"U_ {m} e. _om {Stage(m)}";
-            extraVars.Add(m);
-            Proof ren = pr.Apply("cbviunv", S(("x", k), ("y", m), ("A", "_om"), ("B", stageBody), ("C", Stage(m))),
-                _d.Congruence("class", Subst(stageBody, k, "Z"), "Z", pr.Apply("id", S(("ph", $"{k} = {m}")))));
-            Proof rInSet = pr.Apply("eleqtrd", S(("ph", small), ("A", r), ("B", iapp), ("C", set)), Pick(small, $"{r} e. {iapp}"), eqT0);
-            Proof rInSetM = pr.Apply("eleqtrd", S(("ph", small), ("A", r), ("B", set), ("C", setM)), rInSet, _d.Lift(small, ren));
-            Proof some = pr.Apply("sylib", S(("ph", small), ("ps", $"{r} e. {setM}"), ("ch", $"E. {m} e. _om {r} e. {Stage(m)}")),
-                rInSetM, pr.Apply("eliun", S(("A", r), ("x", m), ("B", "_om"), ("C", Stage(m)))));
-            string ctx = $"( ( {small} /\\ {m} e. _om ) /\\ {r} e. {Stage(m)} )";
-            Proof inner = TagInStage(ctx, m, Pick(ctx, $"{m} e. _om"), Pick(ctx, $"{r} e. {Stage(m)}"));
-            Proof lim = pr.Apply("rexlimdva2", S(("ph", small), ("x", m), ("A", "_om"), ("ps", $"{r} e. {Stage(m)}"), ("ch", $"{tag} e. {iapp}")), inner);
-            tagIn = pr.Apply("mpd", S(("ph", small), ("ps", $"E. {m} e. _om {r} e. {Stage(m)}"), ("ch", $"{tag} e. {iapp}")), some, lim);
+            var taken = new HashSet<string>(set.Split(' ').Concat(small.Split(' ')).Concat(stepApp.Split(' ')).Concat(stepVars)) { k };
+            string Fresh() { string x = FirstVar(y => !taken.Contains(y)); taken.Add(x); extraVars.Add(x); return x; }
+            Proof rInSet0(string r) => pr.Apply("eleqtrd", S(("ph", small), ("A", r), ("B", iapp), ("C", set)), Pick(small, $"{r} e. {iapp}"), eqT0);
+            var ms = new List<string>();
+            var somes = new List<Proof>();
+            var ctxs = new List<string> { small };
+            foreach (int ri in rf)
+            {
+                string r = fields[ri], m = Fresh();
+                string setM = $"U_ {m} e. _om {Stage(m)}";
+                Proof ren = pr.Apply("cbviunv", S(("x", k), ("y", m), ("A", "_om"), ("B", stageBody), ("C", Stage(m))),
+                    _d.Congruence("class", Subst(stageBody, k, "Z"), "Z", pr.Apply("id", S(("ph", $"{k} = {m}")))));
+                Proof rInSetM = pr.Apply("eleqtrd", S(("ph", small), ("A", r), ("B", set), ("C", setM)), rInSet0(r), _d.Lift(small, ren));
+                Proof some = pr.Apply("sylib", S(("ph", small), ("ps", $"{r} e. {setM}"), ("ch", $"E. {m} e. _om {r} e. {Stage(m)}")),
+                    rInSetM, pr.Apply("eliun", S(("A", r), ("x", m), ("B", "_om"), ("C", Stage(m)))));
+                somes.Add(ctxs.Count == 1 ? some : _d.Syl(Restrict(ctxs[^1], small), some));
+                ms.Add(m);
+                ctxs.Add($"( ( {ctxs[^1]} /\\ {m} e. _om ) /\\ {r} e. {Stage(m)} )");
+            }
+            string ctx = ctxs[^1];
+
+            // b, b e. _om, and m_i C_ b.
+            var bs = new List<string> { ms[0] };
+            Proof bOm = Pick(ctx, $"{ms[0]} e. _om");
+            for (int i = 1; i < ms.Count; i++)
+            {
+                bs.Add($"( {bs[^1]} u. {ms[i]} )");
+                bOm = _d.Syl(_d.Jca(bOm, Pick(ctx, $"{ms[i]} e. _om")), pr.Apply("omun", S(("A", bs[^2]), ("B", ms[i]))));
+            }
+            string b = bs[^1];
+            Proof SsB(int i, int level) => i == level
+                ? (level == 0 ? pr.Apply("ssid", S(("A", ms[0]))) : pr.Apply("ssun2", S(("A", ms[i]), ("B", bs[level - 1]))))
+                : pr.Apply("sstri", S(("A", ms[i]), ("B", bs[level - 1]), ("C", bs[level])),
+                    SsB(i, level - 1), pr.Apply("ssun1", S(("A", bs[level - 1]), ("B", ms[level]))));
+
+            // The step's values contain their argument: ( small -> z C_ ( stepf ` z ) ), lean-stagess's hypothesis.
+            Proof? grows = null;
+            Proof RIn(int ri)
+            {
+                int i = rf.IndexOf(ri);
+                string r = fields[ri];
+                Proof here = Pick(ctx, $"{r} e. {Stage(ms[i])}");
+                if (ms.Count == 1)
+                {
+                    return here;
+                }
+                if (grows is null)
+                {
+                    EnsureStageSs();
+                    string z = Fresh();
+                    Proof eqZ = StepAt(small, z);
+                    grows = pr.Apply("sseqtrrd", S(("ph", small), ("A", z), ("B", Rhs(eqZ)), ("C", Lhs(eqZ))),
+                        _d.Lift(small, pr.Apply("ssun1", S(("A", z), ("B", Part(Rhs(eqZ), "B"))))), eqZ);
+                }
+                string z0 = _d.Split(grows.Value.Proves).X.Split(' ')[0];
+                Proof mono = pr.Apply(Recursion.StageSsLabel, S(("ph", small), ("z", z0), ("F", stepApp), ("A", "(/)"), ("M", b), ("N", ms[i])), grows.Value);
+                Proof ante = _d.Jca(_d.Jca(bOm, Pick(ctx, $"{ms[i]} e. _om")), _d.Lift(ctx, SsB(i, ms.Count - 1)));
+                Proof ss = pr.Apply("mpd", S(("ph", ctx), ("ps", small), ("ch", $"{Stage(ms[i])} C_ {Stage(b)}")),
+                    Restrict(ctx, small), _d.Syl(ante, mono));
+                Proof imp = pr.Apply("sseld", S(("ph", ctx), ("A", Stage(ms[i])), ("B", Stage(b)), ("C", r)), ss);
+                return pr.Apply("mpd", S(("ph", ctx), ("ps", $"{r} e. {Stage(ms[i])}"), ("ch", $"{r} e. {Stage(b)}")), here, imp);
+            }
+            tagIn = TagInStage(ctx, b, bOm, RIn);
+            for (int i = ms.Count - 1; i >= 0; i--)
+            {
+                string r = fields[rf[i]], m = ms[i];
+                Proof lim = pr.Apply("rexlimdva2", S(("ph", ctxs[i]), ("x", m), ("A", "_om"), ("ps", $"{r} e. {Stage(m)}"), ("ch", $"{tag} e. {iapp}")), tagIn);
+                tagIn = pr.Apply("mpd", S(("ph", ctxs[i]), ("ps", $"E. {m} e. _om {r} e. {Stage(m)}"), ("ch", $"{tag} e. {iapp}")), somes[i], lim);
+            }
         }
         Proof vInSmall = pr.Apply("eqeltrd", S(("ph", small), ("A", v), ("B", tag), ("C", iapp)), eqV0, tagIn);
         Proof inType = _d.Syl(Restrict(ph, small), vInSmall);
@@ -1343,6 +1396,29 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             {"${"}
               {string.Join(" ", distinct.Select(d => $"$d {d} $."))}
               lean-rankfr $p {stmt} $=
+                {string.Join(' ', proof)} $.
+            {"$}"}
+
+            """;
+        _out.AppendLine(text);
+        pr.Database.Extend(text);
+    }
+
+    /// <summary>Write lean-stagess (the stages of a recursive type only grow) into the output once, and teach it to the prover.</summary>
+    private void EnsureStageSs()
+    {
+        if (pr.Database.Statements.ContainsKey(Recursion.StageSsLabel))
+        {
+            return;
+        }
+        var (stmt, proof, distinct) = new Recursion(pr).StageSs();
+        string text = $"""
+            $( The stages of a recursive type only grow: the recursors of constructors with several recursive fields
+               rest on it, to put all the fields in one stage. $)
+            {"${"}
+              {string.Join(" ", distinct.Select(d => $"$d {d} $."))}
+              {Recursion.StageSsHyp} $e {Recursion.StageSsHypText} $.
+              {Recursion.StageSsLabel} $p {stmt} $=
                 {string.Join(' ', proof)} $.
             {"$}"}
 

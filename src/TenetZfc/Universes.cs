@@ -24,6 +24,9 @@ public sealed partial class Model
     /// <summary>The hypothesis on the universe argument U.</summary>
     private string UHyp => $"U e. {UniverseDomain}";
 
+    /// <summary>A name as part of a label: labels allow only letters, digits and - _ . (c.{0,1} becomes c.u0_1).</summary>
+    public static string LabelPart(string name) => name.Replace("{", "u").Replace(",", "_").Replace("}", "");
+
     /// <summary>A closed level's value, or null when it mentions a parameter.</summary>
     public static int? LevelValue(Level l) => l switch
     {

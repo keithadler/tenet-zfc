@@ -201,6 +201,9 @@ public sealed class Database
         return r.ToList();
     }
 
+    /// <summary>The mandatory hypotheses, in order, of an assertion with this statement made where the database ends.</summary>
+    public IReadOnlyList<Statement> MandatoryHyps(Expr assertion) => Mandatory(_scopes, assertion);
+
     /// <summary>The $e hypotheses in scope, and the $f hypotheses of every variable they or the assertion mention, in order of appearance.</summary>
     private static List<Statement> Mandatory(List<List<Statement>> scopes, Expr assertion)
     {
@@ -457,24 +460,263 @@ public sealed class Prover
     }
 }
 
-/// <summary>Writes a .mm file that includes set.mm and adds theorems with their proofs.</summary>
+
+/// <summary>
+/// Metamath's compressed proof format (the Metamath book, appendix B), with every repeated subproof shared: a proof is
+/// <c>( labels ) LETTERS</c>, where the letters number the steps — the theorem's mandatory hypotheses first, then the
+/// listed labels, then the steps saved by <c>Z</c> — and a repeated subproof is written once, saved, and referred to by
+/// number after that. A flat proof repeats every subterm in full; this writes each distinct one once.
+/// </summary>
+public static class CompressedProof
+{
+    /// <summary>
+    /// Compress a proof (labels in reverse Polish order). <paramref name="mandatory"/> are the theorem's mandatory
+    /// hypotheses, in order; <paramref name="arity"/> gives the number of hypotheses of every other label the proof uses.
+    /// Returns the label list and the letters, without the parentheses.
+    /// </summary>
+    public static (List<string> Labels, string Letters) Compress(IReadOnlyList<string> proof, IReadOnlyList<string> mandatory, Func<string, int> arity)
+    {
+        var hypNumber = new Dictionary<string, int>();
+        for (int i = 0; i < mandatory.Count; i++)
+        {
+            hypNumber.TryAdd(mandatory[i], i + 1);
+        }
+
+        // The proof as a tree, with equal subproofs as one node: a node is its label and its children's nodes.
+        var nodeLabel = new List<string>();
+        var nodeChildren = new List<int[]>();
+        var intern = new Dictionary<string, int>();
+        var stack = new List<int>();
+        var key = new StringBuilder();
+        foreach (string label in proof)
+        {
+            int k = hypNumber.ContainsKey(label) ? 0 : arity(label);
+            if (k > stack.Count)
+            {
+                throw new InvalidOperationException($"compressing a proof: {label} needs {k} hypotheses, the stack has {stack.Count}");
+            }
+            int[] children = stack.GetRange(stack.Count - k, k).ToArray();
+            stack.RemoveRange(stack.Count - k, k);
+            key.Clear().Append(label);
+            foreach (int c in children)
+            {
+                key.Append(' ').Append(c);
+            }
+            string ks = key.ToString();
+            if (!intern.TryGetValue(ks, out int id))
+            {
+                id = nodeLabel.Count;
+                nodeLabel.Add(label);
+                nodeChildren.Add(children);
+                intern[ks] = id;
+            }
+            stack.Add(id);
+        }
+        if (stack.Count != 1)
+        {
+            throw new InvalidOperationException($"compressing a proof: it leaves {stack.Count} expressions on the stack, not 1");
+        }
+        int root = stack[0];
+
+        // Which subproofs the written proof meets more than once. A shared one is not descended into again, so a
+        // subproof that repeats only inside a shared one is met once. A single step costs no more to repeat than to
+        // refer to, so only steps with hypotheses are shared.
+        int n = nodeLabel.Count;
+        var met = new int[n];
+        var todo = new Stack<int>();
+        todo.Push(root);
+        while (todo.Count > 0)
+        {
+            int id = todo.Pop();
+            if (met[id]++ > 0)
+            {
+                continue;
+            }
+            foreach (int c in nodeChildren[id])
+            {
+                todo.Push(c);
+            }
+        }
+
+        // The steps, in order: a label (≥ 0, its node), a saved step (< 0: -1 - its index), or Z (int.MinValue).
+        const int Z = int.MinValue;
+        var steps = new List<int>();
+        var saved = new Dictionary<int, int>();
+        var uses = new Dictionary<string, int>();
+        var walk = new Stack<(int Id, bool Done)>();
+        walk.Push((root, false));
+        while (walk.Count > 0)
+        {
+            (int id, bool done) = walk.Pop();
+            if (!done)
+            {
+                if (saved.TryGetValue(id, out int s))
+                {
+                    steps.Add(-1 - s);
+                    continue;
+                }
+                walk.Push((id, true));
+                int[] ch = nodeChildren[id];
+                for (int i = ch.Length - 1; i >= 0; i--)
+                {
+                    walk.Push((ch[i], false));
+                }
+                continue;
+            }
+            steps.Add(id);
+            string l = nodeLabel[id];
+            if (!hypNumber.ContainsKey(l))
+            {
+                uses[l] = uses.GetValueOrDefault(l) + 1;
+            }
+            if (met[id] > 1 && nodeChildren[id].Length > 0 && !saved.ContainsKey(id))
+            {
+                saved[id] = saved.Count;
+                steps.Add(Z);
+            }
+        }
+
+        // The labels, most used first so that they get the shortest numbers.
+        var labels = uses.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => kv.Key).ToList();
+        var labelNumber = new Dictionary<string, int>(hypNumber);
+        for (int i = 0; i < labels.Count; i++)
+        {
+            labelNumber[labels[i]] = mandatory.Count + i + 1;
+        }
+        int firstSaved = mandatory.Count + labels.Count + 1;
+        var letters = new StringBuilder();
+        foreach (int st in steps)
+        {
+            if (st == Z)
+            {
+                letters.Append('Z');
+            }
+            else if (st < 0)
+            {
+                AppendNumber(letters, firstSaved + (-1 - st));
+            }
+            else
+            {
+                AppendNumber(letters, labelNumber[nodeLabel[st]]);
+            }
+        }
+        return (labels, letters.ToString());
+    }
+
+    /// <summary>A step number in letters: the last digit A–T (1–20), the ones before it U–Y (1–5).</summary>
+    public static void AppendNumber(StringBuilder sb, int number)
+    {
+        int n = number - 1;
+        var digits = new Stack<char>();
+        digits.Push((char)('A' + n % 20));
+        n /= 20;
+        while (n > 0)
+        {
+            n--;
+            digits.Push((char)('U' + n % 5));
+            n /= 5;
+        }
+        while (digits.Count > 0)
+        {
+            sb.Append(digits.Pop());
+        }
+    }
+
+    /// <summary>
+    /// Expand a compressed proof back to labels in reverse Polish order, each shared subproof written out again: the
+    /// inverse of <see cref="Compress"/>, for checking it.
+    /// </summary>
+    public static List<string> Expand(IReadOnlyList<string> labels, string letters, IReadOnlyList<string> mandatory, Func<string, int> arity)
+    {
+        var all = mandatory.Concat(labels).ToList();
+        var stack = new List<List<string>>();
+        var saved = new List<List<string>>();
+        int number = 0;
+        foreach (char c in letters)
+        {
+            if (char.IsWhiteSpace(c))
+            {
+                continue;
+            }
+            if (c == 'Z')
+            {
+                saved.Add(stack[^1]);
+                continue;
+            }
+            if (c is >= 'U' and <= 'Y')
+            {
+                number = number * 5 + (c - 'U' + 1);
+                continue;
+            }
+            if (c is < 'A' or > 'T')
+            {
+                throw new InvalidOperationException($"not a compressed proof letter: {c}");
+            }
+            number = number * 20 + (c - 'A' + 1);
+            if (number <= all.Count)
+            {
+                string label = all[number - 1];
+                int k = number <= mandatory.Count ? 0 : arity(label);
+                var step = new List<string>();
+                foreach (List<string> h in stack.GetRange(stack.Count - k, k))
+                {
+                    step.AddRange(h);
+                }
+                stack.RemoveRange(stack.Count - k, k);
+                step.Add(label);
+                stack.Add(step);
+            }
+            else
+            {
+                stack.Add(saved[number - all.Count - 1]);
+            }
+            number = 0;
+        }
+        if (stack.Count != 1)
+        {
+            throw new InvalidOperationException($"the proof leaves {stack.Count} expressions on the stack, not 1");
+        }
+        return stack[0];
+    }
+}
+
+/// <summary>
+/// Writes a .mm file that includes set.mm and adds theorems with their proofs. Given the database the proofs were made
+/// against, it writes them compressed, sharing every repeated subproof (<see cref="CompressedProof"/>); without one,
+/// as flat label lists.
+/// </summary>
 public sealed class Writer
 {
     private readonly StringBuilder _sb = new();
+    private readonly Database? _db;
+    private readonly Dictionary<string, int> _written = new();   // the number of hypotheses of each theorem written here
 
-    public Writer(string include, string header)
+    public Writer(string include, string header) : this(include, header, null)
     {
+    }
+
+    /// <param name="compressAgainst">The database the proofs are made against, to compress them; null for flat proofs.</param>
+    public Writer(string include, string header, Database? compressAgainst)
+    {
+        _db = compressAgainst;
         _sb.AppendLine($"$( {header} $)");
         _sb.AppendLine($"$[ {include} $]");
         _sb.AppendLine();
     }
 
+    public bool Compressed => _db is not null;
+
     public void Theorem(string label, string comment, Expr statement, IEnumerable<string> proof)
     {
         _sb.AppendLine($"  $( {comment} $)");
         _sb.AppendLine($"  {label} $p {statement} $=");
-        _sb.AppendLine("    " + string.Join(' ', proof) + " $.");
+        AppendProof(_sb, "    ", statement, proof.ToList());
+        _sb.AppendLine(" $.");
         _sb.AppendLine();
+        if (_db is not null)
+        {
+            _written[label] = _db.MandatoryHyps(statement).Count;
+        }
     }
 
     /// <summary>A theorem in its own scope, with distinct-variable conditions (each line a $d list).</summary>
@@ -490,8 +732,92 @@ public sealed class Writer
         _sb.AppendLine();
     }
 
-    /// <summary>Text written as it is: declarations and definitions.</summary>
-    public void Raw(string text) => _sb.AppendLine(text);
+    private static readonly System.Text.RegularExpressions.Regex RawTheorem = new(
+        @"(?<head>(?<label>[^\s$]+)\s+\$p\s+(?<stmt>[^$]*?)\s+\$=)(?<ws>\s+)(?<proof>[^($][^$]*?)\s+\$\.",
+        System.Text.RegularExpressions.RegexOptions.Singleline);
+
+    /// <summary>
+    /// Text written as it is: declarations and definitions. When compressing, a theorem in it (<c>label $p … $= … $.</c>)
+    /// has its flat proof compressed too, unless the text has $e hypotheses: their scopes are not tracked here.
+    /// </summary>
+    public void Raw(string text)
+    {
+        if (_db is not null && text.Contains("$p") && !text.Contains("$e"))
+        {
+            text = RawTheorem.Replace(text, m =>
+            {
+                Expr stmt = Expr.Of(m.Groups["stmt"].Value);
+                var flat = m.Groups["proof"].Value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).ToList();
+                var sb = new StringBuilder(m.Groups["head"].Value).AppendLine();
+                string indent = m.Groups["ws"].Value.Split('\n')[^1];
+                AppendProof(sb, indent, stmt, flat);
+                return sb.Append(" $.").ToString();
+            });
+        }
+        _sb.AppendLine(text);
+    }
+
+    private void AppendProof(StringBuilder sb, string indent, Expr statement, List<string> proof)
+    {
+        if (_db is null)
+        {
+            sb.Append(indent).Append(string.Join(' ', proof));
+            return;
+        }
+        var mandatory = _db.MandatoryHyps(statement).Select(h => h.Label).ToList();
+        (List<string> labels, string letters) = CompressedProof.Compress(proof, mandatory, Arity);
+        // Wrapped at 79 columns, as metamath-exe writes compressed proofs.
+        const int Width = 79;
+        int col = 0;
+        void Word(string w)
+        {
+            if (col > indent.Length && col + 1 + w.Length > Width)
+            {
+                sb.AppendLine();
+                col = 0;
+            }
+            if (col == 0)
+            {
+                sb.Append(indent);
+                col = indent.Length;
+            }
+            else
+            {
+                sb.Append(' ');
+                col++;
+            }
+            sb.Append(w);
+            col += w.Length;
+        }
+        Word("(");
+        foreach (string l in labels)
+        {
+            Word(l);
+        }
+        Word(")");
+        // The letters fill each line; whitespace may fall anywhere among them.
+        for (int i = 0; i < letters.Length;)
+        {
+            int room = Width - col - 1;
+            if (room < 1)
+            {
+                room = Width - indent.Length;
+            }
+            int take = Math.Min(room, letters.Length - i);
+            Word(letters.Substring(i, take));
+            i += take;
+        }
+    }
+
+    private int Arity(string label)
+    {
+        if (_written.TryGetValue(label, out int n))
+        {
+            return n;
+        }
+        Statement s = _db![label];
+        return s.Kind is 'a' or 'p' ? s.Hyps.Count : 0;
+    }
 
     public override string ToString() => _sb.ToString();
 }
