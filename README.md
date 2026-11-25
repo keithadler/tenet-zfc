@@ -10,7 +10,7 @@ It is built on [Tenet](https://github.com/keithadler/tenet), an independent Lean
 > - `2 + 2 = 4`, from its trace, as `|- ( 2 + 2 ) = 4`;
 > - `List.length_append`, from its proof term (induction on lists, through `set.mm`'s word induction), as `|- ( ( B e. Word A /\ C e. Word A ) -> ( # ` ( B ++ C ) ) = ( ( # ` B ) + ( # ` C ) ) )`.
 >
-> The translation so far covers the fragment those proofs use; milestone 3 is the rest of Lean's kernel. See [docs/interpretation.md](docs/interpretation.md).
+> The translation so far covers the fragment those proofs use; milestone 3 is the rest of Lean's kernel. `tenet-zfc survey` measures the gap: the milestone 2 table translates 119 of `Init`'s 45,588 theorem statements, and their proofs mention 37,118 constants. So milestone 3 replaces the table with a generic translation of every definition. See [docs/interpretation.md](docs/interpretation.md) and [docs/milestone3.md](docs/milestone3.md).
 
 ## Why
 

@@ -68,6 +68,8 @@ public sealed class Environment
 
     public string? LeanVersion { get; internal set; }
     public int Count => _consts.Count;
+    /// <summary>This environment's own constants, in no particular order.</summary>
+    public IEnumerable<ConstInfo> All => _consts.Values;
     public ConstInfo? Find(Name n) => _consts.TryGetValue(n, out ConstInfo? c) ? c : _parent?.Find(n);
     internal void Add(ConstInfo c) => _consts[c.Name] = c;
 }

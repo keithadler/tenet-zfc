@@ -10,6 +10,8 @@ const string Usage = """
                                                          replay, then write set.mm theorems for the theorems the
                                                          emitter covers (Nat arithmetic equations, and induction
                                                          on lists like List.length_append)
+      tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
+                                                         which constants block the rest
 
     make a trace with Tenet (github.com/keithadler/tenet, main):
       tenet check <export.ndjson> --trace <trace.ndjson>
@@ -20,6 +22,22 @@ const string Usage = """
 if (args.Length == 5 && args[0] == "emit")
 {
     return Emit(args[1], args[2], args[3], args[4]);
+}
+if (args.Length == 2 && args[0] == "survey")
+{
+    // How much of an export the translator covers, and what to add next.
+    var st0 = new Terms();
+    var r = new Survey(st0, Reader.ReadExport(st0, args[1])).Run();
+    Console.WriteLine($"theorems: {r.Theorems}");
+    Console.WriteLine($"statements translated by the table: {r.StatementsTranslated}");
+    Console.WriteLine("why the others aren't:");
+    foreach ((string why, int n) in r.Reasons) Console.WriteLine($"  {n,7}  {why}");
+    Console.WriteLine("constants outside the table, by the number of statements (and statements with proofs) that mention them:");
+    foreach ((Name c, int s, int f) in r.Blockers) Console.WriteLine($"  {s,7} {f,7}  {c}");
+    Console.WriteLine("theorems whose constants are all covered, after adding the top k of that ranking:");
+    Console.WriteLine("        k  statements  with proofs");
+    foreach ((int k, int s, int f) in r.Curve) Console.WriteLine($"  {k,7}  {s,10}  {f,11}");
+    return 0;
 }
 if (args.Length >= 4 && args[0] == "mm-parse")
 {
