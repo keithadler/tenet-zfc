@@ -43,7 +43,7 @@ public static class RunCommand
           --lean      TENET_ZFC_LEAN       lean; by default elan's, at leanout's toolchain   (for a module or file)
           --tenet     TENET_ZFC_TENET      Tenet, tenet or tenet.dll                         (optional)
 
-        exit status: 0 every declaration proved, 1 some refused or failed, 2 a usage, tool or file error
+        exit status: 0 every declaration proved (with --no-verify: translated), 1 some refused or failed, 2 a usage, tool or file error
         """;
 
     private sealed record Decl(string Name, string Kind)
@@ -336,7 +336,8 @@ public static class RunCommand
             summary = new { proved, refused, failed, translated = unverified },
         };
         File.WriteAllText(Path.Combine(outDir, "report.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }) + "\n");
-        return proved == decls.Count ? 0 : 1;
+        // With --no-verify nothing can be proved: success is then every declaration translated.
+        return proved + unverified == decls.Count ? 0 : 1;
     }
 
     /// <summary>
