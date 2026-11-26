@@ -551,7 +551,7 @@ Before this part, 1,483 definitions in `Init` stopped at "`Lean.Syntax` is a mut
 - the mutual block `Tm`/`Args`: the computation rules of `Tm.var`, `Tm.app`, `Args.nil` and `Args.cons`. `Tm.app`'s fields recurse into both types, through `Tm.rec` and `Args.rec`.
 - the nested type `Rose`: `Rose.node` (through the bridge for `List (Rose α)`), and `Rose.rec_1` on `List.nil` and `List.cons`. `List.cons`'s head recurses through `Rose.rec` and its tail through `Rose.rec_1`.
 
-Both verifiers accept them, and every definition passes the definition check. `Lean.Syntax`'s types, constructors and recursors are defined the same way (a test checks them, from `syntax.ndjson`).
+Both verifiers accept them, and every definition passes the definition check. The flat proofs are long, from 319,000 steps (`Args.nil`) to 1,643,000 (`Rose.rec_1` on `List.cons`); compressed, `mutual.mm` is 267 KB. Generating them takes about 25 minutes of CPU, mostly in the prover's flat proof search. `Lean.Syntax`'s types, constructors and recursors are defined the same way (a test checks them, from `syntax.ndjson`).
 
 **A fix on the way.** The recursors' definitional equations exposed a `$d` bug in the sethood prover. When two minor premises both bind `w` (`X_ w e. …`), a hypothesis mentioning `w` was carried under `ralrimivw` over `w`. It now drops hypotheses the term doesn't use before going under a binder.
 
