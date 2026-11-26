@@ -26,6 +26,9 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
     private string? _setmm;
     private readonly object _read = new();
 
+    /// <summary>The time budget for one constant: its equation and computation rule together.</summary>
+    public double BudgetSeconds { get; init; } = 600;
+
     /// <summary>Constants slower than this are listed as the run goes.</summary>
     public double SlowSeconds { get; init; } = 5;
 
@@ -53,6 +56,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
         {
             var sw = Stopwatch.StartNew();
             string kind = c.Kind.ToString().ToLowerInvariant();
+            pr.Deadline = DateTime.UtcNow.AddSeconds(BudgetSeconds);
             // What is running now, for watching a long run: chunk-NNNN.progress names the constant in hand.
             File.WriteAllText(Path.Combine(outDir, name + ".progress"), $"{outcomes.Count + 1}/{constants.Count} {c.Name}\n");
             try
@@ -87,6 +91,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
                 outcomes.Add(new($"{c.Name}", kind, e is Model.Refused ? "refused" : "error", 0, "-", 0, Why(e), sw.Elapsed.TotalSeconds));
             }
         }
+        pr.Deadline = null;
         foreach (Outcome o in outcomes.Where(o => o.Seconds > SlowSeconds))
         {
             Console.WriteLine($"  {name} slow: {o.Name} {o.Seconds:F0}s ({o.EqSteps} + {o.IotaSteps} steps, {o.Status})");

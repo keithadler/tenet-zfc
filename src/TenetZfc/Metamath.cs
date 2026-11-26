@@ -199,9 +199,24 @@ public sealed class Prover
     /// <summary>The database the prover parses and applies against.</summary>
     public Database Database => _db;
 
+    /// <summary>
+    /// When set, parsing or applying after this time throws <see cref="TimeoutException"/>: a time budget per proof, so
+    /// that one pathological constant can't stall a long run (define-all).
+    /// </summary>
+    public DateTime? Deadline { get; set; }
+
+    private void CheckDeadline()
+    {
+        if (Deadline is DateTime d && DateTime.UtcNow > d)
+        {
+            throw new TimeoutException("over its time budget");
+        }
+    }
+
     /// <summary>The syntax tree of an expression of this typecode, or null if it does not parse.</summary>
     public SyntaxTree? Parse(string type, IReadOnlyList<string> syms)
     {
+        CheckDeadline();
         var memo = new Dictionary<(string, int), List<(int End, SyntaxTree Tree)>>();
         foreach ((int end, SyntaxTree tree) in ParseAt(type, syms, 0, memo))
         {
@@ -399,6 +414,7 @@ public sealed class Prover
     /// </summary>
     public (List<string> Proof, Expr Proves) Apply(string label, IReadOnlyDictionary<string, string> subst, params (List<string> Proof, Expr Proves)[] essentials)
     {
+        CheckDeadline();
         Statement a = _db[label];
         var sub = subst.ToDictionary(kv => kv.Key, kv => kv.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         Expr Inst(Expr e) => new(e.Type, e.Symbols.SelectMany(s => sub.TryGetValue(s, out string[]? v) ? v : [s]).ToList());

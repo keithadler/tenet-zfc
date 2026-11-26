@@ -13,7 +13,7 @@ const string Usage = """
       tenet-zfc define <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: translate definitions by the generic model,
                                                          each with its definitional equation as a theorem
-      tenet-zfc define-all <export.ndjson> <set.mm> <outdir> [--chunk-size N] [--chunks a[-b]] [--jobs N]
+      tenet-zfc define-all <export.ndjson> <set.mm> <outdir> [--chunk-size N] [--chunks a[-b]] [--jobs N] [--budget seconds]
                                                          milestone 3 at scale: every constant the model handles, with
                                                          equations and computation rules, as chunk-NNNN.mm files that
                                                          verify independently (scripts/verify-all); refusals are listed
@@ -223,13 +223,15 @@ catch (Exception e) when (e is IOException or TenetZfc.FormatException or System
 // Milestone 3 at scale: every constant the model handles, in chunks that verify independently (scripts/verify-all).
 static int DefineAllCommand(string export, string setmm, string outDir, string[] opts, bool uncompressed)
 {
-    int chunkSize = 100, from = 0, to = int.MaxValue - 1, jobs = 1;
+    int chunkSize = 100, from = 0, to = int.MaxValue - 1, jobs = 1, budget = 600;
     for (int i = 0; i < opts.Length; i++)
     {
         switch (opts[i])
         {
             case "--chunk-size" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int n) && n > 0:
                 chunkSize = n; i++; break;
+            case "--budget" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int b) && b > 0:
+                budget = b; i++; break;
             case "--jobs" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int j) && j > 0:
                 // chunks translated in parallel: they share the export (read once) but each has its own model and database
                 jobs = j; i++; break;
@@ -248,7 +250,7 @@ static int DefineAllCommand(string export, string setmm, string outDir, string[]
     var terms = new Terms();
     TenetZfc.Environment env = Reader.ReadExport(terms, export);
     Directory.CreateDirectory(outDir);
-    var run = new DefineAll(terms, env, setmm, compress: !uncompressed);
+    var run = new DefineAll(terms, env, setmm, compress: !uncompressed) { BudgetSeconds = budget };
     List<ConstInfo> targets = run.Targets();
     int chunks = (targets.Count + chunkSize - 1) / chunkSize;
     Console.WriteLine($"read {export} in {sw.Elapsed.TotalSeconds:F0}s: {targets.Count} constants to translate, in {chunks} chunks of {chunkSize}");
