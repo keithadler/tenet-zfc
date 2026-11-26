@@ -1214,6 +1214,9 @@ public sealed partial class Model
                     p = pr.Apply("eqeltrd", S(("ph", c.Ph), ("A", text), ("B", Rhs(unfold)), ("C", ty)), unfold, inMap);
                     break;
                 }
+            case ConstKind.Axiom when $"{n}" == "propext":
+                p = PropextTyping(c, ci.Type);
+                break;
             default:
                 throw new Refused($"no typing lemma yet for {n} (a {ci.Kind.ToString().ToLowerInvariant()})");
         }

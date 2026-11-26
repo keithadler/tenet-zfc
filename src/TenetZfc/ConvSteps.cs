@@ -178,7 +178,8 @@ public sealed partial class Model
         Proof cnv = _d.Syl(pr.Apply("a1i", S(("ph", $"{OfnumMap} : _om -1-1-onto-> ( ZZ>= ` 0 )"), ("ps", "T.")), OfnumIso()), pr.Apply("f1ocnv", S(("F", OfnumMap), ("A", "_om"), ("B", "( ZZ>= ` 0 )"))));
         Proof f = _d.Syl(cnv, pr.Apply("f1of", S(("F", $"`' {OfnumMap}"), ("A", "( ZZ>= ` 0 )"), ("B", "_om"))));
         Proof fc = pr.Apply("mptru", S(("ph", $"`' {OfnumMap} : ( ZZ>= ` 0 ) --> _om")), f);
-        return pr.Apply("ffvelcdmi", S(("F", $"`' {OfnumMap}"), ("A", "( ZZ>= ` 0 )"), ("B", "_om"), ("C", Decimal(n))), fc, NumeralUz(n));
+        Proof imp = pr.Apply("ffvelcdmi", S(("F", $"`' {OfnumMap}"), ("A", "( ZZ>= ` 0 )"), ("B", "_om"), ("C", Decimal(n))), fc);
+        return pr.Apply("ax-mp", S(("ph", $"{Decimal(n)} e. ( ZZ>= ` 0 )"), ("ps", $"( `' {OfnumMap} ` {Decimal(n)} ) e. _om")), NumeralUz(n), imp);
     }
 
     /// <summary>|- ( `' OfnumMap ` N ) = O, with O = (/) for 0 and suc ( `' OfnumMap ` N-1 ) after.</summary>
