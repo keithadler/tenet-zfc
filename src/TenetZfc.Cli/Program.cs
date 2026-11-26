@@ -119,7 +119,7 @@ if (args.Length >= 5 && args[0] == "define")
                 // nested type's constructors (List.nil, List.cons).
                 foreach (var (ctor, istmt, iproof, idistinct) in model.RecursorIotas(dt.Of(name)))
                 {
-                    proved.Add(($"lean-{name}-{ctor}-iota", istmt, iproof, idistinct, $"The computation rule of {name} on {ctor}."));
+                    proved.Add(($"lean-{Model.LabelPart(name)}-{Model.LabelPart(ctor.ToString()!)}-iota", istmt, iproof, idistinct, $"The computation rule of {name} on {ctor}."));
                     Console.WriteLine($"{name} on {ctor} (computation rule): {istmt} ({iproof.Count} proof steps)");
                 }
             }
