@@ -292,7 +292,16 @@ public sealed partial class Model
         }
         try
         {
-            return MemCore(c, e);
+            Typed m = MemCore(c, e);
+            string elem = pr.Render(pr.Parse("wff", _d.Split(m.P.Proves).X.Split(' '))!.Children[0]);
+            if (elem != "(/)" && TrIn(c, e) == "(/)")
+            {
+                // A proof reached through data (a field of a structure): a member of a proposition makes (/) one.
+                EnsurePf();
+                Proof isProp = Check(c, m.LTy, InferIn(c, m.LTy), "2o");
+                m = m with { P = _d.Syl(_d.Jca(isProp, m.P), pr.Apply("lean-pf", S(("A", m.Ty), ("B", elem)))) };
+            }
+            return m;
         }
         finally
         {
@@ -410,39 +419,7 @@ public sealed partial class Model
                 case "cif" when pi is { IsPi: true } && n.Children[0].Rule.Label == "wral":
                     {
                         // A proof of a Π-proposition, applied: rspcdv on its A. x e. D (/) e. B.
-                        SyntaxTree all = n.Children[0];
-                        string allText = pr.Render(all);
-                        string x = pr.Render(all.Children[1]), dom = pr.Render(all.Children[2]), psi = pr.Render(all.Children[0]);
-                        EnsureTowerLemmas();
-                        Proof holds = _d.Syl(m.P, Bi1(ApplyId("lean-prop", S(("ph", allText)))));
-                        if (aText.Split(' ').Contains(x) || c.Ph.Split(' ').Contains(x))
-                        {
-                            // rspcdv needs x distinct from the argument and the hypotheses: rename the quantifier's variable (cbvralvw).
-                            string y = FreshFor(aText, psi, dom, c.Ph);
-                            string psiY = SubstFree(psi, x, y);
-                            Proof ren = pr.Apply("cbvralvw", S(("x", x), ("y", y), ("A", dom), ("ph", psi), ("ps", psiY)),
-                                SubstEq("wff", psi, x, $"{x} = {y}"));
-                            string all2 = $"A. {y} e. {dom} {psiY}";
-                            holds = pr.Apply("sylib", S(("ph", c.Ph), ("ps", allText), ("ch", all2)), holds, ren);
-                            (x, psi, allText) = (y, psiY, all2);
-                        }
-                        if (BoundIn(psi).Overlaps(ArgVars(aText)))
-                        {
-                            string psi2 = RenameApart(psi, ArgVars(aText), c.Ph);
-                            string all3 = $"A. {x} e. {dom} {psi2}";
-                            Proof ren = pr.Apply("mptru", S(("ph", $"( {allText} <-> {all3} )")), Alpha("wff", allText, all3)!.Value);
-                            holds = pr.Apply("sylib", S(("ph", c.Ph), ("ps", allText), ("ch", all3)), holds, ren);
-                            (psi, allText) = (psi2, all3);
-                        }
-                        RefuseCapture(aText, psi, x);
-                        Proof aIn = Check(c, a, pi.Domain, dom);
-                        string inst = SubstFree(psi, x, aText);
-                        Proof sub0 = psi.Split(' ').Contains(x)
-                            ? SubstEq("wff", psi, x, $"{x} = {aText}")
-                            : pr.Apply("a1i", S(("ph", $"( {psi} <-> {psi} )"), ("ps", $"{x} = {aText}")), pr.Apply("biid", S(("ph", psi))));
-                        Proof sub = pr.Apply("adantl", S(("ph", $"{x} = {aText}"), ("ps", $"( {psi} <-> {inst} )"), ("ch", c.Ph)), sub0);
-                        Proof imp = pr.Apply("rspcdv", S(("ph", c.Ph), ("x", x), ("A", aText), ("B", dom), ("ps", psi), ("ch", inst)), aIn, sub);
-                        Proof r = pr.Apply("mpd", S(("ph", c.Ph), ("ps", allText), ("ch", inst)), holds, imp);
+                        (Proof r, string inst) = TextApplyProp(c.Ph, m.P, m.Ty, aText, dom => Check(c, a, pi.Domain, dom));
                         string ty = inst.StartsWith("(/) e. ", StringComparison.Ordinal) ? inst[7..] : throw new Refused($"expected (/) e. …, got {inst}");
                         return new Typed(r, ty, _ops.Instantiate(pi.Body, [a]));
                     }
@@ -458,6 +435,47 @@ public sealed partial class Model
             m = new Typed(pr.Apply("eleqtrd", S(("ph", c.Ph), ("A", fText), ("B", m.Ty), ("C", Rhs(eq))), m.P, eq), Rhs(eq), next);
         }
         throw new Refused("too many conversions applying a function");
+    }
+
+    /// <summary>
+    /// From ( ph -> (/) e. if ( A. x e. D ψ , 1o , (/) ) ) and the argument's membership in D: ( ph -> ψ[x := a] ),
+    /// by lean-prop and rspcdv (renaming the quantifier's variable away from the argument and the hypotheses first).
+    /// </summary>
+    private (Proof, string) TextApplyProp(string ph, Proof m, string ifText, string aText, Func<string, Proof> aInDom)
+    {
+        SyntaxTree n = pr.Parse("class", ifText.Split(' ')) ?? throw new Refused($"does not parse: {ifText}");
+        if (n.Rule.Label != "cif" || n.Children[0].Rule.Label != "wral")
+        {
+            throw new Refused($"not a Π-proposition: {ifText}");
+        }
+        SyntaxTree all = n.Children[0];
+        string allText = pr.Render(all);
+        string x = pr.Render(all.Children[1]), dom = pr.Render(all.Children[2]), psi = pr.Render(all.Children[0]);
+        EnsureTowerLemmas();
+        Proof holds = _d.Syl(m, Bi1(ApplyId("lean-prop", S(("ph", allText)))));
+        if (aText.Split(' ').Contains(x) || ph.Split(' ').Contains(x))
+        {
+            string y = FreshFor(aText, psi, dom, ph);
+            string psiY = SubstFree(psi, x, y);
+            Proof ren = pr.Apply("cbvralvw", S(("x", x), ("y", y), ("A", dom), ("ph", psi), ("ps", psiY)), SubstEq("wff", psi, x, $"{x} = {y}"));
+            string all2 = $"A. {y} e. {dom} {psiY}";
+            holds = pr.Apply("sylib", S(("ph", ph), ("ps", allText), ("ch", all2)), holds, ren);
+            (x, psi, allText) = (y, psiY, all2);
+        }
+        if (BoundIn(psi).Overlaps(ArgVars(aText)))
+        {
+            string psi2 = RenameApart(psi, ArgVars(aText), ph);
+            string all3 = $"A. {x} e. {dom} {psi2}";
+            Proof ren = pr.Apply("mptru", S(("ph", $"( {allText} <-> {all3} )")), Alpha("wff", allText, all3)!.Value);
+            holds = pr.Apply("sylib", S(("ph", ph), ("ps", allText), ("ch", all3)), holds, ren);
+            (psi, allText) = (psi2, all3);
+        }
+        RefuseCapture(aText, psi, x);
+        Proof aIn = aInDom(dom);
+        string inst = SubstFree(psi, x, aText);
+        Proof sub = pr.Apply("adantl", S(("ph", $"{x} = {aText}"), ("ps", $"( {psi} <-> {inst} )"), ("ch", ph)), SubstEq("wff", psi, x, $"{x} = {aText}"));
+        Proof imp = pr.Apply("rspcdv", S(("ph", ph), ("x", x), ("A", aText), ("B", dom), ("ps", psi), ("ch", inst)), aIn, sub);
+        return (pr.Apply("mpd", S(("ph", ph), ("ps", allText), ("ch", inst)), holds, imp), inst);
     }
 
     /// <summary>The Lean type in weak head normal form (Lean side only, for reading off a Π's domain).</summary>
@@ -1054,6 +1072,13 @@ public sealed partial class Model
 
     private Typed ConstMem(PCtx c, Const k)
     {
+        if (env.Find(k.Name) is { Kind: ConstKind.Recursor } rk && rk.LevelParams.Length > 0 && TrIn(c, k) == "(/)")
+        {
+            // A recursor into Prop: induction (lean-ind-I).
+            (string il, string ity) = PropRecLemma(k);
+            Proof ir = _d.Syl(Hyp(c.Ph, UHyp) ?? throw new Refused("no universe hypothesis"), ApplyId(il, S(("U", "U"))));
+            return new Typed(ir, ity, _ops.InstantiateLevels(rk.Type, rk.LevelParams, k.Levels));
+        }
         (string label, string ty) = ConstTyLemma(k.Name);
         Proof inst = ApplyId(label, S(("U", "U")));
         Proof r = _d.Syl(Hyp(c.Ph, UHyp) ?? throw new Refused("no universe hypothesis"), inst);
@@ -1260,6 +1285,17 @@ public sealed partial class Model
         if (ConvStep(c, b) is (Expr b2, Proof pb))
         {
             return _d.Trans(Conv(c, a, b2), _d.Symm(pb));
+        }
+        // A literal against a constructor: the literal as Nat.zero or Nat.succ.
+        if (a is NatLit la && b is not NatLit)
+        {
+            (Expr ca, Proof pla) = LitToCtor(c, la.Value);
+            return _d.Trans(pla, Conv(c, ca, b));
+        }
+        if (b is NatLit lb && a is not NatLit)
+        {
+            (Expr cb, Proof plb) = LitToCtor(c, lb.Value);
+            return _d.Trans(Conv(c, a, cb), _d.Symm(plb));
         }
         throw new Refused($"can't show {ta} = {tb}");
     }
