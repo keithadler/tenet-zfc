@@ -31,6 +31,7 @@ public static class RunCommand
           --no-trace         don't use Tenet, even if it is found
           --no-verify        translate only; don't run the checkers
           --uncompressed     flat proofs instead of Metamath's compressed format
+          --single-universe  the one-universe model instead of the tower of universes (quotients and choice need it)
 
         tools (each a flag, else an environment variable, else the PATH):
           --setmm     TENET_ZFC_SETMM      set.mm, or its directory                          (always needed)
@@ -74,7 +75,7 @@ public static class RunCommand
             Console.WriteLine(Usage);
             return args.Length == 0 ? 2 : 0;
         }
-        var (values, switches, positional) = Tools.Parse(args, ["--out", "--decl", "--timeout"], ["--all", "--no-trace", "--no-verify", "--uncompressed"]);
+        var (values, switches, positional) = Tools.Parse(args, ["--out", "--decl", "--timeout"], ["--all", "--no-trace", "--no-verify", "--uncompressed", "--single-universe"]);
         if (positional.Count != 1) throw new ToolError($"give exactly one module, .lean file or export (got {positional.Count})\n\n{Usage}");
         string input = positional[0];
         var tools = new Tools(values);
@@ -259,6 +260,7 @@ public static class RunCommand
             Console.WriteLine($"  translate  theorem {d.Name} through the model{(timeout is null ? "" : $" (time limit {timeoutSeconds}s)")} …");
             var argv = new List<string> { "theorem", export, localSetMm, file, d.Name };
             if (!compress) argv.Add("--uncompressed");
+            if (switches.Contains("--single-universe")) argv.Add("--single-universe");
             var (elapsed, _) = Translate(argv, [d], timeout, logDir, $"theorem-{FileName(d.Name)}");
             if (d.Status == "translated")
             {
@@ -280,6 +282,7 @@ public static class RunCommand
                 var argv = new List<string> { "define", export, localSetMm, file };
                 argv.AddRange(pending.Select(d => d.Name));
                 if (!compress) argv.Add("--uncompressed");
+                if (switches.Contains("--single-universe")) argv.Add("--single-universe");
                 if (!Translate(argv, pending, timeout, logDir, "definitions").Crashed) break;
                 pending = pending.Where(d => d.Detail == SetAside).ToList();
             }
@@ -355,9 +358,11 @@ public static class RunCommand
         var lines = r.Stdout.Replace("\r", "").Split('\n');
         foreach (Decl d in batch)
         {
-            string? line = lines.FirstOrDefault(l => l.StartsWith(d.Name + ": ", StringComparison.Ordinal));
-            if (line is null) continue;
-            string rest = line[(d.Name.Length + 2)..];
+            // In tower mode the line names the instance: twice.{0} for twice, universe parameters at level 0.
+            var head = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(d.Name) + @"(\.\{[0-9,]*\})?: ");
+            var m = lines.Select(l => head.Match(l)).FirstOrDefault(x => x.Success);
+            if (m is null) continue;
+            string rest = m.Result("$'");
             if (rest.StartsWith("refused: ", StringComparison.Ordinal)) { d.Status = "refused"; d.Detail = rest["refused: ".Length..]; }
             else d.Status = "translated";
         }

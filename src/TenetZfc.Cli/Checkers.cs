@@ -25,22 +25,36 @@ public sealed class Checkers(string metamath, string python, string mmverify, st
         return tasks.Select(t => t.Result).ToList();
     }
 
+    // The labels of the file's own $p theorems, in order. set.mm's proofs are checked once, apart (CI checks set.mm
+    // itself with both verifiers), so each output's check covers only what it adds, as scripts/verify-all does.
+    private static List<string> OwnTheorems(string file) =>
+        File.ReadLines(file).Select(l => Regex.Match(l, @"^\s*(\S+)\s+\$p\s")).Where(m => m.Success).Select(m => m.Groups[1].Value).ToList();
+
     public Outcome Metamath(string file, string logDir)
     {
         string dir = Path.GetDirectoryName(Path.GetFullPath(file))!, name = Path.GetFileName(file);
-        var r = Proc.Run(metamath, ["set scroll continuous", $"read {name}", "verify proof *", "exit"], dir);
+        var own = OwnTheorems(file);
+        string which = own.Count > 0 && own.All(l => l.StartsWith("lean-", StringComparison.Ordinal)) ? "lean-*" : "*";
+        var r = Proc.Run(metamath, ["set scroll continuous", $"read {name}", $"verify proof {which}", "exit"], dir);
         File.WriteAllText(Path.Combine(logDir, $"{name}.metamath.log"), r.Output);
-        // metamath-exe exits 0 even on errors; a ?Error line is the failure, as in CI.
+        // metamath-exe exits 0 even on errors; a ?Error line is the failure, as in CI. A file that didn't read leaves
+        // nothing checked, which is a failure too.
         var errors = r.Output.Replace("\r", "").Split('\n').Where(l => l.Contains("?Error")).ToList();
-        bool ok = r.ExitCode == 0 && errors.Count == 0 && r.Output.Contains("verified", StringComparison.Ordinal);
-        string msg = ok ? "every proof verified" : errors.Count > 0 ? $"{errors.Count} ?Error line(s), first: {errors[0].Trim()}" : $"didn't verify (exit {r.ExitCode}):\n{r.Tail()}";
+        bool read = r.Output.Contains("were read into the source buffer", StringComparison.Ordinal);
+        bool ok = r.ExitCode == 0 && errors.Count == 0 && read;
+        string msg = ok ? $"every proof verified ({(which == "*" ? "all of set.mm too" : $"{own.Count} theorems")})"
+            : errors.Count > 0 ? $"{errors.Count} ?Error line(s), first: {errors[0].Trim()}" : $"didn't read or verify (exit {r.ExitCode}):\n{r.Tail()}";
         return new("metamath-exe", ok, msg, r.Elapsed);
     }
 
     public Outcome MmVerify(string file, string logDir)
     {
         string dir = Path.GetDirectoryName(Path.GetFullPath(file))!, name = Path.GetFileName(file);
-        var r = Proc.Run(python, ["-I", Path.GetFullPath(mmverify), name], dir);
+        var own = OwnTheorems(file);
+        var argv = new List<string> { "-I", Path.GetFullPath(mmverify) };
+        if (own.Count > 0) { argv.Add("-b"); argv.Add(own[0]); }   // every proof from the file's first $p on
+        argv.Add(name);
+        var r = Proc.Run(python, argv, dir);
         File.WriteAllText(Path.Combine(logDir, $"{name}.mmverify.log"), r.Output);
         return new("mmverify.py", r.ExitCode == 0, r.ExitCode == 0 ? "exit status 0" : $"exit status {r.ExitCode}:\n{r.Tail()}", r.Elapsed);
     }
@@ -69,7 +83,8 @@ public sealed class Checkers(string metamath, string python, string mmverify, st
         Proc.Result r;
         try
         {
-            r = Proc.Run(java, ["-Xms512M", "-Xmx2048M", "-jar", Path.Combine(mmj2, "mmj2.jar"), Path.GetFileName(paramsFile)], dir);
+            // Without mmj2's failure popup (its second argument, n): on a crash the popup would wait forever.
+            r = Proc.Run(java, ["-Xms512M", "-Xmx2048M", "-jar", Path.Combine(mmj2, "mmj2.jar"), Path.GetFileName(paramsFile), "n"], dir);
         }
         finally
         {

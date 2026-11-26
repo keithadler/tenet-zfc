@@ -23,32 +23,60 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             return;
         }
+        // The default, tower model: Nat.add's computation rules are theorems, so ⟦Nat.add⟧ = + needs no hypotheses.
         var (text, proved) = NatBridge.Emit(Fixture("natadd.ndjson"), Path.Combine(SetMm, "set.mm"), [2, 4, 256]);
         var by = proved.ToDictionary(p => p.Label, p => p.Statement.ToString());
+        const string tw = "U e. lean.-tower";
 
         // The headline statements, in set.mm's vocabulary.
-        Assert.Equal($"|- ( U e. Univ -> {F} : {Nat} -1-1-onto-> NN0 )", by["lean-nat-f1o"]);
-        Assert.Equal($"|- ( U e. Univ -> ( {F} ` ( lean.Nat.zero ` U ) ) = 0 )", by["lean-nat-fzero"]);
-        Assert.Equal($"|- ( ( U e. Univ /\\ A e. {Nat} ) -> ( {F} ` ( ( lean.Nat.succ ` U ) ` A ) ) = ( ( {F} ` A ) + 1 ) )", by["lean-nat-fsucc"]);
+        Assert.Equal($"|- ( {tw} -> {F} : {Nat} -1-1-onto-> NN0 )", by["lean-nat-f1o"]);
+        Assert.Equal($"|- ( {tw} -> ( {F} ` ( lean.Nat.zero ` U ) ) = 0 )", by["lean-nat-fzero"]);
+        Assert.Equal($"|- ( ( {tw} /\\ A e. {Nat} ) -> ( {F} ` ( ( lean.Nat.succ ` U ) ` A ) ) = ( ( {F} ` A ) + 1 ) )", by["lean-nat-fsucc"]);
         Assert.Equal($"|- ( A e. NN0 -> ( {F} ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` A ) ) ) = A )", by["lean-nat-flitnum"]);
         Assert.Equal($"|- ( {F} ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` ; ; 2 5 6 ) ) ) = ; ; 2 5 6", by["lean-nat-lit-256"]);
-        string rules = NatBridge.Rules("( lean.Nat.add ` U )");
-        Assert.Equal($"|- ( ( {rules} /\\ ( A e. {Nat} /\\ B e. {Nat} ) ) -> ( {F} ` ( ( ( lean.Nat.add ` U ) ` A ) ` B ) ) = ( ( {F} ` A ) + ( {F} ` B ) ) )",
+        Assert.Equal($"|- ( ( {tw} /\\ A e. {Nat} ) -> ( ( ( lean.Nat.add ` U ) ` A ) ` ( lean.Nat.zero ` U ) ) = A )", by["lean-nat-natadd-zero"]);
+        Assert.Equal($"|- ( ( ( {tw} /\\ A e. {Nat} ) /\\ B e. {Nat} ) -> ( ( ( lean.Nat.add ` U ) ` A ) ` ( ( lean.Nat.succ ` U ) ` B ) ) = ( ( lean.Nat.succ ` U ) ` ( ( ( lean.Nat.add ` U ) ` A ) ` B ) ) )",
+            by["lean-nat-natadd-succ"]);
+        Assert.Equal($"|- ( ( {tw} /\\ ( A e. {Nat} /\\ B e. {Nat} ) ) -> ( {F} ` ( ( ( lean.Nat.add ` U ) ` A ) ` B ) ) = ( ( {F} ` A ) + ( {F} ` B ) ) )",
             by["lean-nat-natadd"]);
         string two = "( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 2 ) )", four = "( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 4 ) )";
-        Assert.Equal($"|- ( {rules} -> ( ( ( lean.Nat.add ` U ) ` {two} ) ` {two} ) = {four} )", by["lean-nat-natadd-2p2e4"]);
-        Assert.Equal($"|- ( ( ( U e. Univ /\\ A e. ( U ^m {Nat} ) ) /\\ B e. {Nat} ) -> ( ( ( lean.Nat.below ` U ) ` A ) ` B ) = (/) )",
-            by["lean-nat-belowempty"]);
-        // Nothing is assumed: the output's only $a statements are the model's definitions and their syntax.
+        Assert.Equal($"|- ( {tw} -> ( ( ( lean.Nat.add ` U ) ` {two} ) ` {two} ) = {four} )", by["lean-nat-natadd-2p2e4"]);
+        Assert.DoesNotContain("lean-nat-belowempty", by.Keys);
+        // The header states the assumption, and nothing is assumed beyond it: the output's only $a statements are the
+        // model's definitions and their syntax.
+        Assert.Contains("Each theorem has the hypothesis U e. lean.-tower", text);
         Assert.DoesNotContain(text.Split('\n'), l => l.Contains(" $a |-") && !l.TrimStart().StartsWith("df-lean.", StringComparison.Ordinal));
+        Verify(text, "natbridge");
+    }
 
-        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
-        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
-        if (metamath is null || mmverify is null)
+    [Fact]
+    public void InTheOneUniverseModelNatAddCollapsesAndItsRulesAreHypotheses()
+    {
+        if (SetMm is null)
         {
             return;
         }
-        string file = Path.Combine(SetMm, $"tenet-zfc-natbridge-{Guid.NewGuid():N}.mm");
+        var (text, proved) = NatBridge.Emit(Fixture("natadd.ndjson"), Path.Combine(SetMm, "set.mm"), [2], tower: false);
+        var by = proved.ToDictionary(p => p.Label, p => p.Statement.ToString());
+        string rules = new NatBridge(new Prover(new Database()), tower: false).Rules("( lean.Nat.add ` U )");
+        Assert.StartsWith("( ( U e. Univ /\\ ", rules);
+        Assert.Equal($"|- ( ( {rules} /\\ ( A e. {Nat} /\\ B e. {Nat} ) ) -> ( {F} ` ( ( ( lean.Nat.add ` U ) ` A ) ` B ) ) = ( ( {F} ` A ) + ( {F} ` B ) ) )",
+            by["lean-nat-natadd"]);
+        Assert.Equal($"|- ( ( ( U e. Univ /\\ A e. ( U ^m {Nat} ) ) /\\ B e. {Nat} ) -> ( ( ( lean.Nat.below ` U ) ` A ) ` B ) = (/) )",
+            by["lean-nat-belowempty"]);
+        Assert.Contains("one Grothendieck universe for every universe level", text);
+        Verify(text, "natbridge1");
+    }
+
+    private void Verify(string text, string tag)
+    {
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (SetMm is null || metamath is null || mmverify is null)
+        {
+            return;
+        }
+        string file = Path.Combine(SetMm, $"tenet-zfc-{tag}-{Guid.NewGuid():N}.mm");
         File.WriteAllText(file, text);
         try
         {
@@ -78,7 +106,7 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             return;
         }
-        var (text, _) = NatBridge.Emit(Fixture("natadd.ndjson"), Path.Combine(SetMm, "set.mm"), [], compress: false);
+        var (text, _) = NatBridge.Emit(Fixture("natadd.ndjson"), Path.Combine(SetMm, "set.mm"), [], compress: false, tower: false);
         // lean-nat-zns says the model's zero is not a successor; claim it is.
         string bad = text.Replace("lean-nat-zns $p |- -. <. (/) , (/) >. =", "lean-nat-zns $p |- <. (/) , (/) >. =", StringComparison.Ordinal);
         Assert.NotEqual(text, bad);

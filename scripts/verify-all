@@ -1,0 +1,99 @@
+#!/bin/bash
+# Check every chunk that `tenet-zfc define-all` wrote, in parallel, with all three checkers (proofs too long for mmj2
+# are listed in chunk-NNNN.mmj2-long, and left to the other two):
+#   - metamath-exe: every lean-* proof (set.mm's own proofs are checked once, elsewhere), no ?Error line;
+#   - mmverify.py: every proof from the chunk's first $p on, exit status 0;
+#   - scripts/check-definitions: mmj2's definitionCheck on every df-lean.* definition.
+# Writes verify-all.tsv in the output folder, one line per chunk, and prints the totals. Chunks already checked
+# (chunk-NNNN.verify newer than chunk-NNNN.mm) are not checked again.
+#
+# usage: scripts/verify-all [-j jobs] <outdir>
+# The tools come from the same variables the tests use:
+#   TENET_ZFC_SETMM (the folder holding set.mm), TENET_ZFC_METAMATH, TENET_ZFC_MMVERIFY, TENET_ZFC_JAVA, TENET_ZFC_MMJ2
+set -u
+here="$(cd "$(dirname "$0")" && pwd)"
+now() { perl -MTime::HiRes=time -e 'printf "%.1f", time'; }
+sub() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f", a - b }'; }
+
+if [ "${1:-}" = "--one" ]; then
+  # One chunk; prints its line of verify-all.tsv.
+  f="$2"; dir="$(dirname "$f")"; base="$(basename "$f")"; chunk="${base%.mm}"
+  bytes=$(wc -c < "$f" | tr -d ' ')
+  theorems=$(grep -c '^ *[^ ]* \$p ' "$f")
+  first=$(grep -m1 -o '^ *[^ ]* \$p ' "$f" | awk '{print $1}')
+  log="$dir/$chunk.verify.log"; : > "$log"
+
+  t0=$(now)
+  mm=$(cd "$dir" && "$TENET_ZFC_METAMATH" "read $base" "verify proof lean-*" exit 2>&1)
+  t1=$(now)
+  mmerr=$(printf '%s\n' "$mm" | grep -c '?Error')
+  # A file that doesn't read leaves no proofs checked: count that as a failure too.
+  printf '%s\n' "$mm" | grep -q 'were read into the source buffer' || mmerr=$((mmerr + 1))
+  [ "$mmerr" -gt 0 ] && { echo "== metamath-exe"; printf '%s\n' "$mm" | grep -A3 '?Error'; } >> "$log"
+  # metamath-exe wraps its lines, so join them before reading the failing labels out.
+  bad=$(printf '%s\n' "$mm" | tr '\n' ' ' | grep -o 'label  *"[^"]*"' | sed 's/label  *"\(.*\)"/\1/' | sort -u | tr '\n' ' ')
+
+  if [ -n "$first" ]; then
+    out=$(cd "$dir" && python3 -I "$TENET_ZFC_MMVERIFY" -b "$first" "$base" 2>&1); mmv=$?
+  else
+    out=$(cd "$dir" && python3 -I "$TENET_ZFC_MMVERIFY" "$base" 2>&1); mmv=$?
+  fi
+  t2=$(now)
+  [ "$mmv" -ne 0 ] && { echo "== mmverify.py"; printf '%s\n' "$out" | tail -5; } >> "$log"
+
+  if grep -q '^ *df-lean\.' "$f"; then
+    out=$("$here/check-definitions" "$TENET_ZFC_JAVA" "$TENET_ZFC_MMJ2" "$f" --long-proofs-ok 2>&1); dc=$?
+    # Proofs too long for mmj2 are listed, not failed (metamath-exe and mmverify.py check them): keep the list.
+    printf '%s\n' "$out" | grep 'too long for mmj2' > "$dir/$chunk.mmj2-long" || rm -f "$dir/$chunk.mmj2-long"
+  else
+    out="no definitions"; dc=0
+  fi
+  t3=$(now)
+  [ "$dc" -ne 0 ] && { echo "== check-definitions"; printf '%s\n' "$out" | tail -20; } >> "$log"
+  [ -s "$log" ] || rm -f "$log"
+
+  ok=pass; { [ "$mmerr" -ne 0 ] || [ "$mmv" -ne 0 ] || [ "$dc" -ne 0 ]; } && ok=FAIL
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$chunk" "$ok" "$bytes" "$theorems" \
+    "$mmerr" "$(sub "$t1" "$t0")" "$mmv" "$(sub "$t2" "$t1")" "$dc" "$(sub "$t3" "$t2")" "$bad"
+  exit 0
+fi
+
+jobs=4
+if [ "${1:-}" = "-j" ]; then jobs="$2"; shift 2; fi
+[ $# -eq 1 ] || { echo "usage: scripts/verify-all [-j jobs] <outdir>"; exit 2; }
+for v in TENET_ZFC_SETMM TENET_ZFC_METAMATH TENET_ZFC_MMVERIFY TENET_ZFC_JAVA TENET_ZFC_MMJ2; do
+  [ -n "${!v:-}" ] || { echo "verify-all: set $v"; exit 2; }
+done
+export TENET_ZFC_SETMM TENET_ZFC_METAMATH TENET_ZFC_MMVERIFY TENET_ZFC_JAVA TENET_ZFC_MMJ2
+out="$(cd "$1" && pwd)"
+# The chunks include set.mm by its bare name, so it must resolve next to them; mmj2's macros too. Made here, once,
+# so the parallel jobs don't race to make them.
+[ -e "$out/set.mm" ] || ln -s "$TENET_ZFC_SETMM/set.mm" "$out/set.mm"
+[ -e "$out/macros" ] || ln -s "$(cd "$TENET_ZFC_MMJ2" && pwd)/macros" "$out/macros"
+
+start=$(now)
+tsv="$out/verify-all.tsv"
+printf 'chunk\tresult\tbytes\ttheorems\tmetamath_errors\tmetamath_s\tmmverify_status\tmmverify_s\tdefcheck_status\tdefcheck_s\tfailing_labels\n' > "$tsv"
+# Each chunk's result is kept in chunk-NNNN.verify, so a rerun checks only chunks that are new or rewritten: a long
+# define-all run can be verified as its chunks appear.
+for f in "$out"/chunk-*.mm; do
+  [ -e "$f" ] || continue
+  v="${f%.mm}.verify"
+  [ -s "$v" ] && [ "$v" -nt "$f" ] || echo "$f"
+done | xargs -P "$jobs" -n 1 sh -c '"$0" --one "$1" > "${1%.mm}.verify.tmp" && mv "${1%.mm}.verify.tmp" "${1%.mm}.verify"' "$0" \
+  && true
+cat "$out"/chunk-*.verify 2>/dev/null | sort >> "$tsv"
+tail -n +2 "$tsv" | awk -F'\t' '{ printf "%s %s  %8.1f MiB  %5d theorems  metamath %ss  mmverify %ss  definitionCheck %ss\n", $1, $2, $3/1048576, $4, $6, $8, $10 }'
+end=$(now)
+awk -F'\t' -v wall="$(sub "$end" "$start")" -v jobs="$jobs" 'NR > 1 {
+    n++; bytes += $3; thm += $4; mm += $6; mv += $8; dc += $10
+    if ($2 == "pass") { pass++; pthm += $4 } else fail++
+  } END {
+    printf "chunks: %d passed, %d failed, of %d\n", pass, fail, n
+    printf "theorems: %d in passing chunks, of %d\n", pthm, thm
+    printf "size: %.1f MiB\n", bytes / 1048576
+    printf "checker time (CPU-serial sum): metamath-exe %.0fs, mmverify.py %.0fs, definitionCheck %.0fs\n", mm, mv, dc
+    printf "wall time of this invocation: %.0fs with %d jobs\n", wall, jobs
+  }' "$tsv" | tee "$out/verify-all.txt"
+grep -q 'FAIL' "$tsv" && exit 1
+exit 0

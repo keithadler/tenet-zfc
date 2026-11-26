@@ -30,11 +30,13 @@ The first version meant for someone else to install and use: independently check
 - Quotients as equivalence classes, with `Quot.lift`'s computation rule; `propext` as a proof; `Classical.choice` from `set.mm`'s choice.
 - More than 26 bound variables: set variables each output declares itself (`$v`, `$f setvar`), which add no axiom.
 - Proofs in Metamath's compressed format, sharing every repeated subproof: the largest outputs shrink by up to about 40 times (`--uncompressed` keeps flat proofs).
-- Coverage, measured with `tenet-zfc model-survey`: 13,958 of the 17,590 definitions in Lean 4.36's `Init` (79%) translate together with everything they use.
+- **Universes: a tower by default.** With one universe `Nat.below` is empty, and structurally recursive functions such as `Nat.add` collapse. The model's default is an increasing sequence of Grothendieck universes, one per level, under the hypothesis `U e. lean.-tower`; no axiom is added. Each output's header states this, how many levels it uses and which declarations use each. `--single-universe` keeps the one-universe model, which quotients and choice still need.
+- Coverage, measured with `tenet-zfc model-survey`: 14,105 of the 17,590 definitions in Lean 4.36's `Init` (80%) translate together with everything they use, in the tower model (13,958 in the one-universe model).
+- **At scale:** `tenet-zfc define-all` translates every definition of an export in chunks (`--jobs`, `--budget` per constant, `--chunks` to resume), and `scripts/verify-all` checks every chunk with all three checkers.
 
-**Bridges** ([docs/bridges.md](docs/bridges.md)): the model's `Nat` is proved to be `set.mm`'s `NN0`, zero to `0`, `succ` to `+ 1`, literals to numerals (`tenet-zfc nat-bridge`). Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`.
+**Bridges** ([docs/bridges.md](docs/bridges.md)): the model's `Nat` is proved to be `set.mm`'s `NN0`, zero to `0`, `succ` to `+ 1`, literals to numerals, and `⟦Nat.add⟧` to `+`, with no hypotheses but the tower's (`tenet-zfc nat-bridge`). Lean's `Nat.add_zero` and `Nat.zero_add`, proved through the model, are restated as `( A + 0 ) = A` and `( 0 + A ) = A`. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`.
 
-**First theorems through the model** (`tenet-zfc theorem`): Lean theorems proved from their own proof terms, a proof's typing becoming membership `(/) e. ⟦P⟧` and each conversion an equation. `Nat.add_zero` and `Nat.zero_add` verify. They use tower mode, an increasing sequence of Grothendieck universes, one per level, which fixes a gap found on the way: with a single universe `Nat.below` is empty, and structurally recursive functions collapse. `define` takes `--tower`; it is not yet the default.
+**First theorems through the model** (`tenet-zfc theorem`): Lean theorems proved from their own proof terms, a proof's typing becoming membership `(/) e. ⟦P⟧` and each conversion an equation. `Nat.add_zero` and `Nat.zero_add` verify.
 
 ### Milestone 2: the bridge library
 

@@ -6,3 +6,4 @@ obj/
 .DS_Store
 /out/
 *.trace
+/example-out/

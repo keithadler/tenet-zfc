@@ -256,7 +256,7 @@ public sealed class Terms
     public Level Succ(Level l) => GetL(("succ", l), () => new LSucc(l));
     public Level Max(Level a, Level b) => GetL(("max", a, b), () => new LMax(a, b));
     public Level IMax(Level a, Level b) => GetL(("imax", a, b), () => new LIMax(a, b));
-    public Level Param(Name n) => _params.TryGetValue(n, out Level? l) ? l : _params[n] = new LParam(n);
+    public Level Param(Name n) => Get(_params, n, () => new LParam(n));
 
     public Expr BVar(int i) => GetE(("bvar", i), () => new BVar(i));
     public Expr FVar(ulong id) => GetE(("fvar", id), () => new FVar(id));
@@ -286,14 +286,19 @@ public sealed class Terms
         return f;
     }
 
+    // Locked, so that several models may share one Terms from different threads (define-all --jobs). Uncontended,
+    // the lock costs little next to the dictionary lookup.
     private static T Get<TK, T>(Dictionary<TK, T> d, TK k, Func<T> mk) where TK : notnull
     {
-        if (!d.TryGetValue(k, out T? v))
+        lock (d)
         {
-            v = mk();
-            d[k] = v;
+            if (!d.TryGetValue(k, out T? v))
+            {
+                v = mk();
+                d[k] = v;
+            }
+            return v;
         }
-        return v;
     }
 
     private Level GetL(object key, Func<Level> mk) => Get(_levels, key, mk);

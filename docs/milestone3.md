@@ -595,7 +595,7 @@ The cause is the one universe for every level: large elimination into `Sort (u+1
 
 ### Tower mode (`Universes.cs`, `Monomorph.cs`)
 
-The fix is opt-in (`new Model(…, tower: true)`, `define --tower`), so default outputs don't change:
+The fix is the tower, now the model's default (`new Model(…)`, `define`, `nat-bridge`, `model-survey`); `--single-universe` (`tower: false`) keeps the old model for what still needs it:
 
 - **A tower of universes.** The universe argument ranges over `lean.-tower`, a new definition:
 
@@ -610,6 +610,63 @@ The fix is opt-in (`new Model(…, tower: true)`, `define --tower`), so default 
 `Nat.below.{1}`'s motive is now `( z e. ( lean.Nat ` u ) |-> ( u ` (/) ) )`, in `( U. ran u ^m ( lean.Nat ` u ) )`. The definitions pass the definition check, and the definitional equations and computation rules verify as before.
 
 **What a theorem assumes.** `U e. lean.-tower`. ZFC doesn't prove that such a tower exists (it needs inaccessible cardinals), so, as before, a theorem holds in every model of the hypotheses. It adds no axiom.
+
+### Tower mode as the default
+
+Since tower mode makes structurally recursive definitions mean what Lean means, it is the default everywhere:
+
+- **`define`** monomorphizes, then translates. A constant's universe parameters are set to 0, as the spec's universe analysis says, unless its name gives levels: `Eq.{1}` is `Eq` at `Type`. Level 0 makes a `Sort u` parameter `Prop`, so `id.{0}` is `id` on proofs and translates to `(/)`; CI asks for `id.{1}`, `Function.comp.{1,1,1}`, `Eq.{1}` and `Nonempty.{1}`. A recursor's motive level may be left out: `Eq.rec.{1}` is the recursor of `Eq.{1}`. In a shell, quote such names: bash expands `Function.comp.{1,1,1}` into three words.
+- **Nested blocks.** `Monomorph` now also instantiates a nested block's auxiliary recursors: `Rose.rec_1` becomes `Rose.{0}.rec_1`, beside `Rose.{0}.rec`.
+- **`nat-bridge`** runs in the tower and proves `Nat.add`'s computation rules, so `⟦Nat.add⟧ = +` has no hypotheses left ([bridges.md](bridges.md#natadds-computation-rules-proved)).
+- **`model-survey`** monomorphizes each definition at level 0 before translating it (below).
+- **`--single-universe`** (anywhere on the command line) gives the old model. Quotients and `Classical.choice` still need it: `QuotLiftIota` and `ChoiceSpec` are written for one universe (a well-ordering of `U`, `Quot`'s relation over `U`), so in the tower they are refused with that reason. CI translates `axioms.ndjson` with `--single-universe`. `--tower` is still accepted, and does nothing.
+
+Every fixture CI translates (`model`, `ind`, `props`, `rec`, `tree`, `natle`, `setvars`, `strings`, `mutual`; `axioms` in the one-universe model) passes metamath-exe, mmverify.py and mmj2's `definitionCheck` in tower mode. One instance is refused that the one-universe model translated: the computation rule of `Eq.refl.{0}` and `HEq.refl.{0}`, equality of proofs, whose field is a proof (`no hypothesis (/) e. A`). At `Eq.{1}` both translate.
+
+### `model-survey` in the tower
+
+`model-survey` now monomorphizes each definition at level 0, then translates it in the tower. On Lean 4.36's `Init`, **14,105 of 17,590 definitions** translate with everything they use, against 13,958 in the one-universe model on the same code before this change. That is 147 more, although the definitions that reach quotients or `Classical.choice` (95 counted first under those two reasons) are now refused. The first reasons for the rest, from the 25 most common:
+
+| Definitions | First reason |
+|---|---|
+| 1,368 or more | a name with characters a `set.mm` token can't hold (`'`, `?`, `₂`): `BitVec.extractLsb'` 338, `Lean.Syntax.getPos?` 301, … |
+| 268 + 9 | `Acc.intro`: a premise that is a function into the type, so its stages must go beyond ω |
+| 58 + 37 | `Classical.choice`, `Quot`: not in the tower model yet |
+| 56 | a constant not in the export |
+
+The first run found a bug in the change: a nested block's auxiliary recursor (`Lean.Syntax.rec_1`, over `Array Syntax`) has computation rules on the nested type's constructors (`Array.mk`), at the levels the nesting uses, not the block's. `Monomorph` now reads those levels from the recursor's type. Before the fix the count was 12,542, with 3,253 definitions stopped there.
+
+### Each output states its assumptions
+
+The spec's universe-analysis stage asks every output to say which universes it uses, and which declarations need them. Each output of `define`, `theorem` and `nat-bridge` now starts with that, after its title (`Model.Assumptions`, `Writer.Assumptions`). The header of CI's `nat-bridge` output, with `Nat.add_zero` and `Nat.zero_add`:
+
+```
+$(
+Assumptions (the universe analysis of docs/spec.md).
+Universes: a tower U of Grothendieck universes. Each theorem has the hypothesis U e. lean.-tower: U is
+an increasing omega-sequence of Grothendieck universes, the first containing omega, and Lean's Sort (k+1)
+is ( U ` k ). ZFC does not prove that such a tower exists (that needs inaccessible cardinals), so each
+theorem holds in every model of ZFC that has one. No axiom is added.
+Levels used: 2 universes, ( U ` (/) ) to ( U ` 1o ) (Lean's Type 0 to Type 1).
+( U ` (/) ) (Type 0) is used directly by: PProd.{1,1}, PProd.mk.{1,1}, PProd.{1,1}.rec, Nat.below.{1},
+  Nat.brecOn.go.{1}, Nat.brecOn.{1}, Nat.casesOn.{1}, Nat.add.match_1.{1}, Eq.{1}, Eq.refl.{1}, Eq.{1}.rec,
+  HAdd.{0,0,0}, HAdd.mk.{0,0,0}, HAdd.{0,0,0}.rec, HAdd.hAdd.{0,0,0}, Add.{0}, Add.mk.{0}, Add.{0}.rec,
+  Add.add.{0}, instHAdd.{0}, OfNat.{0}, OfNat.mk.{0}, OfNat.{0}.rec, OfNat.ofNat.{0}, PProd.{0,1},
+  PProd.mk.{0,1}, PProd.{0,1}.rec, Nat.below.{0}.
+( U ` 1o ) (Type 1) is used directly by: outParam.{2}.
+U. ran U, the whole tower, is the codomain of the motives of: Nat.rec, PUnit.{1}.rec, PProd.{1,1}.rec,
+  PProd.rec, Eq.{1}.rec, HAdd.{0,0,0}.rec, HAdd.rec, Add.{0}.rec, Add.rec, OfNat.{0}.rec, OfNat.rec,
+  PProd.{0,1}.rec.
+  (a recursor's motive level is left open, so one recursor serves every elimination level)
+U. ran U also stands for a universe parameter left open, in: PProd, PProd.mk, outParam, HAdd, HAdd.mk, Add,
+  Add.mk, OfNat, OfNat.mk.
+  (a projection names its structure without universe levels, so the structure, and what its type uses, is defined with them open)
+$)
+```
+
+- **Levels used** counts the tower's levels that some definition names, `( U ` k )` for Lean's `Type k`. One level means one universe, the first, which contains ω. Here `outParam.{2}`, the identity on `Type 1` that marks an output parameter of a class, names the second level, so the output uses two. A definition counts when it uses the level directly; one that only uses other constants needs what they need.
+- **The whole tower** appears where a level is left open: a recursor's motive level (one recursor serves every elimination level), and a structure that a projection names. A projection carries no universe levels, so its structure isn't monomorphized; that structure, and what its type uses (here `outParam`), is translated with its parameters ranging over the whole tower.
+- A one-universe output says instead that it has the hypothesis `U e. Univ`, and that structurally recursive definitions collapse in it.
 
 ### How a theorem is proved
 
@@ -665,7 +722,7 @@ Three small lemmas are proved once per output: `lean-tw` (what the tower hypothe
 | `Nat.add_zero` | `rfl`, so `n + 0` is unfolded to `n` through `Nat.add`, `Nat.brecOn`, `Nat.rec` and the literal `0` | 45 (1,147,634) | 1,665,317 | 383 KB | 6 min |
 | `Nat.zero_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg`, `rfl` | 61 (22,854,344) | 69,124 | 678 KB | 15 min |
 
-Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its own and together. CI proves both into one output (863 KB, 13 minutes here; the second reuses the first's lemmas) and runs all three checks on it.
+Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its own and together. CI proves both into one output with the Nat bridge, which also restates them in `NN0` (`nat-bridge … Nat.add_zero Nat.zero_add`; see [bridges.md](bridges.md#leans-theorems-restated-in-setmms-arithmetic)), and runs all three checks on it. On their own, `theorem` proves both into one output of 863 KB in 13 minutes; the second reuses the first's lemmas.
 
 **`Nat.succ_add` and `List.length_append` aren't proved yet.** Both get past every construct they use: induction on `Nat` and on `List α`, `Eq.rec`, `congrArg`, `congrFun'`, `propext`, `eq_self`, the literal `1`. Both then run out of `set.mm`'s 26 set variables, in the typing of `Nat.succ_add._f` and `List.append._f`, whose matchers nest binders deeper than that. PR #2 (extra set variables) lifts that limit; the translator already takes its quantified variables from set.mm's letters, so it merges with #2 as it is.
 
@@ -683,6 +740,91 @@ Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its ow
          ( ( lean.instOfNatNat ` U ) ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 0 ) ) ) ) ) ) ` A ) )
 ```
 
-That is, `A + 0 = A` in the model, with `+` as Lean defines it. Restating it as `( A + 0 ) = A` in `set.mm`'s arithmetic needs the bridge theorem `⟦Nat.add⟧ = +`, now possible in tower mode.
+That is, `A + 0 = A` in the model, with `+` as Lean defines it. `nat-bridge … Nat.add_zero` restates it as `( ( U e. lean.-tower /\ A e. NN0 ) -> ( A + 0 ) = A )` in `set.mm`'s arithmetic, through the bridge theorem `⟦Nat.add⟧ = +`, which tower mode made provable ([bridges.md](bridges.md#leans-theorems-restated-in-setmms-arithmetic)).
 
 **Where the size goes.** Most of the steps are typing lemmas for the constants structural recursion goes through: `Nat.brecOn.go` (361,529 steps), `Nat.add._f` (289,688), the computation rules. `Nat.zero_add._f` alone is 20.9 million flat steps: its matcher's motive carries the whole statement, and each typing step repeats it. Compression shares the repeats (678 KB), but proving takes 15 minutes. Sharing types between steps, as Lean's kernel does, is the obvious next optimization.
+
+## The Init-wide run (built)
+
+Until now only small fixtures had been emitted and verified; `model-survey` only checks that definitions translate, in dry-run mode. This run emits and verifies everything the model handles in `Init`.
+
+**Universes.** The run below was made in the one-universe model, before the tower became the default. `define-all` now follows the default: each chunk monomorphizes the export afresh, defines each constant's instance with its universe parameters at 0 (`c.{0,…}`), and states its assumptions in its header. `--single-universe` reproduces the run as recorded. The counts below have not yet been remeasured in the tower; `model-survey` in the tower gives 14,105 definitions that translate, against 13,958 in one universe ([above](#model-survey-in-the-tower)).
+
+**The tools.**
+- `tenet-zfc define-all <export> <set.mm> <outdir> [--chunk-size N] [--chunks a,b-c] [--jobs N] [--budget s]` targets every definition, opaque constant, inductive type, constructor and recursor that isn't unsafe, in export order. Each constant gets its definitional equation; each constructor also gets its recursor's computation rule. The output is a chunk per N constants. Each chunk is a standalone `.mm` that includes set.mm and defines everything its constants use (a fresh model and database per chunk), so chunks verify independently. A refusal or failure is recorded per constant in `chunk-NNNN.tsv` with its reason, and the run goes on. `--budget` caps the time per constant; the prover and the type inferencer enforce it.
+- `scripts/verify-all [-j N] <outdir>` runs the three checkers on every chunk in parallel:
+  - metamath-exe, `verify proof lean-*` (set.mm's own proofs are checked once, in CI);
+  - mmverify.py, from the chunk's first `$p`;
+  - `scripts/check-definitions`.
+
+  It records pass or fail, size, times and failing labels per chunk. It is incremental, so a long run can be verified as its chunks appear. Fed a corrupted proof, all three checkers rejected it and the failing label was reported.
+- `scripts/summarize-all <outdir>` gives the totals below.
+- CI runs `define-all` and `verify-all` on `natle.ndjson`, in two chunks.
+
+**The result.** `Init` from Lean 4.36.0, 19,885 constants in 40 chunks of 500. Every chunk passes all three checkers.
+
+| | Constants | Translated, equation verified | Refused | Errors |
+|---|---|---|---|---|
+| definitions | 17,590 | 13,931 | 3,654 | 5 |
+| constructors | 828 | 755 | 73 | 0 |
+| recursors | 608 | 546 | 60 | 2 |
+| inductive types | 606 | 545 | 61 | 0 |
+| opaque constants | 253 | 181 | 72 | 0 |
+| **all** | **19,885** | **15,958** | **3,920** | **7** |
+
+- **Equations:** 15,958 emitted, 15,958 verified.
+- **Computation rules:** 471 emitted, 471 verified. Another 126 constructors need none: their recursors eliminate only into `Prop`, so both sides are proofs. 149 were refused and 9 failed (below).
+- **Rejected by a checker:** none. Seven computation rules, `Lean.ParserDescr`'s, have proof steps longer than mmj2 can hold. Those seven are checked by metamath-exe and mmverify.py only (see the limits below).
+
+`model-survey` counted 12,145 definitions translating before nested and mutual types landed; with them, 13,931 now translate with a verified equation.
+
+**Why the rest don't translate** (refusals, failures, and refused computation rules):
+
+| Reason | Constants |
+|---|---|
+| the name has characters a set.mm token can't hold (`'`, `?`, `₂`, hygienic `_@`) | 3,397 |
+| `Acc`, and the well-founded recursion built on it (a premise that is a function into `Acc`) | 379 |
+| the definition is too large for mmj2's definition check (over 15,000 symbols) | 76 |
+| a computation rule whose constructor has a proof field of a ∀-statement ("no hypothesis `(/) e. X_ …`") | 71 |
+| a structure field whose type binds a variable (`Bind.mk`, `Functor.mk`) | 60 |
+| more parameters or arguments than set.mm's 20 class variables (`IO.Error`) | 54 |
+| over the time budget | 13 |
+| `Lean.Order.iterates` (like `Acc`) | 10 |
+| the empty types `Empty`, `PEmpty` and one more, and what is built on them | 24 |
+| `fvmptd3: hypothesis fvmptd3.3 needs |-` (`Std.LawfulCommIdentity.mk`'s computation rule) | 1 |
+
+The two `KeyNotFoundException`s among the errors (`Empty.rec`, `PEmpty.rec`) come from chunks made before the fix for partly translated types, below; they are refusals now.
+
+**Bugs the run found, all fixed.** Each fix was checked by running the failing constants on `Init` again, through all three checkers.
+1. **`$d` in sethood proofs.** Sibling binders may share a set variable, so a hypothesis `D e. X_ w e. …` can bind the `w` that `ralrimivw` then quantifies over. Every equation with two Π-typed arguments binding the same letter failed all three checkers: `match_1`, `casesOn`, `recOn`, `below.rec`, 18 theorems in chunk 0 alone. Main's fix proves sethood under only the hypotheses a term needs. When those bind the variable too, this branch renames it first (`cbvixpv`, `cbviunv`, `eqeltrid`).
+2. **`outParam`.** The kernel strips `optParam`, `autoParam`, `outParam` and `semiOutParam` from a recursor's binder types, but a constructor keeps them, so `HAdd.mk`'s computation rule couldn't match its hypotheses. The model now translates through these identity wrappers.
+3. **A recursor that ignores its value** (`PUnit.rec`): its computation rule tried to rewrite a value that doesn't occur.
+4. **Partly translated types.** `Empty`'s type is written before its recursor is refused, so `Empty.rec`, and definitions using it (`Empty.elim`), referred to a constant never written: chunk 6 failed to parse. A constructor or recursor of such a type is now refused cleanly.
+5. **Private names.** A recursor's type was found by reparsing its name's text, which turns numeric parts into strings, so `_private.….0.….rec` was "not in the export". That refused 106 constants.
+6. **Labels.** `termExists_,_` is a valid token but not a label: theorem labels now go through `Model.LabelPart`.
+7. **Definitions too large for mmj2** (`stdNext`, 33,685 symbols; `Array.binInsertAux`, 94,525): mmj2's `definitionCheck` crashed on them and checked nothing after. The model now refuses definitions over 15,000 symbols, so every definition it writes can be checked.
+
+**Limits of the checkers at this scale.**
+- **mmj2 can't hold an expression over 32,000 symbols.** Its definition check proves `|- body = body'` for a copy of the body with fresh dummy variables, hence the model's cap at 15,000 symbols. Its proof verifier hits the same limit on seven of `Lean.ParserDescr`'s computation rules (3.8 to 13.8 million steps). `check-definitions --long-proofs-ok`, which `verify-all` uses, lists those theorems instead of failing: the definition check still has to run and pass, and metamath-exe and mmverify.py check those proofs. CI calls `check-definitions` without the flag.
+- **mmj2's failure popup** waited forever on a headless run. `check-definitions` now turns it off.
+- **Stack overflows.** `define-all` runs each chunk on a thread with a 256 MB stack, because the prover recurses over terms and a stack overflow can't be caught. `SetVarTests` crashed the macOS test host this way until it was changed on main.
+
+**Cost.**
+- **Size.** 114.7 MiB of compressed output, 1.4 to 5.5 MiB per chunk. Each chunk repeats the definitions its constants use, so the total counts `Nat`, `List` and the rest 40 times.
+- **Proof steps.** 565 million in equations and 233 million in computation rules, counted uncompressed. 53 equations have over a million steps each.
+- **Translation.** About 16.8 hours summed over constants. A chunk took 6 minutes to 2¾ hours, with a median of 19 minutes, at 4 jobs. The slowest was chunk 4, under the 600 s budget and heavy load. The machine was shared with other sessions at loads from 6 to 240, so wall-clock times varied widely. Caching whole parses (main's cache, and this branch's first one) made translation about three times faster.
+- **Verification**, summed over chunks: metamath-exe 2 minutes, mmverify.py 8 minutes, mmj2 84 minutes. mmj2 spends about a minute per chunk just reading and parsing set.mm, which is why chunks are large. The whole run verifies in about 25 minutes at 4 jobs.
+- **Budgets.** The time budget was 600 s per constant for chunks 0–5 and 11, and 240 s for the rest. 13 constants ran out of budget, most of them computation rules of `Lean.ParserDescr` and `IO.Error`.
+
+**To reproduce** (about five hours of translation at 4 jobs on a quiet 8-core machine, then about 25 minutes of checking):
+
+```
+tenet-zfc define-all init.ndjson set.mm out --chunk-size 500 --jobs 4 --budget 240
+TENET_ZFC_SETMM=… TENET_ZFC_METAMATH=… TENET_ZFC_MMVERIFY=… TENET_ZFC_JAVA=… TENET_ZFC_MMJ2=… scripts/verify-all -j 4 out
+scripts/summarize-all out
+```
+
+**What it shows.** The model is sound at scale: no checker rejected anything it wrote once the bugs above were fixed. What stops the rest is mostly not the model:
+- **Names:** 3,397 constants, 17% of `Init`, have names a set.mm token can't hold. An escaping scheme in `Model.Token` would admit most of them.
+- **Model features still missing:** `Acc` and well-founded recursion (389), proof fields of ∀-statements in computation rules (71), fields whose types bind variables (60), empty types (24).
+- **Tool limits:** mmj2's 32,000 symbols (76 definitions), and set.mm's 20 class variables (54).
