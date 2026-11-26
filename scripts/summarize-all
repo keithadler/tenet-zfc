@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Totals of a define-all run and its verification (docs/milestone3.md, "The Init-wide run").
+
+usage: scripts/summarize-all <outdir>
+
+Reads every chunk-NNNN.tsv (what define-all translated) and chunk-NNNN.verify (what scripts/verify-all checked), and
+prints: constants translated, by kind; equations and computation rules emitted and verified; refusals by reason;
+theorems that failed a checker; output size and checker time.
+"""
+import collections
+import glob
+import os
+import re
+import sys
+
+
+def category(reason):
+    r = re.sub(r"^\S+ is (not|a|an) ", r"X is \1 ", reason)
+    r = re.sub(r"^\S+: the name has", "X: the name has", r)
+    r = re.sub(r"^\S+ (is a mutual|is a recursive|is an indexed|has a field|has a premise)", r"X \1", r)
+    r = re.sub(r"\(.*\)$", "", r)
+    r = re.sub(r"lean\.\S+", "lean.X", r)
+    r = re.sub(r"\bno hypothesis .*", "no hypothesis …", r)
+    r = re.sub(r"came out as .*", "came out as …", r)
+    r = re.sub(r"(the hole \S+ does not occur in) .*", r"\1 …", r)
+    r = re.sub(r"^\S+'s definition has \d+ symbols", "X's definition has N symbols", r)
+    return r.strip()[:150]
+
+
+def main(out):
+    rows = []
+    for f in sorted(glob.glob(os.path.join(out, "chunk-*.tsv"))):
+        chunk = os.path.basename(f)[:-4]
+        with open(f) as fh:
+            next(fh)
+            for line in fh:
+                name, kind, status, eq, iota, isteps, secs, reason = line.rstrip("\n").split("\t")
+                rows.append(dict(chunk=chunk, name=name, kind=kind, status=status, eq=int(eq), iota=iota,
+                                 isteps=int(isteps), secs=float(secs), reason=reason))
+    verify = {}
+    for f in glob.glob(os.path.join(out, "chunk-*.verify")):
+        cols = open(f).read().rstrip("\n").split("\t")
+        verify[cols[0]] = dict(result=cols[1], bytes=int(cols[2]), theorems=int(cols[3]), mm=float(cols[5]),
+                               mv=float(cols[7]), dc=float(cols[9]), failing=set(cols[10].split()) if len(cols) > 10 else set())
+    chunks = sorted({r["chunk"] for r in rows})
+    unverified = [c for c in chunks if c not in verify]
+    print(f"chunks: {len(chunks)} translated, {len(verify)} checked, {sum(v['result'] == 'pass' for v in verify.values())} passed all three checkers")
+    if unverified:
+        print(f"  not yet checked: {' '.join(unverified)}")
+
+    print(f"\nconstants: {len(rows)}")
+    by_kind = collections.defaultdict(list)
+    for r in rows:
+        by_kind[r["kind"]].append(r)
+    for kind, rs in sorted(by_kind.items(), key=lambda kv: -len(kv[1])):
+        ok = [r for r in rs if r["status"] == "ok"]
+        print(f"  {kind:<12} {len(rs):6}: {len(ok):6} translated with their equations, "
+              f"{sum(r['status'] == 'refused' for r in rs):6} refused, {sum(r['status'] == 'error' for r in rs):5} errors")
+
+    # A theorem counts as verified when its chunk was checked and no checker named it. When a chunk fails only
+    # mmj2's or mmverify's check, the theorems metamath-exe didn't name are still counted, and the chunk is listed.
+    def verified(r, suffix):
+        v = verify.get(r["chunk"])
+        # Labels as Model.LabelPart writes them: a set.mm label can't hold { } or ,
+        label = r["name"].replace("{", "u").replace(",", "_").replace("}", "")
+        return v is not None and f"lean-{label}-{suffix}" not in v["failing"]
+
+    eqs = [r for r in rows if r["status"] == "ok"]
+    iotas = [r for r in rows if r["iota"] == "ok"]
+    print(f"\nequations emitted: {len(eqs)}, verified: {sum(verified(r, 'eq') for r in eqs)}")
+    print(f"computation rules emitted: {len(iotas)}, verified: {sum(verified(r, 'iota') for r in iotas)}; "
+          f"none needed (into Prop): {sum(r['iota'] == 'none-needed' for r in rows)}; "
+          f"refused: {sum(r['iota'] == 'refused' for r in rows)}; errors: {sum(r['iota'] == 'error' for r in rows)}")
+    print(f"proof steps (uncompressed count): {sum(r['eq'] for r in eqs):,} in equations, {sum(r['isteps'] for r in iotas):,} in computation rules")
+
+    long_ = sorted({re.search(r"Theorem (\S+):", l).group(1) for f in glob.glob(os.path.join(out, "chunk-*.mmj2-long"))
+                    for l in open(f) if "Theorem " in l})
+    print(f"proofs too long for mmj2 (checked by metamath-exe and mmverify.py only): {len(long_)}"
+          + (f", e.g. {', '.join(long_[:3])}" if long_ else ""))
+    failing = sorted(set().union(*[v["failing"] for v in verify.values()])) if verify else []
+    print(f"\ntheorems a checker rejected: {len(failing)}")
+    for label in failing[:40]:
+        print(f"  {label}")
+    for c, v in sorted(verify.items()):
+        if v["result"] != "pass" and not v["failing"]:
+            print(f"  {c}: failed a checker without metamath-exe naming a theorem (see {c}.verify.log)")
+
+    print("\nwhy the others aren't translated (refusals, errors, refused computation rules):")
+    reasons = collections.Counter()
+    example = {}
+    for r in rows:
+        if r["reason"]:
+            k = category(r["reason"])
+            reasons[k] += 1
+            example.setdefault(k, r["name"])
+    for k, n in reasons.most_common(30):
+        print(f"  {n:6}  {k}  (e.g. {example[k]})")
+
+    size = sum(v["bytes"] for v in verify.values())
+    print(f"\noutput: {size / 2**20:.1f} MiB in {len(verify)} checked chunks")
+    print(f"checker time, summed over chunks: metamath-exe {sum(v['mm'] for v in verify.values()):.0f}s, "
+          f"mmverify.py {sum(v['mv'] for v in verify.values()):.0f}s, definitionCheck {sum(v['dc'] for v in verify.values()):.0f}s")
+    print(f"translation time, summed over constants: {sum(r['secs'] for r in rows):.0f}s")
+    print("slowest constants:")
+    for r in sorted(rows, key=lambda r: -r["secs"])[:10]:
+        print(f"  {r['secs']:7.0f}s  {r['name']} ({r['eq']:,} + {r['isteps']:,} steps, {r['status']})")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    main(sys.argv[1])

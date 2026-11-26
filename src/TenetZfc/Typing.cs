@@ -17,6 +17,17 @@ public sealed class Typing(Terms t, Environment env)
     /// <summary>Why inference failed.</summary>
     public sealed class Stuck(string why) : Exception(why);
 
+    /// <summary>When it returns a time in the past, inference throws <see cref="TimeoutException"/> (define-all's budget).</summary>
+    public Func<DateTime?>? Deadline { get; init; }
+
+    private void CheckDeadline()
+    {
+        if (Deadline?.Invoke() is DateTime d && DateTime.UtcNow > d)
+        {
+            throw new TimeoutException("over its time budget, in type inference");
+        }
+    }
+
     /// <summary>
     /// Whether e is a proof: its type's type is Prop. Null when that can't be decided, for example when the type's
     /// sort is a universe parameter that could be zero.
@@ -59,6 +70,7 @@ public sealed class Typing(Terms t, Environment env)
 
     public Expr Infer(Expr e, IReadOnlyDictionary<ulong, Expr> ctx)
     {
+        CheckDeadline();
         switch (e)
         {
             case FVar f:
@@ -155,6 +167,7 @@ public sealed class Typing(Terms t, Environment env)
     {
         for (int fuel = 0; fuel < 10_000; fuel++)
         {
+            CheckDeadline();
             Expr head = Ops.Spine(e, out List<Expr> args);
             switch (head)
             {

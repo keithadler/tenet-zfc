@@ -743,3 +743,86 @@ Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its ow
 That is, `A + 0 = A` in the model, with `+` as Lean defines it. `nat-bridge … Nat.add_zero` restates it as `( ( U e. lean.-tower /\ A e. NN0 ) -> ( A + 0 ) = A )` in `set.mm`'s arithmetic, through the bridge theorem `⟦Nat.add⟧ = +`, which tower mode made provable ([bridges.md](bridges.md#leans-theorems-restated-in-setmms-arithmetic)).
 
 **Where the size goes.** Most of the steps are typing lemmas for the constants structural recursion goes through: `Nat.brecOn.go` (361,529 steps), `Nat.add._f` (289,688), the computation rules. `Nat.zero_add._f` alone is 20.9 million flat steps: its matcher's motive carries the whole statement, and each typing step repeats it. Compression shares the repeats (678 KB), but proving takes 15 minutes. Sharing types between steps, as Lean's kernel does, is the obvious next optimization.
+
+## The Init-wide run (built)
+
+Until now only small fixtures had been emitted and verified; `model-survey` only checks that definitions translate, in dry-run mode. This run emits and verifies everything the model handles in `Init`.
+
+**The tools.**
+- `tenet-zfc define-all <export> <set.mm> <outdir> [--chunk-size N] [--chunks a,b-c] [--jobs N] [--budget s]` targets every definition, opaque constant, inductive type, constructor and recursor that isn't unsafe, in export order. Each constant gets its definitional equation; each constructor also gets its recursor's computation rule. The output is a chunk per N constants. Each chunk is a standalone `.mm` that includes set.mm and defines everything its constants use (a fresh model and database per chunk), so chunks verify independently. A refusal or failure is recorded per constant in `chunk-NNNN.tsv` with its reason, and the run goes on. `--budget` caps the time per constant; the prover and the type inferencer enforce it.
+- `scripts/verify-all [-j N] <outdir>` runs the three checkers on every chunk in parallel:
+  - metamath-exe, `verify proof lean-*` (set.mm's own proofs are checked once, in CI);
+  - mmverify.py, from the chunk's first `$p`;
+  - `scripts/check-definitions`.
+
+  It records pass or fail, size, times and failing labels per chunk. It is incremental, so a long run can be verified as its chunks appear. Fed a corrupted proof, all three checkers rejected it and the failing label was reported.
+- `scripts/summarize-all <outdir>` gives the totals below.
+- CI runs `define-all` and `verify-all` on `natle.ndjson`, in two chunks.
+
+**The result.** `Init` from Lean 4.36.0, 19,885 constants in 40 chunks of 500. Every chunk passes all three checkers.
+
+| | Constants | Translated, equation verified | Refused | Errors |
+|---|---|---|---|---|
+| definitions | 17,590 | 13,931 | 3,654 | 5 |
+| constructors | 828 | 755 | 73 | 0 |
+| recursors | 608 | 546 | 60 | 2 |
+| inductive types | 606 | 545 | 61 | 0 |
+| opaque constants | 253 | 181 | 72 | 0 |
+| **all** | **19,885** | **15,958** | **3,920** | **7** |
+
+- **Equations:** 15,958 emitted, 15,958 verified.
+- **Computation rules:** 471 emitted, 471 verified. Another 126 constructors need none: their recursors eliminate only into `Prop`, so both sides are proofs. 149 were refused and 9 failed (below).
+- **Rejected by a checker:** none. Seven computation rules, `Lean.ParserDescr`'s, have proof steps longer than mmj2 can hold. Those seven are checked by metamath-exe and mmverify.py only (see the limits below).
+
+`model-survey` counted 12,145 definitions translating before nested and mutual types landed; with them, 13,931 now translate with a verified equation.
+
+**Why the rest don't translate** (refusals, failures, and refused computation rules):
+
+| Reason | Constants |
+|---|---|
+| the name has characters a set.mm token can't hold (`'`, `?`, `₂`, hygienic `_@`) | 3,397 |
+| `Acc`, and the well-founded recursion built on it (a premise that is a function into `Acc`) | 379 |
+| the definition is too large for mmj2's definition check (over 15,000 symbols) | 76 |
+| a computation rule whose constructor has a proof field of a ∀-statement ("no hypothesis `(/) e. X_ …`") | 71 |
+| a structure field whose type binds a variable (`Bind.mk`, `Functor.mk`) | 60 |
+| more parameters or arguments than set.mm's 20 class variables (`IO.Error`) | 54 |
+| over the time budget | 13 |
+| `Lean.Order.iterates` (like `Acc`) | 10 |
+| the empty types `Empty`, `PEmpty` and one more, and what is built on them | 24 |
+| `fvmptd3: hypothesis fvmptd3.3 needs |-` (`Std.LawfulCommIdentity.mk`'s computation rule) | 1 |
+
+The two `KeyNotFoundException`s among the errors (`Empty.rec`, `PEmpty.rec`) come from chunks made before the fix for partly translated types, below; they are refusals now.
+
+**Bugs the run found, all fixed.** Each fix was checked by running the failing constants on `Init` again, through all three checkers.
+1. **`$d` in sethood proofs.** Sibling binders may share a set variable, so a hypothesis `D e. X_ w e. …` can bind the `w` that `ralrimivw` then quantifies over. Every equation with two Π-typed arguments binding the same letter failed all three checkers: `match_1`, `casesOn`, `recOn`, `below.rec`, 18 theorems in chunk 0 alone. Main's fix proves sethood under only the hypotheses a term needs. When those bind the variable too, this branch renames it first (`cbvixpv`, `cbviunv`, `eqeltrid`).
+2. **`outParam`.** The kernel strips `optParam`, `autoParam`, `outParam` and `semiOutParam` from a recursor's binder types, but a constructor keeps them, so `HAdd.mk`'s computation rule couldn't match its hypotheses. The model now translates through these identity wrappers.
+3. **A recursor that ignores its value** (`PUnit.rec`): its computation rule tried to rewrite a value that doesn't occur.
+4. **Partly translated types.** `Empty`'s type is written before its recursor is refused, so `Empty.rec`, and definitions using it (`Empty.elim`), referred to a constant never written: chunk 6 failed to parse. A constructor or recursor of such a type is now refused cleanly.
+5. **Private names.** A recursor's type was found by reparsing its name's text, which turns numeric parts into strings, so `_private.….0.….rec` was "not in the export". That refused 106 constants.
+6. **Labels.** `termExists_,_` is a valid token but not a label: theorem labels now go through `Model.LabelPart`.
+7. **Definitions too large for mmj2** (`stdNext`, 33,685 symbols; `Array.binInsertAux`, 94,525): mmj2's `definitionCheck` crashed on them and checked nothing after. The model now refuses definitions over 15,000 symbols, so every definition it writes can be checked.
+
+**Limits of the checkers at this scale.**
+- **mmj2 can't hold an expression over 32,000 symbols.** Its definition check proves `|- body = body'` for a copy of the body with fresh dummy variables, hence the model's cap at 15,000 symbols. Its proof verifier hits the same limit on seven of `Lean.ParserDescr`'s computation rules (3.8 to 13.8 million steps). `check-definitions --long-proofs-ok`, which `verify-all` uses, lists those theorems instead of failing: the definition check still has to run and pass, and metamath-exe and mmverify.py check those proofs. CI calls `check-definitions` without the flag.
+- **mmj2's failure popup** waited forever on a headless run. `check-definitions` now turns it off.
+- **Stack overflows.** `define-all` runs each chunk on a thread with a 256 MB stack, because the prover recurses over terms and a stack overflow can't be caught. `SetVarTests` crashed the macOS test host this way until it was changed on main.
+
+**Cost.**
+- **Size.** 114.7 MiB of compressed output, 1.4 to 5.5 MiB per chunk. Each chunk repeats the definitions its constants use, so the total counts `Nat`, `List` and the rest 40 times.
+- **Proof steps.** 565 million in equations and 233 million in computation rules, counted uncompressed. 53 equations have over a million steps each.
+- **Translation.** About 16.8 hours summed over constants. A chunk took 6 minutes to 2¾ hours, with a median of 19 minutes, at 4 jobs. The slowest was chunk 4, under the 600 s budget and heavy load. The machine was shared with other sessions at loads from 6 to 240, so wall-clock times varied widely. Caching whole parses (main's cache, and this branch's first one) made translation about three times faster.
+- **Verification**, summed over chunks: metamath-exe 2 minutes, mmverify.py 8 minutes, mmj2 84 minutes. mmj2 spends about a minute per chunk just reading and parsing set.mm, which is why chunks are large. The whole run verifies in about 25 minutes at 4 jobs.
+- **Budgets.** The time budget was 600 s per constant for chunks 0–5 and 11, and 240 s for the rest. 13 constants ran out of budget, most of them computation rules of `Lean.ParserDescr` and `IO.Error`.
+
+**To reproduce** (about five hours of translation at 4 jobs on a quiet 8-core machine, then about 25 minutes of checking):
+
+```
+tenet-zfc define-all init.ndjson set.mm out --chunk-size 500 --jobs 4 --budget 240
+TENET_ZFC_SETMM=… TENET_ZFC_METAMATH=… TENET_ZFC_MMVERIFY=… TENET_ZFC_JAVA=… TENET_ZFC_MMJ2=… scripts/verify-all -j 4 out
+scripts/summarize-all out
+```
+
+**What it shows.** The model is sound at scale: no checker rejected anything it wrote once the bugs above were fixed. What stops the rest is mostly not the model:
+- **Names:** 3,397 constants, 17% of `Init`, have names a set.mm token can't hold. An escaping scheme in `Model.Token` would admit most of them.
+- **Model features still missing:** `Acc` and well-founded recursion (389), proof fields of ∀-statements in computation rules (71), fields whose types bind variables (60), empty types (24).
+- **Tool limits:** mmj2's 32,000 symbols (76 definitions), and set.mm's 20 class variables (54).
