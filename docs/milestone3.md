@@ -426,6 +426,7 @@ The largest proofs gain the most, because their repeats are the longest. In `rec
 | `lean-List.rec-eq` | 24,459 | 1,578 | 192 |
 
 Sharing in the text makes the proofs short, but the proof search still builds the flat proof first. The next size step is to share inside the prover too: prove a repeated equality once, as a lemma or a saved step, instead of building it again.
+
 ## Step 5, first part: strings, axioms, quotients and choice (built)
 
 **String literals.** The kernel expands a literal to `String.ofList` applied to the list of its characters, each `Char.ofNat` of its code point (`StringToCtor` in the replayer). The model translates it to exactly that, with one helper so it stays short:

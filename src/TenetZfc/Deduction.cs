@@ -244,17 +244,6 @@ public sealed class Deduction(Prover pr)
                     Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
             case "copab": // { <. x , y >. | ph } ($d x y ph)
                 return pr.Apply("opabbidv", S(("ph", h), ("x", L("x")), ("y", L("y")), ("ps", L("ph")), ("ch", R("ph"))), Sub("ph")!.Value);
-            case "wss":  // A C_ B
-                {
-                    Proof? pl = Sub("A"), prr = Sub("B");
-                    if (pl is Proof x && prr is Proof y)
-                    {
-                        return pr.Apply("sseq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))), x, y);
-                    }
-                    return pl is Proof only
-                        ? pr.Apply("sseq1d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B"))), only)
-                        : pr.Apply("sseq2d", S(("ph", h), ("A", L("B")), ("B", R("B")), ("C", L("A"))), prr!.Value);
-                }
             case "wer":  // R Er A, by the closed ereq1 and ereq2
                 {
                     Proof? pRel = Sub("R"), pDom = Sub("A");
