@@ -577,3 +577,112 @@ Both verifiers accept them, and every definition passes the definition check. Th
 `tenet-zfc nat-bridge` proves that `F = ( `' lean.Nat.-ofnum o. `' lean.Nat.-lit )` is a bijection from the model's `Nat` onto `NN0`. It takes zero to `0`, `succ` to `+ 1` and each literal to its numeral. Any function with `Nat.add`'s computation rules is `+` through `F`. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. Milestone 2's table entries for `Nat` become these theorems. All three checkers accept the output, and CI runs them.
 
 **A limit found on the way.** In the one-universe model, `⟦Nat.below⟧` is `(/)` everywhere. Its motive returns `U`, and `U e. U` is impossible. So `⟦Nat.add⟧`, compiled through `brecOn`, doesn't satisfy its own computation rules, and neither does any other structurally recursive definition. Both the motive lemma and the collapse of `Nat.below` are proved, and the bridge for `Nat.add` takes the rules as hypotheses until milestone 4 separates universe levels. See [bridges.md](bridges.md).
+
+## Theorems through the model (built: `Nat.add_zero` and `Nat.zero_add`)
+
+Until now no Lean theorem was proved through the generic model; milestone 2's `2 + 2 = 4` and `List.length_append` went through a hand-written table. `tenet-zfc theorem <export> <set.mm> <out.mm> <name>…` (`TheoremTranslator.cs`) now proves Lean theorems from their proof terms, in the model's own terms.
+
+### First, a gap in the model: one universe makes `Nat.add` empty
+
+Every function `Init` defines by structural recursion went to `(/)` in the model. So `Nat.add_zero` (`n + 0 = n`) was false there for `n ≠ 0`, and `⟦Nat.add⟧ = +` couldn't be proved.
+
+- Structural recursion compiles to `Nat.brecOn`, whose functional takes an argument of type `Nat.below motive t`.
+- `Nat.below` is `Nat.rec` at the motive `fun _ => Sort (max 1 u)`, which translates to `( z e. ( lean.Nat ` u ) |-> u )`.
+- The recursor's motives range over `( u ^m ( lean.Nat ` u ) )`. That motive is in it only if `u e. u`, which is false. So `⟦Nat.below⟧` is a map applied outside its domain, `(/)`.
+- From there `Nat.brecOn.go`'s motive is `(/)` everywhere, its minor premise can't be in it, and `⟦Nat.brecOn …⟧ = ( 1st ` ( 2nd ` (/) ) ) = (/)`.
+
+The cause is the one universe for every level: large elimination into `Sort (u+1)` needs `Sort u ∈ Sort (u+1)`.
+
+### Tower mode (`Universes.cs`, `Monomorph.cs`)
+
+The fix is opt-in (`new Model(…, tower: true)`, `define --tower`), so default outputs don't change:
+
+- **A tower of universes.** The universe argument ranges over `lean.-tower`, a new definition:
+
+  ```
+  df-lean.-tower $a |- lean.-tower = { f | ( ( f : _om --> Univ /\ _om e. ( f ` (/) ) ) /\ A. n e. _om ( f ` n ) e. ( f ` suc n ) ) } $.
+  ```
+
+  An increasing ω-sequence of Grothendieck universes, the first containing ω. `Prop` is `2o`, and `Sort (k+1)` is `( U ` k )` for a concrete level `k`.
+- **Monomorphization.** Each constant used at concrete levels becomes its own constant, `c.{l1,l2}` (labels write it `c.ul1_l2`, since labels can't hold braces). A recursor's motive level stays a parameter, and it means the whole tower, `U. ran U`. It occurs only as the motive's codomain, so one recursor per type instance serves every elimination level.
+- **Π-types into `Prop` are propositions**, `if ( A. x e. ⟦A⟧ (/) e. ⟦B⟧ , 1o , (/) )`, rather than sets of functions. A proof, `(/)`, is then in a Π-proposition exactly when it holds, as it is in any other proposition.
+
+`Nat.below.{1}`'s motive is now `( z e. ( lean.Nat ` u ) |-> ( u ` (/) ) )`, in `( U. ran u ^m ( lean.Nat ` u ) )`. The definitions pass the definition check, and the definitional equations and computation rules verify as before.
+
+**What a theorem assumes.** `U e. lean.-tower`. ZFC doesn't prove that such a tower exists (it needs inaccessible cardinals), so, as before, a theorem holds in every model of the hypotheses. It adds no axiom.
+
+### How a theorem is proved
+
+The model is meant to be sound for Lean's typing: if `Γ ⊢ e : T` then `⟦e⟧ ∈ ⟦T⟧`. A proof `p : P` translates to `(/)`, so translating the typing of `p` proves `(/) e. ⟦P⟧`: the statement holds in the model. The output is
+
+```
+|- ( ( U e. lean.-tower /\ A e. ⟦T1⟧ /\ … ) -> (/) e. ⟦statement⟧ )
+```
+
+with the statement's leading binders opened as hypotheses: `A e. ⟦T⟧` for data, `(/) e. ⟦P⟧` for a hypothesis.
+
+**Typing becomes membership.**
+
+| Lean | `set.mm` step |
+|---|---|
+| `f a`, `f : (x : A) → B` | `fvixp`, or `elmapi` and `ffvelcdmd` for a non-dependent arrow |
+| `h a`, `h` a proof of a Π-proposition | `lean-prop` (below), then `rspcdv` |
+| `fun x => b` | `ralrimiva`, then `mptelixpg` or `fmpt` and `elmapd` |
+| a proof `fun x => b` | `ralrimiva`, then `lean-prop` |
+| `s.i` | `lean-proj-S-i`: down the structure's unions (`eliun`, `rexlimdva`) to `s = tuple` (`elsni`) |
+| a constant `c` | `lean-ty-c`, a typing lemma proved once (below) |
+| a sort, a type as an argument | `UniverseMembership.cs`: closure of `( U ` k )` under pairs, singletons, unions and function spaces (`gruop`, `grusn`, `gruun`, `gruiun`, `grumap`) |
+| a literal `n` | as `Nat.zero` or `Nat.succ (n-1)` (below) |
+
+**Conversions become equations.** Where Lean checks `T ≡ T'`, the translator proves `( ph -> ⟦T⟧ = ⟦T'⟧ )` by normalizing both sides:
+- beta: `fvmptd3`, with the argument's membership in the domain;
+- delta: the constant's definition;
+- iota: the constructor's computation rule, `lean-iota-c`;
+- projections: the constructor's equation, then `op1stg` and `op2ndg`;
+- Nat literals: `( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 0 ) ) = ( lean.Nat.zero ` U )`, and so on, through `set.mm`'s isomorphism of `_om` and `NN0` (`om2uzf1oi`, `f1ocnvfv`, `frsuc`);
+- congruence on applications, projections and Π-types (`fveq12d`, `ixpeq2dva`, `ralbidva`, `ixpconstg`).
+
+Texts that differ only in the names of bound variables are equal by `Alpha.cs` (`cbvmptv`, `cbvixpv`, `cbviunv`, `cbvralvw` and congruence).
+
+**Each constant is typed once**, by a lemma in the output:
+- **definitions and theorems:** their value, typed;
+- **constructors:** their tuple is in the type (`lean-in-c`, the first step of the computation rule's proof);
+- **inductive types:** their sets are in the universe of their sort. A recursive type's stages are, by induction over ω (`finds2`);
+- **recursors:** `lean-recty-I`, `⟦I params⟧ C_ { t | ( R ` t ) e. ( B ` t ) }` for the recursor `R` and motive `B`. Each stage is a subset by `finds2`; a constructor's tuple is in it by its computation rule and its minor premise's type;
+- **recursors into `Prop`** (induction): `lean-ind-I`, from `lean-recty-I` with each minor premise, a proof, replaced by a witness of its data type: the map that is `(/)` everywhere. It is in that type because each motive value it lands in holds, by the minor premise;
+- **`Eq.rec` into `Prop`** (substitution): `lean-subst-Eq`. The major premise holds, so `b = a`, and the motive at `b` is the motive at `a`.
+
+Three small lemmas are proved once per output: `lean-tw` (what the tower hypothesis says) with `lean-tw-u`, `lean-tw-s` and `lean-tw-om`; `lean-prop`, `|- ( (/) e. if ( ph , 1o , (/) ) <-> ph )`; and `lean-pf`, `|- ( ( A e. 2o /\ B e. A ) -> (/) e. A )`, so that a member of a proposition makes it hold.
+
+**Distinct variables.** Each lemma carries exactly the `$d` conditions its proof needs, computed by replaying the proof (`Distinct.cs`). A blanket `$d` over all its variables would stop the lemma being used with a term that binds one of them. Where a lemma needs a bound variable distinct from a class variable, the term is renamed apart first and brought back by alpha-equivalence. The replay also checks every step's hypotheses, so a broken proof fails where it is made, not in a verifier.
+
+### Results
+
+`tests/fixtures/theorems.ndjson` is `leanout Init -- Nat.add_zero Nat.zero_add Nat.succ_add List.length_append` (Lean 4.36.0).
+
+| Theorem | Proof term | Lemmas (flat steps) | Theorem (flat steps) | Output (compressed) | Time |
+|---|---|---|---|---|---|
+| `Nat.add_zero` | `rfl`, so `n + 0` is unfolded to `n` through `Nat.add`, `Nat.brecOn`, `Nat.rec` and the literal `0` | 45 (1,147,634) | 1,665,317 | 383 KB | 6 min |
+| `Nat.zero_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg`, `rfl` | 61 (22,854,344) | 69,124 | 678 KB | 15 min |
+
+Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its own and together. CI proves both into one output (863 KB, 13 minutes here; the second reuses the first's lemmas) and runs all three checks on it.
+
+**`Nat.succ_add` and `List.length_append` aren't proved yet.** Both get past every construct they use: induction on `Nat` and on `List α`, `Eq.rec`, `congrArg`, `congrFun'`, `propext`, `eq_self`, the literal `1`. Both then run out of `set.mm`'s 26 set variables, in the typing of `Nat.succ_add._f` and `List.append._f`, whose matchers nest binders deeper than that. PR #2 (extra set variables) lifts that limit; the translator already takes its quantified variables from set.mm's letters, so it merges with #2 as it is.
+
+`propext` holds in the model and is typed by a lemma (`Propext.cs`): a proposition is `(/)` or `1o` (`lean-2oif`, `|- ( A e. 2o -> A = if ( (/) e. A , 1o , (/) ) )`), so two that hold together are equal.
+
+**Refused, with the reason:** a constant that isn't a theorem; universe levels above 4; Nat literals above 10; recursors with indices or several motives (other than one-constructor propositions like `Eq`, by substitution); axioms other than `propext`; nested and mutual types (left to the model).
+
+`Nat.add_zero`'s statement, as proved:
+
+```
+|- ( ( U e. lean.-tower /\ A e. ( lean.Nat ` U ) ) -> (/) e. ( ( ( ( lean.Eq.{1} ` U ) ` ( lean.Nat ` U ) ) `
+     ( ( ( ( ( ( ( lean.HAdd.hAdd.{0,0,0} ` U ) ` ( lean.Nat ` U ) ) ` ( lean.Nat ` U ) ) ` ( lean.Nat ` U ) ) `
+         ( ( ( lean.instHAdd.{0} ` U ) ` ( lean.Nat ` U ) ) ` ( lean.instAddNat ` U ) ) ) ` A ) `
+       ( ( ( ( lean.OfNat.ofNat.{0} ` U ) ` ( lean.Nat ` U ) ) ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 0 ) ) ) `
+         ( ( lean.instOfNatNat ` U ) ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 0 ) ) ) ) ) ) ` A ) )
+```
+
+That is, `A + 0 = A` in the model, with `+` as Lean defines it. Restating it as `( A + 0 ) = A` in `set.mm`'s arithmetic needs the bridge theorem `⟦Nat.add⟧ = +`, now possible in tower mode.
+
+**Where the size goes.** Most of the steps are typing lemmas for the constants structural recursion goes through: `Nat.brecOn.go` (361,529 steps), `Nat.add._f` (289,688), the computation rules. `Nat.zero_add._f` alone is 20.9 million flat steps: its matcher's motive carries the whole statement, and each typing step repeats it. Compression shares the repeats (678 KB), but proving takes 15 minutes. Sharing types between steps, as Lean's kernel does, is the obvious next optimization.

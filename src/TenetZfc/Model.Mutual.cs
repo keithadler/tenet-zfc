@@ -378,9 +378,9 @@ public sealed partial class Model
         RefuseBinders(cdoms.Skip(ctorParams.Count).Select(d => ("", d)).ToList(), ctor.Name);
         List<string> paramHyps = ti.Original is null ? ctorParams.Select((a, i) => $"{a} e. {cdoms[i]}").ToList() : [];
         List<string> fieldHyps = fields.Select((a, i) => $"{a} e. {cdoms[ctorParams.Count + i]}").ToList();
-        string ph = Conj(new[] { "U e. Univ" }.Concat(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}")).Concat(paramHyps).Concat(fieldHyps));
+        string ph = Conj(new[] { UHyp }.Concat(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}")).Concat(paramHyps).Concat(fieldHyps));
         Proof Pick(string ctx, string h) => Hyp(ctx, h) ?? throw new Refused($"no hypothesis {h}");
-        List<string> baseHyps = new[] { "U e. Univ" }.Concat(ps.Select((a, i) => $"{a} e. {rdoms[i]}")).ToList();
+        List<string> baseHyps = new[] { UHyp }.Concat(ps.Select((a, i) => $"{a} e. {rdoms[i]}")).ToList();
         string small = Conj(baseHyps.Concat(paramHyps).Concat(fieldHyps));
         var extraVars = new List<string>();
         var toks = new List<string> { ctok, rtok, blk.StepTok, blk.CaseTok };
