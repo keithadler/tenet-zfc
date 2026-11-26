@@ -215,6 +215,51 @@ public sealed class Deduction(Prover pr)
                     Sub("A") ?? Refl(h, L("A")), Sub("R") ?? Refl(h, L("R")), Sub("B") ?? Refl(h, L("B")));
             case "cs1":  // <" A ">
                 return pr.Apply("s1eqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
+            case "cqs":  // ( A /. R )
+                return Pair("qseq1d", "qseq2d", "qseq12d", "A", "R");
+            case "cec":  // [ A ] R
+                {
+                    Proof? pa = Sub("A"), pr2 = Sub("R");
+                    Proof? first = pa is Proof x ? pr.Apply("eceq1d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("R"))), x) : null;
+                    Proof? second = pr2 is Proof y ? pr.Apply("eceq2d", S(("ph", h), ("A", L("R")), ("B", R("R")), ("C", R("A"))), y) : null;
+                    return first is Proof f1 && second is Proof s1 ? Trans(f1, s1) : (first ?? second!.Value);
+                }
+            case "crn":  // ran A
+                return pr.Apply("rneqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
+            case "cint": // |^| A
+                return pr.Apply("inteqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
+            case "cpw":  // ~P A
+                return pr.Apply("pweqd", S(("ph", h), ("A", L("A")), ("B", R("A"))), Sub("A")!.Value);
+            case "cin":  // ( A i^i B )
+                return pr.Apply("ineq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
+            case "cxp":  // ( A X. B )
+                return pr.Apply("xpeq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
+            case "crab": // { x e. A | ph } ($d x ph)
+                return pr.Apply("rabeqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
+            case "copab": // { <. x , y >. | ph } ($d x y ph)
+                return pr.Apply("opabbidv", S(("ph", h), ("x", L("x")), ("y", L("y")), ("ps", L("ph")), ("ch", R("ph"))), Sub("ph")!.Value);
+            case "wer":  // R Er A, by the closed ereq1 and ereq2
+                {
+                    Proof? pRel = Sub("R"), pDom = Sub("A");
+                    Proof? first = pRel is Proof x ? Syl(x, pr.Apply("ereq1", S(("R", L("R")), ("S", R("R")), ("A", L("A"))))) : null;
+                    Proof? second = pDom is Proof y ? Syl(y, pr.Apply("ereq2", S(("A", L("A")), ("B", R("A")), ("R", R("R"))))) : null;
+                    if (first is Proof f1 && second is Proof s1)
+                    {
+                        return pr.Apply("bitrd", S(("ph", h), ("ps", $"{L("R")} Er {L("A")}"), ("ch", $"{R("R")} Er {L("A")}"), ("th", $"{R("R")} Er {R("A")}")), f1, s1);
+                    }
+                    return first ?? second!.Value;
+                }
+            case "crio": // ( iota_ x e. A ph ) ($d x ph)
+                return pr.Apply("riotaeqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
+            case "wral": // A. x e. A ph ($d x ph)
+                return pr.Apply("raleqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
+            case "wn":   // -. ph
+                return pr.Apply("notbid", S(("ph", h), ("ps", L("ph")), ("ch", R("ph"))), Sub("ph")!.Value);
             case "wceq": // A = B
                 return Pair("eqeq1d", "eqeq2d", "eqeq12d", "A", "B");
             case "wcel": // A e. B
