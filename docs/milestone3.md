@@ -745,11 +745,11 @@ The two `KeyNotFoundException`s among the errors (`Empty.rec`, `PEmpty.rec`) com
 **Cost.**
 - **Size.** 114.7 MiB of compressed output, 1.4 to 5.5 MiB per chunk. Each chunk repeats the definitions its constants use, so the total counts `Nat`, `List` and the rest 40 times.
 - **Proof steps.** 565 million in equations and 233 million in computation rules, counted uncompressed. 53 equations have over a million steps each.
-- **Translation.** About 16.8 hours summed over constants. A chunk took 6 to 40 minutes, with a median of 19, at 4 jobs. The machine was shared with other sessions at loads from 6 to 240, so wall-clock times varied widely. Caching whole parses (main's cache, and this branch's first one) made translation about three times faster.
+- **Translation.** About 16.8 hours summed over constants. A chunk took 6 minutes to 2¾ hours, with a median of 19 minutes, at 4 jobs. The slowest was chunk 4, under the 600 s budget and heavy load. The machine was shared with other sessions at loads from 6 to 240, so wall-clock times varied widely. Caching whole parses (main's cache, and this branch's first one) made translation about three times faster.
 - **Verification**, summed over chunks: metamath-exe 2 minutes, mmverify.py 8 minutes, mmj2 84 minutes. mmj2 spends about a minute per chunk just reading and parsing set.mm, which is why chunks are large. The whole run verifies in about 25 minutes at 4 jobs.
-- **Budgets.** The time budget was 600 s per constant for chunks 0–5 and 11, and 240 s for the rest. 13 constants ran out of budget; some of the 6,000-step `Lean.ParserDescr` equations finished just under it.
+- **Budgets.** The time budget was 600 s per constant for chunks 0–5 and 11, and 240 s for the rest. 13 constants ran out of budget, most of them computation rules of `Lean.ParserDescr` and `IO.Error`.
 
-**To reproduce** (about a day on a quiet 8-core machine at 4 jobs):
+**To reproduce** (about five hours of translation at 4 jobs on a quiet 8-core machine, then about 25 minutes of checking):
 
 ```
 tenet-zfc define-all init.ndjson set.mm out --chunk-size 500 --jobs 4 --budget 240
