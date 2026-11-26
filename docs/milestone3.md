@@ -748,6 +748,8 @@ That is, `A + 0 = A` in the model, with `+` as Lean defines it. `nat-bridge … 
 
 Until now only small fixtures had been emitted and verified; `model-survey` only checks that definitions translate, in dry-run mode. This run emits and verifies everything the model handles in `Init`.
 
+**Universes.** The run below was made in the one-universe model, before the tower became the default. `define-all` now follows the default: each chunk monomorphizes the export afresh, defines each constant's instance with its universe parameters at 0 (`c.{0,…}`), and states its assumptions in its header. `--single-universe` reproduces the run as recorded. The counts below have not yet been remeasured in the tower; `model-survey` in the tower gives 14,105 definitions that translate, against 13,958 in one universe ([above](#model-survey-in-the-tower)).
+
 **The tools.**
 - `tenet-zfc define-all <export> <set.mm> <outdir> [--chunk-size N] [--chunks a,b-c] [--jobs N] [--budget s]` targets every definition, opaque constant, inductive type, constructor and recursor that isn't unsafe, in export order. Each constant gets its definitional equation; each constructor also gets its recursor's computation rule. The output is a chunk per N constants. Each chunk is a standalone `.mm` that includes set.mm and defines everything its constants use (a fresh model and database per chunk), so chunks verify independently. A refusal or failure is recorded per constant in `chunk-NNNN.tsv` with its reason, and the run goes on. `--budget` caps the time per constant; the prover and the type inferencer enforce it.
 - `scripts/verify-all [-j N] <outdir>` runs the three checkers on every chunk in parallel:
