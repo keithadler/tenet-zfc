@@ -57,6 +57,7 @@ public sealed partial class Model
     {
         Debug($"lemma {label}: {p.Proof.Count} steps");
         comment = new string(comment.Where(ch => ch < 128).ToArray());
+        p = RenameInternal(p);
         var dv = DistinctVars.Required(pr.Database, p.Proof);
         string text = $"""
             $( {comment} $)
@@ -70,6 +71,42 @@ public sealed partial class Model
         _out.AppendLine(text);
         pr.Database.Extend(text);
         LemmaSteps[label] = p.Proof.Count;
+    }
+
+    /// <summary>
+    /// The proof with its internal set variables (those its statement doesn't mention) renamed to letters from the far
+    /// end of the alphabet that the proof doesn't use. A consistent renaming of variables keeps a proof valid, and it
+    /// keeps the lemma's $d conditions away from the variables a context binds (which come from the front).
+    /// </summary>
+    private Proof RenameInternal(Proof p)
+    {
+        var inStmt = p.Proves.Symbols.ToHashSet();
+        var used = new HashSet<string>();
+        foreach (string l in p.Proof)
+        {
+            if (pr.Database.Statements.TryGetValue(l, out Statement? st) && st.Kind == 'f' && st.Expr.Type == "setvar")
+            {
+                used.Add(st.Var!);
+            }
+        }
+        var internals = used.Where(v => !inStmt.Contains(v)).ToList();
+        var free = Enumerable.Reverse(QuantLetters).Where(v => !used.Contains(v) && !inStmt.Contains(v)).ToList();
+        var map = new Dictionary<string, string>();
+        foreach (string v in internals)
+        {
+            if (free.Count == 0)
+            {
+                break;
+            }
+            // Only move a variable that sits at the front, where contexts take theirs.
+            if (Array.IndexOf(QuantLetters, v) >= 13 || !QuantLetters.Contains(v))
+            {
+                continue;
+            }
+            map[pr.Database.FloatOf(v)!.Label] = pr.Database.FloatOf(free[0])!.Label;
+            free.RemoveAt(0);
+        }
+        return map.Count == 0 ? p : (p.Proof.Select(l => map.TryGetValue(l, out string? m) ? m : l).ToList(), p.Proves);
     }
 
     /// <summary>The proof size of each lemma written, by label.</summary>
