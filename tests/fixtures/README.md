@@ -28,3 +28,5 @@ tenet check Nat.add_succ.ndjson --trace Nat.add_succ.trace.ndjson
 ```
 
 Regenerate them when the trace format changes.
+
+`Example.lean` has no committed export: it is the README's worked example, and CI's `run-example` job compiles, exports, traces, translates and verifies it from source with `tenet-zfc run tests/fixtures/Example.lean`.

@@ -1,0 +1,121 @@
+name: Release
+
+# Push a tag v<version> (e.g. v0.1.0) to release. The workflow runs all of CI (tests on Linux, macOS and Windows; every
+# fixture output checked by metamath-exe, mmverify.py and mmj2; the README's worked example end to end), builds the
+# dotnet tool package and self-contained binaries, and creates a GitHub Release with them and the verified outputs.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # Each binary is built on its own OS: a macOS binary must be signed (ad hoc) on macOS to run on Apple silicon.
+  binaries:
+    needs: ci
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, rid: linux-x64, exe: tenet-zfc }
+          - { os: macos-latest, rid: osx-arm64, exe: tenet-zfc }
+          - { os: windows-latest, rid: win-x64, exe: tenet-zfc.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish a self-contained single-file binary
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          dotnet publish src/TenetZfc.Cli -c Release -f net10.0 -r ${{ matrix.rid }} --self-contained \
+            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:Version="$version" -o publish
+          cp README.md LICENSE NOTICE CHANGELOG.md publish/
+      - name: Smoke-test the binary
+        shell: bash
+        run: |
+          ./publish/${{ matrix.exe }} --version
+          ./publish/${{ matrix.exe }} --version | grep -F "${GITHUB_REF_NAME#v}"
+          curl -fsSL -o "$RUNNER_TEMP/set.mm" "https://raw.githubusercontent.com/metamath/set.mm/6315535f37e5e58d14ece8c34ddb204926446264/set.mm"
+          ./publish/${{ matrix.exe }} run tests/fixtures/inductives.ndjson --decl Bool,Bool.true --setmm "$RUNNER_TEMP/set.mm" --no-verify --out "$RUNNER_TEMP/smoke"
+      - name: Archive
+        shell: bash
+        run: |
+          name="tenet-zfc-${GITHUB_REF_NAME#v}-${{ matrix.rid }}"
+          mkdir -p dist
+          if [ "${{ matrix.rid }}" = win-x64 ]; then
+            (cd publish && 7z a -tzip "../dist/$name.zip" . > /dev/null)
+          else
+            tar -C publish -czf "dist/$name.tar.gz" .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.rid }}
+          path: dist/*
+
+  release:
+    needs: [ci, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Pack the dotnet tool
+        run: dotnet pack src/TenetZfc.Cli -c Release -p:Version="${GITHUB_REF_NAME#v}" -o dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-outputs
+          path: verified-outputs
+      - uses: actions/download-artifact@v4
+        with:
+          name: example-run
+          path: example-run
+      - name: Archive the verified outputs, and checksums
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          (cd verified-outputs && zip -qr "../dist/tenet-zfc-$version-verified-outputs.zip" .)
+          (cd example-run && zip -qr "../dist/tenet-zfc-$version-example-run.zip" .)
+          (cd dist && sha256sum * > SHA256SUMS)
+          ls -l dist
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The section for this version: from its heading to the next.
+          awk -v v="$version" '
+            /^## / { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "See [CHANGELOG.md](CHANGELOG.md)." > notes.md; fi
+          cat >> notes.md <<EOF
+
+          ## Assets
+
+          - \`tenet-zfc.$version.nupkg\`: the dotnet tool (.NET 8 or 10). \`dotnet tool install -g tenet-zfc --add-source <directory holding it> --version $version\`
+          - \`tenet-zfc-$version-<os>.tar.gz\` / \`.zip\`: self-contained single-file binaries for linux-x64, osx-arm64 and win-x64; no .NET needed
+          - \`tenet-zfc-$version-verified-outputs.zip\`: every fixture output CI produced, each accepted by metamath-exe, mmverify.py and mmj2's definitionCheck (see VERIFIED.txt for the pinned versions)
+          - \`tenet-zfc-$version-example-run.zip\`: \`tenet-zfc run tests/fixtures/Example.lean\`, with its outputs, logs and report.json
+          - \`SHA256SUMS\`
+          EOF
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          prerelease=""
+          case "$version" in *-*) prerelease="--prerelease";; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "tenet-zfc $version" --notes-file notes.md $prerelease

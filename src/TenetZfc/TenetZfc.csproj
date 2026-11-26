@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>TenetZfc</RootNamespace>
+    <!-- Shipped inside the tenet-zfc tool package, not as a package of its own. -->
+    <IsPackable>false</IsPackable>
     <Description>Replays Tenet's derivation traces of Lean 4 declarations, without Tenet.</Description>
   </PropertyGroup>
 </Project>

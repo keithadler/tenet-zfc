@@ -1,10 +1,16 @@
 using System.Diagnostics;
 using TenetZfc;
+using TenetZfc.Cli;
 
 const string Usage = """
-    tenet-zfc - Lean 4 proofs to ZFC (see docs/spec.md)
+    tenet-zfc - Lean 4 proofs to ZFC, checked by Metamath verifiers (github.com/keithadler/tenet-zfc)
 
     usage:
+      tenet-zfc run <Module | File.lean | export.ndjson> [--out <dir>] [options]
+                                                         export, trace, translate and verify in one command, with a
+                                                         report on each declaration (tenet-zfc run --help)
+      tenet-zfc verify <out.mm>...                       check outputs with metamath-exe, mmverify.py and mmj2
+      tenet-zfc --version
       tenet-zfc replay <export.ndjson> <trace.ndjson>   re-derive the steps of a Tenet trace, without Tenet
       tenet-zfc emit <export.ndjson> <trace.ndjson> <set.mm> <out.mm>
                                                          replay, then write set.mm theorems for the theorems the
@@ -44,6 +50,25 @@ const string Usage = """
 
     exit status: 0 no step failed, 1 some step failed, 2 usage or file error
     """;
+
+if (args.Length >= 1 && args[0] == "run")
+{
+    return RunCommand.Execute(args[1..]);
+}
+if (args.Length >= 1 && args[0] == "verify")
+{
+    return VerifyCommand.Execute(args[1..]);
+}
+if (args.Length == 1 && args[0] is "--version" or "version")
+{
+    Console.WriteLine($"tenet-zfc {BuildInfo.Version}");
+    return 0;
+}
+if (args.Length == 1 && args[0] is "--help" or "-h" or "help")
+{
+    Console.WriteLine(Usage);
+    return 0;
+}
 
 // Compressed proofs unless --uncompressed: the Writer compresses against the database the proofs were made against.
 bool uncompressed = args.Contains("--uncompressed");
