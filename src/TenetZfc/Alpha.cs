@@ -17,6 +17,7 @@ public sealed partial class Model
     /// </summary>
     private string SubstFree(string text, string x, string with)
     {
+        using var prof = Prof.Time("SubstFree");
         if (!text.Split(' ').Contains(x))
         {
             return text;
@@ -44,6 +45,7 @@ public sealed partial class Model
     /// <summary>An alpha-variant of the text whose binders avoid the given variables (renamed to fresh ones).</summary>
     private string RenameApart(string text, ISet<string> avoid, params string[] alsoAvoid)
     {
+        using var prof = Prof.Time("RenameApart");
         var used = new HashSet<string>(text.Split(' ').Concat(avoid).Concat(alsoAvoid.SelectMany(a => a.Split(' '))));
         SyntaxTree n = pr.Parse("class", text.Split(' ')) ?? pr.Parse("wff", text.Split(' ')) ?? throw new Refused($"does not parse: {text}");
         string Go(SyntaxTree m)
@@ -87,6 +89,7 @@ public sealed partial class Model
     /// </summary>
     private Proof SubstEq(string type, string body, string x, string h)
     {
+        using var prof = Prof.Time("SubstEq");
         string v = h.StartsWith($"{x} = ", StringComparison.Ordinal) ? h[(x.Length + 3)..] : h;
         string hyp = $"{x} = {v}";
         string ctx = SubstFree(body, x, "Z");
@@ -106,6 +109,7 @@ public sealed partial class Model
     /// <summary>( ph -> x = y ) for alpha-equivalent class texts.</summary>
     private Proof AlphaIn(string ph, string x, string y)
     {
+        using var prof = Prof.Time("AlphaIn");
         if (x == y)
         {
             return _d.Refl(ph, x);
@@ -117,6 +121,7 @@ public sealed partial class Model
     /// <summary>( T. -> a = b ) or ( T. -> ( a <-> b ) ), or null when the texts are equal.</summary>
     private Proof? Alpha(string type, string a, string b)
     {
+        using var prof = Prof.Time("Alpha");
         if (a == b)
         {
             return null;

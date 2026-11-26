@@ -75,6 +75,7 @@ public sealed partial class Model
     /// <summary>( d.Ph -> X e. G ), G = ( U ` K ) or 2o.</summary>
     private Proof UnivMem(PCtx d, string x, string g)
     {
+        using var prof = Prof.Time("UnivMem");
         if (g == "2o")
         {
             return PropIn2o(d, x);

@@ -25,6 +25,7 @@ public sealed class TheoremTranslator
     public TheoremTranslator(Terms t, Environment env, Prover pr)
     {
         _t = t;
+        pr.Sharing = true;
         _mono = new Monomorph(t, env);
         _model = new Model(t, _mono.Env, pr, tower: true);
     }
@@ -55,22 +56,31 @@ public sealed partial class Model
     /// <summary>Write |- statement as a $p with its proof and exactly the $d conditions the proof needs; teach it to the prover.</summary>
     private void EmitLemma(string label, string comment, Proof p)
     {
-        Debug($"lemma {label}: {p.Proof.Count} steps");
+        SharedProofs sh = pr.Database.Shared;
+        long size = sh.Size(p.Proof);
+        Debug($"lemma {label}: {size} steps");
         comment = new string(comment.Where(ch => ch < 128).ToArray());
         p = RenameInternal(p);
         var dv = DistinctVars.Required(pr.Database, p.Proof);
+        // Written compressed straight from the shared proof (it is never expanded).
+        var mandatory = pr.Database.MandatoryHyps(p.Proves).Select(h => h.Label).ToList();
+        (List<string> labels, string letters) = CompressedProof.Compress(p.Proof, mandatory,
+            l => pr.Database[l] is { Kind: 'a' or 'p' } st ? st.Hyps.Count : 0, sh);
+        var proofText = new System.Text.StringBuilder();
+        Writer.AppendCompressed(proofText, "    ", labels, letters);
         string text = $"""
             $( {comment} $)
             {"${"}
               {string.Join(" ", dv.Select(d => $"$d {d.Item1} {d.Item2} $."))}
               {label} $p {p.Proves} $=
-                {string.Join(' ', p.Proof)} $.
+            {proofText} $.
             {"$}"}
 
             """;
         _out.AppendLine(text);
         pr.Database.Extend(text);
-        LemmaSteps[label] = p.Proof.Count;
+        LemmaSteps[label] = size;
+        LemmaShared[label] = sh.Reachable(p.Proof).Count + p.Proof.Count;
     }
 
     /// <summary>
@@ -82,7 +92,7 @@ public sealed partial class Model
     {
         var inStmt = p.Proves.Symbols.ToHashSet();
         var used = new HashSet<string>();
-        foreach (string l in p.Proof)
+        foreach (string l in pr.Database.Shared.Labels(p.Proof))
         {
             if (pr.Database.Statements.TryGetValue(l, out Statement? st) && st.Kind == 'f' && st.Expr.Type == "setvar")
             {
@@ -92,6 +102,7 @@ public sealed partial class Model
         var internals = used.Where(v => !inStmt.Contains(v)).ToList();
         var free = Enumerable.Reverse(QuantLetters).Where(v => !used.Contains(v) && !inStmt.Contains(v)).ToList();
         var map = new Dictionary<string, string>();
+        var vars = new Dictionary<string, string>();
         foreach (string v in internals)
         {
             if (free.Count == 0)
@@ -104,13 +115,17 @@ public sealed partial class Model
                 continue;
             }
             map[pr.Database.FloatOf(v)!.Label] = pr.Database.FloatOf(free[0])!.Label;
+            vars[v] = free[0];
             free.RemoveAt(0);
         }
-        return map.Count == 0 ? p : (p.Proof.Select(l => map.TryGetValue(l, out string? m) ? m : l).ToList(), p.Proves);
+        return map.Count == 0 ? p : (pr.Database.Shared.Rename(p.Proof, map, vars), p.Proves);
     }
 
     /// <summary>The proof size of each lemma written, by label.</summary>
-    public Dictionary<string, int> LemmaSteps { get; } = new();
+    public Dictionary<string, long> LemmaSteps { get; } = new();
+
+    /// <summary>The number of distinct shared steps each lemma's proof is built from, by label.</summary>
+    public Dictionary<string, long> LemmaShared { get; } = new();
 
     private bool Has(string label) => pr.Database.Statements.ContainsKey(label);
 
@@ -211,6 +226,12 @@ public sealed partial class Model
         public Dictionary<ulong, (Proof P, string Ty)> Mems { get; } = new();
         public List<string> Binders { get; } = new();
         public ulong LastFv;
+
+        /// <summary>
+        /// Memberships already proved in this context, by term (terms are hash-consed): a term typed twice, as Lean's
+        /// kernel caches inferred types, is proved once. Each is kept with the hypotheses it was proved under.
+        /// </summary>
+        public Dictionary<Expr, (string Ph, Typed T)> Memo { get; } = new(ReferenceEqualityComparer.Instance);
 
         public PCtx Clone()
         {
@@ -327,6 +348,11 @@ public sealed partial class Model
             _depth = 0;
             throw new Refused("typing recursion too deep");
         }
+        if (c.Memo.TryGetValue(e, out var known) && known.Ph == c.Ph)
+        {
+            _depth--;
+            return known.T;
+        }
         try
         {
             Typed m = MemCore(c, e);
@@ -338,6 +364,7 @@ public sealed partial class Model
                 Proof isProp = Check(c, m.LTy, InferIn(c, m.LTy), "2o");
                 m = m with { P = _d.Syl(_d.Jca(isProp, m.P), pr.Apply("lean-pf", S(("A", m.Ty), ("B", elem)))) };
             }
+            c.Memo[e] = (c.Ph, m);
             return m;
         }
         finally
@@ -1162,6 +1189,7 @@ public sealed partial class Model
 
     private Typed ConstMem(PCtx c, Const k)
     {
+        using var prof = Prof.Time("ConstMem");
         if (env.Find(k.Name) is { Kind: ConstKind.Recursor } rk && rk.LevelParams.Length > 0 && TrIn(c, k) == "(/)")
         {
             // A recursor into Prop: induction (lean-ind-I).
@@ -1340,6 +1368,7 @@ public sealed partial class Model
     /// <summary>( ph -> at = bt ), where at and bt are a's and b's translations up to the names of bound variables.</summary>
     private Proof ConvText(PCtx c, Expr a, string at, Expr b, string bt)
     {
+        using var prof = Prof.Time("ConvText");
         Proof p1 = AlphaTo(c, at, TrIn(c, a));
         Proof p2 = Conv(c, a, b);
         Proof p3 = AlphaTo(c, TrIn(c, b), bt);
@@ -1349,6 +1378,7 @@ public sealed partial class Model
     /// <summary>( ph -> x = y ) for texts equal up to the names of bound variables.</summary>
     private Proof AlphaTo(PCtx c, string x, string y)
     {
+        using var prof = Prof.Time("AlphaTo");
         return AlphaIn(c.Ph, x, y);
     }
 
@@ -1538,6 +1568,7 @@ public sealed partial class Model
     /// <summary>One reduction step of e, with ( ph -> ⟦e⟧ = ⟦e'⟧ ), or null when e is in weak head normal form.</summary>
     private (Expr, Proof)? ConvStep(PCtx c, Expr e)
     {
+        using var prof = Prof.Time("ConvStep");
         if (IsProofIn(c, e))
         {
             return null;

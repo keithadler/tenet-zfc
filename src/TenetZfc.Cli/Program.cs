@@ -149,7 +149,7 @@ if (args.Length >= 5 && args[0] == "theorem")
         {
             var (stmt, proof) = translator.Prove(tt.Of(name));
             done.Add(($"lean-thm-{Model.LabelPart(name)}", stmt, proof, name));
-            Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
+            Console.WriteLine($"{name}: {stmt} ({tpr.Database.Shared.Size(proof)} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
         }
         catch (Model.Refused e)
         {
@@ -161,7 +161,8 @@ if (args.Length >= 5 && args[0] == "theorem")
     foreach (var d in done)
     {
         var dv = TenetZfc.Metamath.DistinctVars.Required(tpr.Database, d.Proof);
-        tw.Theorem(d.Label, $"The Lean theorem {d.Name}, proved through the model from its proof term.", d.Statement, d.Proof, dv.Select(p => $"{p.Item1} {p.Item2}"));
+        var proofOut = tw.Compressed ? d.Proof : tpr.Database.Shared.Expand(d.Proof);
+        tw.Theorem(d.Label, $"The Lean theorem {d.Name}, proved through the model from its proof term.", d.Statement, proofOut, dv.Select(p => $"{p.Item1} {p.Item2}"));
     }
     File.WriteAllText(args[3], tw.ToString());
     return tstatus;

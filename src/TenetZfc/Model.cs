@@ -80,6 +80,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
 
     private string Tr(Expr e, Scope sc)
     {
+        using var prof = Prof.Time("Tr");
         // Proof irrelevance: every proof is (/). Types (sorts, Π-types) are never proofs, so they skip the check.
         if (e is not Sort and not Binder { IsPi: true } && _typing.IsProof(e, sc.Types) == true)
         {
@@ -1470,7 +1471,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             {"${"}
               {string.Join(" ", distinct.Select(d => $"$d {d} $."))}
               lean-rankfr $p {stmt} $=
-                {string.Join(' ', proof)} $.
+                {string.Join(' ', pr.Database.Shared.Expand(proof))} $.
             {"$}"}
 
             """;
@@ -1493,7 +1494,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
               {string.Join(" ", distinct.Select(d => $"$d {d} $."))}
               {Recursion.StageSsHyp} $e {Recursion.StageSsHypText} $.
               {Recursion.StageSsLabel} $p {stmt} $=
-                {string.Join(' ', proof)} $.
+                {string.Join(' ', pr.Database.Shared.Expand(proof))} $.
             {"$}"}
 
             """;
@@ -1690,6 +1691,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     /// </summary>
     private Proof? Simp(string ph, string x)
     {
+        using var prof = Prof.Time("Simp");
         SyntaxTree n = pr.Parse("class", x.Split(' '))!;
         switch (n.Rule.Label)
         {

@@ -11,11 +11,24 @@ public static class DistinctVars
     /// <summary>The pairs, each ordered, or a failure when the proof needs a variable distinct from itself.</summary>
     public static List<(string, string)> Required(Database db, IReadOnlyList<string> proof)
     {
+        using var prof = Prof.Time("Required");
         var stack = new List<string[]>();
         var need = new HashSet<(string, string)>();
         bool IsVar(string s) => db.FloatOf(s) is not null && !db.IsConstant(s);
         foreach (string label in proof)
         {
+            if (SharedProofs.IsRef(label))
+            {
+                // A shared subproof: its conclusion, and the pairs it needs, computed once for every use.
+                int id = SharedProofs.IdOf(label);
+                Expr e = db.Shared.Proves(id);
+                stack.Add([.. e.Symbols.Prepend(e.Type)]);
+                foreach (var pair in db.Shared.DistinctOf(id, body => Required(db, body)))
+                {
+                    need.Add(pair);
+                }
+                continue;
+            }
             Statement st = db[label];
             if (st.Kind is 'f' or 'e')
             {
