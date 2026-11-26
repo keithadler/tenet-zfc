@@ -61,7 +61,9 @@ def main(out):
     # mmj2's or mmverify's check, the theorems metamath-exe didn't name are still counted, and the chunk is listed.
     def verified(r, suffix):
         v = verify.get(r["chunk"])
-        return v is not None and f"lean-{r['name']}-{suffix}" not in v["failing"]
+        # Labels as Model.LabelPart writes them: a set.mm label can't hold { } or ,
+        label = r["name"].replace("{", "u").replace(",", "_").replace("}", "")
+        return v is not None and f"lean-{label}-{suffix}" not in v["failing"]
 
     eqs = [r for r in rows if r["status"] == "ok"]
     iotas = [r for r in rows if r["iota"] == "ok"]

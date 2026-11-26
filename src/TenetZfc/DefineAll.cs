@@ -62,7 +62,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
             try
             {
                 var (stmt, proof, distinct) = model.Equation(c.Name);
-                proved.Add(($"lean-{c.Name}-eq", stmt, proof, distinct, $"The definitional equation of {c.Name}."));
+                proved.Add(($"lean-{Model.LabelPart($"{c.Name}")}-eq", stmt, proof, distinct, $"The definitional equation of {c.Name}."));
                 string iota = "-", reason = "";
                 int iotaSteps = 0;
                 if (c.Kind == ConstKind.Constructor)
@@ -70,7 +70,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
                     try
                     {
                         var (istmt, iproof, idistinct) = model.Iota(c.Name);
-                        proved.Add(($"lean-{c.Name}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {c.Name}."));
+                        proved.Add(($"lean-{Model.LabelPart($"{c.Name}")}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {c.Name}."));
                         iota = "ok";
                         iotaSteps = iproof.Count;
                     }
