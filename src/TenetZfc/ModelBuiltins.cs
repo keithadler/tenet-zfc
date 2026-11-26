@@ -173,7 +173,7 @@ public sealed partial class Model
             var sc = NewScope();
             Expr ty = quot.Type;
             var ps = Telescope(ref ty, 2, sc);
-            string Far() => Add(sc, Declare(Enumerable.Reverse(Letters).Concat(ExtraSetVars).First(v => !sc.Bound.Contains(v))));
+            string Far() => Enumerable.Reverse(Letters).Concat(ExtraSetVars).FirstOrDefault(v => !sc.Bound.Contains(v)) is string v ? Add(sc, Declare(v)) : throw new Refused("more set variables needed than the model declares");   // set.mm's letters first, from the end
             string a = Far(), b = Far(), c = Far();
             string x = ps[0].Var, y = ps[1].Var, sq = $"( {x} X. {x} )";
             string r0 = $"{{ <. {b} , {c} >. | ( ( {b} e. {x} /\\ {c} e. {x} ) /\\ (/) e. ( ( {y} ` {b} ) ` {c} ) ) }}";

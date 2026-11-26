@@ -84,6 +84,16 @@ if (args.Length >= 5 && args[0] == "define")
                     Console.WriteLine($"{name} (computation rule): none needed: {e.Message}");
                 }
             }
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"\.rec_[0-9]+$"))
+            {
+                // A nested block's auxiliary recursor (Rose.rec_1, on List (Rose α)): the computation rule on each of the
+                // nested type's constructors (List.nil, List.cons).
+                foreach (var (ctor, istmt, iproof, idistinct) in model.RecursorIotas(dt.Of(name)))
+                {
+                    proved.Add(($"lean-{name}-{ctor}-iota", istmt, iproof, idistinct, $"The computation rule of {name} on {ctor}."));
+                    Console.WriteLine($"{name} on {ctor} (computation rule): {istmt} ({iproof.Count} proof steps)");
+                }
+            }
         }
         catch (Model.Refused e)
         {
@@ -109,6 +119,9 @@ if (args.Length == 3 && args[0] == "bridge")
     Console.WriteLine($"lean-rankfr: {stmt} ({proof.Count} proof steps)");
     var bw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[1]), "tenet-zfc bridge lemmas for recursive types (docs/milestone3.md)", CompressAgainst(bdb));
     bw.Theorem("lean-rankfr", "Smaller rank is a well-founded relation on any class.", stmt, proof, distinct);
+    var (sstmt, sproof, sdistinct) = rb.RankSe();
+    Console.WriteLine($"{Recursion.RankSeLabel}: {sstmt} ({sproof.Count} proof steps)");
+    bw.Theorem(Recursion.RankSeLabel, "Smaller rank is a set-like relation on every set.", sstmt, sproof, sdistinct);
     File.WriteAllText(args[2], bw.ToString());
     return 0;
 }

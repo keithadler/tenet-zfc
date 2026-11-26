@@ -97,11 +97,12 @@ jobs:
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/tree.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/tree.mm" Tree Tree.leaf Tree.node Tree.rec
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/natle.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natle.mm" Nat.le Nat.le.refl Nat.le.step Nat.le.rec Nat.lt UInt8.size
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/setvars.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/setvars.mm" Lean.Grind.Config.casesOn Lean.Meta.Simp.Config.zeta
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/mutual.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/mutual.mm" Tm Args Tm.var Tm.app Args.nil Args.cons Tm.rec Args.rec Rose Rose.node Rose.rec Rose.rec_1
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/strings.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/strings.mm" Lean.origin String.instInhabited instToStringBool
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/axioms.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/axioms.mm" propext Quot Quot.mk Quot.ind Quot.lift Classical.choice Classical.choose Classical.propDecidable
           # The bridge theorems: the model's Nat is NN0 (docs/bridges.md), with literals 2, 4 and 256.
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- nat-bridge tests/fixtures/natadd.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natbridge.mm" 2 4 256
-          for g in model ind props bridge rec tree natle setvars strings axioms natbridge; do
+          for g in model ind props bridge rec tree natle setvars strings axioms mutual natbridge; do
             out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read $g.mm" "verify proof *" "exit")
             echo "$out" | tail -2
             if echo "$out" | grep -q '?Error'; then exit 1; fi
@@ -113,4 +114,4 @@ jobs:
           raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
           curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
           for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
-          for g in model ind props rec tree natle setvars strings axioms natbridge; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+          for g in model ind props rec tree natle setvars strings axioms mutual natbridge; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
