@@ -49,10 +49,11 @@ About 40% of the way to the goal. The parts done so far:
 | recursors | `set.mm`'s well-founded recursion (`frecs`) over smaller rank | via `frr2` and a one-time lemma that rank is well-founded |
 | recursive propositions (`Nat.le`) | least sets of index tuples | |
 | `Nat` literals | decimal numerals, through `_om` | |
+| more than 26 bound variables | set variables the output declares itself (`$v`, `$f setvar`), which add no axiom | definitional equations |
 
-On Lean 4.36's `Init`, **11,780 of 17,590 definitions** translate together with everything they use. Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
+On Lean 4.36's `Init`, **13,192 of 17,590 definitions** translate together with everything they use. Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
 
-**In progress:** strings, axioms and quotients (`Classical.choice`, `Quot`), more set variables, nested and mutual types, bridge theorems from the model's `Nat` to `set.mm`'s `NN0`, proving Init's theorems through the model, and verifying all of Init. See [docs/milestone3.md](docs/milestone3.md) for the full design and the numbers.
+**In progress:** strings, axioms and quotients (`Classical.choice`, `Quot`), nested and mutual types, bridge theorems from the model's `Nat` to `set.mm`'s `NN0`, proving Init's theorems through the model, and verifying all of Init. See [docs/milestone3.md](docs/milestone3.md) for the full design and the numbers.
 
 ## How it works
 
