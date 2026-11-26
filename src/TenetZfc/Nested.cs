@@ -26,6 +26,34 @@ public sealed partial class Replayer
         public required Dictionary<Name, Expr> Aux2Nested { get; init; }
     }
 
+    /// <summary>One type of an auxiliary block, for the model: its constructors, each with its type in the block and
+    /// the name of the constructor it stands for (an auxiliary type's are the nested type's own, like List.cons).</summary>
+    public sealed record BlockType(Name Name, Expr Type, List<(Name Name, Expr Type, Name Real)> Ctors, Expr? Nested);
+
+    /// <summary>
+    /// A nested block as the plain mutual block the kernel checks (see <see cref="EliminateNested"/>), for the model
+    /// (Model.Mutual.cs). The original types come first; each auxiliary type carries the nested occurrence it replaces,
+    /// over <paramref name="params"/>.
+    /// </summary>
+    public (string? Error, List<BlockType>? Types, List<Expr>? Params) AuxiliaryBlock(ConstInfo first)
+    {
+        (string? error, Elimination? el) = EliminateNested(first);
+        if (el is null)
+        {
+            return (error ?? "the nested block could not be eliminated", null, null);
+        }
+        var types = new List<BlockType>();
+        for (int k = 0; k < el.Types.Count; k++)
+        {
+            AuxType at = el.Types[k];
+            Expr? nested = k < el.NumOriginal ? null : el.Aux2Nested[at.Name];
+            Name? real = nested is null ? null : ((Const)Ops.Spine(nested, out _)).Name;
+            types.Add(new BlockType(at.Name, at.Type,
+                at.Ctors.Select(c => (c.Name, c.Type, real is null ? c.Name : _t.ReplacePrefix(c.Name, at.Name, real))).ToList(), nested));
+        }
+        return (null, types, el.Params);
+    }
+
     /// <summary>The kernel's elim_nested_inductive, from the export: the block with every nested occurrence replaced.</summary>
     private (string? Error, Elimination? Result) EliminateNested(ConstInfo first)
     {
