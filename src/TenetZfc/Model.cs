@@ -33,7 +33,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     private static readonly string[] ClassVars = "A B C D E F G H I J K L M N O P Q R S T".Split(' ');   // U is the universe, Z a hole
 
     private readonly Ops _ops = new(t);
-    private readonly Typing _typing = new(t, env);
+    private readonly Typing _typing = new(t, env) { Deadline = () => pr.Deadline };   // define-all's time budget
     private readonly Deduction _d = new(pr);
     private readonly HashSet<Name> _defined = new(ReferenceEqualityComparer.Instance);
     private readonly StringBuilder _out = new();
@@ -94,6 +94,8 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             case Const c:
                 Define(c.Name);
                 return ConstTerm(c.Name, sc);   // ModelBuiltins.cs: with the well-ordering when it depends on choice
+            case App a when Unwrapped(a) is Expr inner:
+                return Tr(inner, sc);
             case App a:
                 return $"( {Tr(a.Fn, sc)} ` {Tr(a.Arg, sc)} )";
             case Binder { IsPi: true } pp when tower && _typing.IsProposition(pp, sc.Types) == true:
@@ -212,18 +214,63 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
                 return;
             case ConstKind.Constructor when c.Induct is Name ind:
                 Define(ind);
+                RefuseIfPartial(n, ind);
                 return;
-            case ConstKind.Recursor when $"{n}".EndsWith(".rec", StringComparison.Ordinal):
-                Define(t.Of($"{n}"[..^4]));
+            // The inductive type is the recursor's name without its last part. Taken from the name itself, not by
+            // reparsing its text, which loses numeric parts (_private.….0.…; found by the Init-wide run).
+            case ConstKind.Recursor when n is StrName { Value: "rec" } r:
+                Define(r.Prefix);
+                RefuseIfPartial(n, r.Prefix);
                 return;
-            case ConstKind.Recursor when IsAuxRecursorName(n):
-                Define(t.Of($"{n}"[..$"{n}".LastIndexOf(".rec_", StringComparison.Ordinal)]));   // a nested block's auxiliary recursor
+            case ConstKind.Recursor when IsAuxRecursorName(n) && n is StrName aux:
+                Define(aux.Prefix);   // a nested block's auxiliary recursor, I.rec_k
+                RefuseIfPartial(n, aux.Prefix);
                 return;
             case ConstKind.Axiom or ConstKind.Quot:
                 DefineBuiltin(c);   // ModelBuiltins.cs
                 return;
         }
         throw new Refused($"{n} is not a definition but {(c.Kind == ConstKind.Inductive ? "an inductive type" : "a " + c.Kind.ToString().ToLowerInvariant())}; not in the model yet");
+    }
+
+    /// <summary>
+    /// A type is written before its constructors and recursor, so when one of those was refused (Empty.rec: the empty
+    /// type isn't in the model yet) the type counts as defined and they don't. Refuse them again here, rather than fail
+    /// later on a definition that was never written (found by the Init-wide run).
+    /// </summary>
+    private void RefuseIfPartial(Name n, Name ind)
+    {
+        if (!_defined.Contains(n))
+        {
+            throw new Refused($"{n} is part of {ind}, which was only partly translated: an earlier refusal stopped it");
+        }
+    }
+
+    /// <summary>
+    /// The type inside an optParam, autoParam, outParam or semiOutParam wrapper, or null. The kernel strips these from
+    /// an inductive's locals when it makes the recursor (Recursors.ConsumeAnnotations), so a recursor's binder types
+    /// lack them while its constructors' keep them, and a computation rule, which matches hypotheses as text, fails
+    /// (HAdd.mk, found by the Init-wide run). Each is the identity on its first argument, so translating through it
+    /// changes no value. Like the kernel, only a wrapper the export defines as that identity is looked through.
+    /// </summary>
+    private Expr? Unwrapped(App a)
+    {
+        Expr head = Ops.Spine(a, out List<Expr> args);
+        string n = head is Const c ? $"{c.Name}" : "";
+        int arity = n is "optParam" or "autoParam" ? 2 : n is "outParam" or "semiOutParam" ? 1 : 0;
+        if (arity == 0 || args.Count != arity || env.Find(((Const)head).Name) is not { Kind: ConstKind.Definition, Value: Expr v })
+        {
+            return null;
+        }
+        for (int i = 0; i < arity; i++)
+        {
+            if (v is not Binder { IsPi: false } lam)
+            {
+                return null;
+            }
+            v = lam.Body;
+        }
+        return v is BVar b && b.Idx == arity - 1 ? args[0] : null;
     }
 
     private Scope NewScope()
@@ -234,10 +281,22 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         return sc;
     }
 
+    /// <summary>The largest definition body written, in symbols: half of mmj2's 32,000, less a margin.</summary>
+    private const int MaxDefinitionSymbols = 15_000;
+
     private void Emit(Name n, string tok, string body, Scope sc, string what)
     {
         EnsureTower();
         body = WellOrderLayer(tok, body, sc);   // ModelBuiltins.cs: ( r e. ~P ( u X. u ) |-> … ) when it depends on choice
+        // mmj2's definition check proves |- body = body' for a copy with fresh dummies, and mmj2 can't hold an
+        // expression over 32,000 symbols: past that, the check crashes and checks nothing after it (stdNext, 33,685
+        // symbols, found by the Init-wide run). Every definition this writes must be checkable, so refuse larger ones.
+        int symbols = body.Count(ch => ch == ' ') + 1;
+        if (symbols > MaxDefinitionSymbols)
+        {
+            _defined.Remove(n);   // callers mark it defined first; it isn't, so what uses it must be refused too
+            throw new Refused($"{n}'s definition has {symbols} symbols, more than mmj2's definition check can hold ({MaxDefinitionSymbols})");
+        }
         string text = $"""
             $( The Lean {what} {n}, translated by the model of docs/milestone3.md. $)
             $c {tok} $.
@@ -350,7 +409,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             throw new Refused($"{n} is an indexed inductive type (not a proposition); not in the model yet");
         }
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
-        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        ConstInfo rec = env.Find(t.Str(n, "rec")) ?? throw new Refused($"{n}.rec is not in the export");
         foreach (ConstInfo c in ctors.Append(rec))
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
@@ -418,7 +477,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     {
         Name n = ind.Name;
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
-        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        ConstInfo rec = env.Find(t.Str(n, "rec")) ?? throw new Refused($"{n}.rec is not in the export");
         foreach (ConstInfo c in ctors.Append(rec))
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
@@ -515,7 +574,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     {
         Name n = ind.Name;
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
-        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        ConstInfo rec = env.Find(t.Str(n, "rec")) ?? throw new Refused($"{n}.rec is not in the export");
         foreach (ConstInfo c in ctors.Append(rec))
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
@@ -685,7 +744,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     {
         Name n = ind.Name;
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
-        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        ConstInfo rec = env.Find(t.Str(n, "rec")) ?? throw new Refused($"{n}.rec is not in the export");
         foreach (ConstInfo c in ctors.Append(rec))
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
@@ -978,6 +1037,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         {
             setvars.UnionWith(_values[tok].Split(' ').Where(SetVarSet.Contains));
         }
+        setvars.UnionWith(_renamedTo);
         return [string.Join(' ', setvars.Concat(classVars).Append("U"))];
     }
 
@@ -1021,7 +1081,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         {
             return BlockIota(ind.Name, ctorName);   // Model.Mutual.cs
         }
-        ConstInfo rec = env.Find(t.Of($"{ind.Name}.rec"))!;
+        ConstInfo rec = env.Find(t.Str(ind.Name, "rec"))!;
         if (_choiceDependent.Contains(Token(ind.Name)!) || _choiceDependent.Contains(Token(ctorName)!) || _choiceDependent.Contains(Token(rec.Name)!))
         {
             throw new Refused($"{ind.Name} depends on Classical.choice; its computation rules aren't in the model yet");
@@ -1071,8 +1131,10 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         // The recursor at the constructor's value: its case analysis, on the tag, then simplified.
         var allArgs = recArgs.Append(v).ToList();
         (Proof eqR, string lastVar, string lastBody) = Unfold(ph, rtok, allArgs, (i, dom) => i < nrec ? Pick(i, $"{allArgs[i]} e. {dom}") : inType);
-        Proof toTag = _d.Congruence("class", Subst(lastBody, lastVar, "Z"), "Z", eqV);
-        Proof cur = _d.Trans(eqR, toTag);
+        // A recursor whose case analysis doesn't look at its value (one constructor, no fields: PUnit.rec, found by the
+        // Init-wide run) needs no rewriting to the tagged tuple.
+        string context = Subst(lastBody, lastVar, "Z");
+        Proof cur = context.Split(' ').Contains("Z") ? _d.Trans(eqR, _d.Congruence("class", context, "Z", eqV)) : eqR;
         if (Simp(ph, Rhs(cur)) is Proof simp)
         {
             cur = _d.Trans(cur, simp);
@@ -1845,6 +1907,32 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         return _d.Syl(restrict, ExistsIn(sub, x));
     }
 
+    private readonly HashSet<string> _renamedTo = new();   // set variables RenameBound introduced, for the $d lists
+
+    /// <summary>
+    /// ( ph -> X e. _V ) for an indexed union or product X whose bound variable v also occurs in ph. ralrimivw needs v
+    /// disjoint from ph, and sibling binders may share a variable, so a hypothesis can bind the same v (the equation of
+    /// Nat.add.match_1, whose hypotheses D and E both bind w; found by the Init-wide run). So rename v first, to a
+    /// variable in neither ph nor X (cbvixpv, cbviunv), and carry the sethood back (eqeltrid).
+    /// </summary>
+    private Proof? RenameBound(string ph, string x, string label, string v, string dom, string body)
+    {
+        var taken = new HashSet<string>(ph.Split(' ').Concat(x.Split(' ')));
+        string? y = Enumerable.Reverse(SetVars).FirstOrDefault(s => !taken.Contains(s) && pr.Database.FloatOf(s) is not null);
+        if (y is null)
+        {
+            return null;
+        }
+        _renamedTo.Add(y);
+        string body2 = Subst(body, v, y);
+        string x2 = label == "cixp" ? $"X_ {y} e. {dom} {body2}" : $"U_ {y} e. {dom} {body2}";
+        Proof sub = body.Split(' ').Contains(v)
+            ? _d.Congruence("class", Subst(body, v, "Z"), "Z", pr.Apply("id", S(("ph", $"{v} = {y}"))))
+            : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", $"{v} = {y}")), pr.Apply("eqid", S(("A", body))));
+        Proof eq = pr.Apply(label == "cixp" ? "cbvixpv" : "cbviunv", S(("x", v), ("y", y), ("A", dom), ("B", body), ("C", body2)), sub);
+        return pr.Apply("eqeltrid", S(("ph", ph), ("A", x), ("B", x2), ("C", "_V")), eq, ExistsIn(ph, x2));
+    }
+
     private Proof ExistsIn(string ph, string x)
     {
         SyntaxTree n = pr.Parse("class", x.Split(' ')) ?? throw new Refused($"does not parse: {x}");
@@ -1897,6 +1985,11 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
                         if (sub != ph && !sub.Split(' ').Contains(v))
                         {
                             return Exists(ph, x);
+                        }
+                        // Otherwise the hypotheses it needs bind v themselves: rename v (found by the Init-wide run).
+                        if (RenameBound(ph, x, n.Rule.Label, v, dom, body) is Proof renamed)
+                        {
+                            return renamed;
                         }
                     }
                     Proof all = pr.Apply("ralrimivw", S(("ph", ph), ("ps", $"{body} e. _V"), ("x", v), ("A", dom)), ExistsIn(ph, body));
