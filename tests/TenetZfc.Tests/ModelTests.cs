@@ -424,7 +424,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
         string d = m.Declarations;
         // Each type is its slice of the block's fixed point, tagged (/) for the first type and 1o for the second.
-        Assert.Contains("df-lean.Tm $a |- lean.Tm = ( u e. Univ |-> ( x e. u |-> ( U_ y e. _om ( rec ( ( r e. _V |-> ( lean.Tm.-mstep ` <. <. u , <. x , (/) >. >. , r >. ) ) , (/) ) ` y ) \" { (/) } ) ) ) $.", d);
+        Assert.Matches(@"df-lean\.Tm \$a \|- lean\.Tm = \( u e\. Univ \|-> \( x e\. u \|-> \( U_ (\w+) e\. _om \( rec \( \( (\w+) e\. _V \|-> \( lean\.Tm\.-mstep ` <\. <\. u , <\. x , \(/\) >\. >\. , \2 >\. \) \) , \(/\) \) ` \1 \) "" \{ \(/\) \} \) \) \) \$\.", d);
         Assert.Contains("\" { 1o } ) ) ) $.", d);
         // The step adds <. 1o , tag >. for Args.cons, its fields ranging over the last stage's slices.
         Assert.Contains("{ <. 1o , <. 1o , <. (/) , <. ", d);
@@ -454,6 +454,29 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
 
     [Fact]
     public void MutualAndNestedRecursionComputesAndVerifies()
+    {
+        // The flat proofs run to 1.6 million steps; building them recurses deeper than a test thread's stack allows.
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                MutualAndNestedRecursion();
+            }
+            catch (Exception e)
+            {
+                failure = e;
+            }
+        }, 1 << 30);
+        thread.Start();
+        thread.Join();
+        if (failure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
+    private void MutualAndNestedRecursion()
     {
         if (SetMm is null)
         {
