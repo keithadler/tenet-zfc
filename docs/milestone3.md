@@ -615,7 +615,7 @@ The fix is the tower, now the model's default (`new Model(…)`, `define`, `nat-
 
 Since tower mode makes structurally recursive definitions mean what Lean means, it is the default everywhere:
 
-- **`define`** monomorphizes, then translates. A constant's universe parameters are set to 0, as the spec's universe analysis says, unless its name gives levels: `Eq.{1}` is `Eq` at `Type`. Level 0 makes a `Sort u` parameter `Prop`, so `id.{0}` is `id` on proofs and translates to `(/)`; CI asks for `id.{1}`, `Function.comp.{1,1,1}`, `Eq.{1}` and `Nonempty.{1}`. A recursor's motive level may be left out: `Eq.rec.{1}` is the recursor of `Eq.{1}`.
+- **`define`** monomorphizes, then translates. A constant's universe parameters are set to 0, as the spec's universe analysis says, unless its name gives levels: `Eq.{1}` is `Eq` at `Type`. Level 0 makes a `Sort u` parameter `Prop`, so `id.{0}` is `id` on proofs and translates to `(/)`; CI asks for `id.{1}`, `Function.comp.{1,1,1}`, `Eq.{1}` and `Nonempty.{1}`. A recursor's motive level may be left out: `Eq.rec.{1}` is the recursor of `Eq.{1}`. In a shell, quote such names: bash expands `Function.comp.{1,1,1}` into three words.
 - **Nested blocks.** `Monomorph` now also instantiates a nested block's auxiliary recursors: `Rose.rec_1` becomes `Rose.{0}.rec_1`, beside `Rose.{0}.rec`.
 - **`nat-bridge`** runs in the tower and proves `Nat.add`'s computation rules, so `⟦Nat.add⟧ = +` has no hypotheses left ([bridges.md](bridges.md#natadds-computation-rules-proved)).
 - **`model-survey`** monomorphizes each definition at level 0 before translating it (below).

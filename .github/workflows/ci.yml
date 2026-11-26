@@ -88,13 +88,14 @@ jobs:
           if echo "$out" | grep -q '?Error'; then exit 1; fi
           (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" lenapp-flat.mm)
       # The model's default is a tower of universes, one per level (docs/milestone3.md, "Tower mode"). Universe
-      # parameters are instantiated at 0 unless a name gives levels: id.{1} is id at Type, where id.{0} is id at Prop.
+      # parameters are instantiated at 0 unless a name gives levels: id.{1} is id at Type, where id.{0} is id at Prop. Quote such
+      # names: bash expands Function.comp.{1,1,1} into three words.
       # Quotients and choice still need the one-universe model (--single-universe).
       - name: Translate definitions and inductive types by the generic model and verify (milestone 3)
         run: |
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/model.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/model.mm" id.{1} Function.comp.{1,1,1} Function.const.{1,1}
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/model.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/model.mm" 'id.{1}' 'Function.comp.{1,1,1}' 'Function.const.{1,1}'
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/inductives.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/ind.mm" Bool Bool.false Bool.true Prod Prod.mk Option Option.none Option.some Bool.rec Prod.rec Option.rec
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/props.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/props.mm" Eq.{1} Eq.refl.{1} Eq.rec.{1} HEq.{1} HEq.refl.{1} HEq.rec.{1} False False.rec True True.intro And And.intro And.rec Or Or.inl Or.inr Or.rec Nonempty.{1} Nonempty.intro.{1} Nonempty.rec.{1}
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/props.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/props.mm" 'Eq.{1}' 'Eq.refl.{1}' 'Eq.rec.{1}' 'HEq.{1}' 'HEq.refl.{1}' 'HEq.rec.{1}' False False.rec True True.intro And And.intro And.rec Or Or.inl Or.inr Or.rec 'Nonempty.{1}' 'Nonempty.intro.{1}' 'Nonempty.rec.{1}'
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- bridge "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/bridge.mm"
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/recursive.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/rec.mm" Nat Nat.zero Nat.succ List List.nil List.cons Nat.rec List.rec
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/tree.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/tree.mm" Tree Tree.leaf Tree.node Tree.rec
