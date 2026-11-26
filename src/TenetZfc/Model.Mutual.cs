@@ -843,7 +843,7 @@ public sealed partial class Model
             string kJ = Part(val, "x"), lsBody = Part(val, "B");
             string LS(string x) => Subst(lsBody, kJ, x);
             string stepAppJ = Part(Part(LS("(/)"), "F"), "F");
-            var avoid = new HashSet<string>(ctx.Split(' ').Concat(val.Split(' ')).Concat(slice.Split(' ')).Concat(_values[jinfo.StepTok].Split(' ')));
+            var avoid = new HashSet<string>(ctx.Split(' ').Concat(val.Split(' ')).Concat(slice.Split(' ')).Concat(_values[jinfo.StepTok].Split(' ')).Concat(_values[blk.StepTok].Split(' ')));   // the block's step is simplified under Phi(y)
             string x = FirstVar(q => !avoid.Contains(q));
             avoid.Add(x);
             string y = FirstVar(q => !avoid.Contains(q));

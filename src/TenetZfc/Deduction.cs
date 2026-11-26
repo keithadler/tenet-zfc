@@ -267,6 +267,8 @@ public sealed class Deduction(Prover pr)
                 return Pair("eqeq1d", "eqeq2d", "eqeq12d", "A", "B");
             case "wcel": // A e. B
                 return Pair("eleq1d", "eleq2d", "eleq12d", "A", "B");
+            case "wss":  // A C_ B
+                return Pair("sseq1d", "sseq2d", "sseq12d", "A", "B");
             case "wi":   // ( ph -> ps )
                 return PairWff("imbi1d", "imbi2d", "imbi12d", "ph", "ps");
             case "wa":   // ( ph /\ ps )
