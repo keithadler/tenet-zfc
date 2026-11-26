@@ -44,12 +44,14 @@ public sealed class Monomorph
             bool large = c.LevelParams.Length == ind.LevelParams.Length + 1;
             Level[] ls = large ? levels[1..] : levels;
             Name ti = Instance(ind.Name, ls);
-            return Make(n, ls, () => _t.Str(ti, "rec"), keep: large ? c.LevelParams[0] : null);
+            return Make(n, ls, () => _t.Str(ti, ((StrName)c.Name).Value), keep: large ? c.LevelParams[0] : null);
         }
         return Make(n, levels, () => levels.Length == 0 ? n : _t.Str(n, "{" + string.Join(",", levels.Select(Value)) + "}"), keep: null);
     }
 
-    private static Name TypeOf(ConstInfo rec) => rec.Name is StrName { Value: "rec" } s ? s.Prefix : rec.Name;
+    /// <summary>The type a recursor is named after: I for I.rec, and for a nested block's auxiliary recursors I.rec_1, I.rec_2, ….</summary>
+    private static Name TypeOf(ConstInfo rec) =>
+        rec.Name is StrName s && (s.Value == "rec" || System.Text.RegularExpressions.Regex.IsMatch(s.Value, "^rec_[0-9]+$")) ? s.Prefix : rec.Name;
 
     private static int Value(Level l) => Model.LevelValue(l) ?? throw new Model.Refused($"a universe level with a parameter ({l}) where a concrete one is needed");
 
@@ -100,6 +102,11 @@ public sealed class Monomorph
         {
             // The model defines a type's recursor with the type, and finds it as (the type's name).rec.
             Instance(rec.Name, rec.LevelParams.Length == levels.Length + 1 ? levels.Prepend(_t.Zero).ToArray() : levels);
+            // A nested block's auxiliary recursors, I.rec_1, I.rec_2, …, likewise.
+            for (ulong k = 1; _src.Find(_t.Str(n, $"rec_{k}")) is ConstInfo aux; k++)
+            {
+                Instance(aux.Name, aux.LevelParams.Length == levels.Length + 1 ? levels.Prepend(_t.Zero).ToArray() : levels);
+            }
         }
         return inst;
     }

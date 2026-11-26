@@ -10,22 +10,29 @@ const string Usage = """
                                                          replay, then write set.mm theorems for the theorems the
                                                          emitter covers (Nat arithmetic equations, and induction
                                                          on lists like List.length_append)
-      tenet-zfc define [--tower] <export.ndjson> <set.mm> <out.mm> <name>...
+      tenet-zfc define <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: translate definitions by the generic model,
-                                                         each with its definitional equation as a theorem
+                                                         each with its definitional equation as a theorem; universe
+                                                         parameters at 0 unless the name gives levels (Eq.{1})
       tenet-zfc bridge <set.mm> <out.mm>                 milestone 3: the bridge lemmas recursive types rest on
       tenet-zfc theorem <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: prove Lean theorems through the generic model
                                                          (tower mode), |- ( hypotheses -> (/) e. [statement] )
-      tenet-zfc nat-bridge <export.ndjson> <set.mm> <out.mm> [<n>...]
+      tenet-zfc nat-bridge <export.ndjson> <set.mm> <out.mm> [<n>|<theorem>...]
                                                          milestone 3: prove that the model's Nat is NN0 (zero, succ,
                                                          Nat.add and literals, each numeral n given), from an export
-                                                         with Nat.add (docs/bridges.md)
+                                                         with Nat.add (docs/bridges.md); each theorem named (such as
+                                                         Nat.add_zero) is proved through the model and restated in
+                                                         set.mm's arithmetic
       tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
                                                          which constants block the rest
 
     emit, define, bridge and nat-bridge write proofs in Metamath's compressed format, sharing every repeated subproof;
     add --uncompressed (anywhere) for flat label lists.
+
+    the model interprets universes as a tower of Grothendieck universes, one per level, so that structurally
+    recursive definitions mean what Lean means; add --single-universe (anywhere) for the old model with one universe
+    for every level, under which they collapse (docs/milestone3.md). Each output's header states its assumptions.
 
     make a trace with Tenet (github.com/keithadler/tenet, main):
       tenet check <export.ndjson> --trace <trace.ndjson>
@@ -42,25 +49,25 @@ if (args.Length == 5 && args[0] == "emit")
 {
     return Emit(args[1], args[2], args[3], args[4], uncompressed);
 }
-bool towerMode = args.Length >= 2 && args[0] == "define" && args[1] == "--tower";
-if (towerMode)
-{
-    args = args.Where((_, i) => i != 1).ToArray();
-}
+// The model's universes: a tower of Grothendieck universes, one per level (the default), or with --single-universe one
+// universe for every level, under which structurally recursive definitions collapse (docs/milestone3.md). --tower is
+// accepted for scripts written when the tower was opt-in.
+bool singleUniverse = args.Contains("--single-universe");
+args = args.Where(a => a is not "--single-universe" and not "--tower").ToArray();
 if (args.Length >= 5 && args[0] == "define")
 {
-    // Milestone 3: definitions through the generic model, each with its definitional equation. With --tower, the
+    // Milestone 3: definitions through the generic model, each with its definitional equation. In tower mode the
     // universe argument is a tower of universes and constants are monomorphized first (docs/milestone3.md).
     var dt = new Terms();
     TenetZfc.Environment denv = Reader.ReadExport(dt, args[1]);
     Monomorph? mono = null;
-    if (towerMode)
+    if (!singleUniverse)
     {
         mono = new Monomorph(dt, denv);
         denv = mono.Env;
     }
     var dpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
-    var model = new Model(dt, denv, dpr, tower: towerMode);
+    var model = new Model(dt, denv, dpr, tower: !singleUniverse);
     var theorems = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean definitions translated by tenet-zfc's model (docs/milestone3.md)", CompressAgainst(dpr.Database));
     var proved = new List<(string Label, TenetZfc.Metamath.Expr Statement, List<string> Proof, string[] Distinct, string Name)>();
     int status = 0;
@@ -71,10 +78,9 @@ if (args.Length >= 5 && args[0] == "define")
         {
             if (mono is not null)
             {
-                // Each universe parameter at level 0, written c.{0,…}; a recursor keeps its motive level.
-                ConstInfo gc = denv.Find(dt.Of(given)) ?? throw new Model.Refused($"{given} is not in the export");
-                Name inst = mono.Instance(gc.Name, gc.LevelParams.Select(_ => dt.Zero).ToArray());
-                name = $"{inst}";
+                // Each universe parameter at level 0, written c.{0,…}, unless the name gives the levels (Eq.{1}); a
+                // recursor keeps its motive level.
+                name = $"{InstanceOf(dt, mono, given)}";
             }
             var (stmt, proof, distinct) = model.Equation(dt.Of(name));
             proved.Add(($"lean-{Model.LabelPart(name)}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
@@ -124,6 +130,7 @@ if (args.Length >= 5 && args[0] == "define")
             status = 1;
         }
     }
+    theorems.Assumptions(model.Assumptions());
     theorems.Raw(model.Declarations);
     foreach (var p in proved)
     {
@@ -157,6 +164,7 @@ if (args.Length >= 5 && args[0] == "theorem")
             tstatus = 1;
         }
     }
+    tw.Assumptions(translator.Model.Assumptions());
     tw.Raw(translator.Declarations);
     foreach (var d in done)
     {
@@ -187,8 +195,15 @@ if (args.Length >= 4 && args[0] == "nat-bridge")
     // Milestone 3: bridge theorems from the model's Nat to set.mm's NN0 (docs/bridges.md).
     try
     {
-        var numerals = args[4..].Select(System.Numerics.BigInteger.Parse).ToList();
-        var (text, proved) = NatBridge.Emit(args[1], args[2], numerals, compress: !uncompressed);
+        // Numerals get F ( n ) = n; names are theorems to prove through the model and restate in NN0 (tower mode).
+        var numerals = args[4..].Where(a => System.Numerics.BigInteger.TryParse(a, out _)).Select(System.Numerics.BigInteger.Parse).ToList();
+        var restate = args[4..].Where(a => !System.Numerics.BigInteger.TryParse(a, out _)).ToList();
+        if (singleUniverse && restate.Count > 0)
+        {
+            Console.Error.WriteLine("nat-bridge: restating theorems needs the tower model");
+            return 2;
+        }
+        var (text, proved) = NatBridge.Emit(args[1], args[2], numerals, compress: !uncompressed, tower: !singleUniverse, restate: restate);
         foreach (var th in proved)
         {
             Console.WriteLine($"{th.Label}: {th.Statement} ({th.Proof.Count} proof steps)");
@@ -207,16 +222,28 @@ if (args.Length == 2 && args[0] == "model-survey")
     // Milestone 3: which definitions the generic model translates, and the first thing that stops each of the others.
     var mt = new Terms();
     TenetZfc.Environment menv = Reader.ReadExport(mt, args[1]);
+    TenetZfc.Environment orig = menv;
     var reasons = new Dictionary<string, int>();
     var blockers = new Dictionary<string, int>();
     int ok = 0, total = 0;
-    foreach (ConstInfo c in menv.All.Where(c => c.Kind == ConstKind.Definition))
+    foreach (ConstInfo c in orig.All.Where(c => c.Kind == ConstKind.Definition).ToList())
     {
         total++;
         try
         {
-            // A fresh model per definition: each counts on its own, dependencies included.
-            new Model(mt, menv, new TenetZfc.Metamath.Prover(new TenetZfc.Metamath.Database()), dryRun: true).Define(c.Name);
+            // A fresh model per definition: each counts on its own, dependencies included. In tower mode, over a fresh
+            // monomorphization, with the definition's universe parameters at 0.
+            var spr = new TenetZfc.Metamath.Prover(new TenetZfc.Metamath.Database());
+            if (singleUniverse)
+            {
+                new Model(mt, orig, spr, dryRun: true, tower: false).Define(c.Name);
+            }
+            else
+            {
+                var smono = new Monomorph(mt, orig);
+                Name inst = smono.Instance(c.Name, c.LevelParams.Select(_ => mt.Zero).ToArray());
+                new Model(mt, smono.Env, spr, dryRun: true, tower: true).Define(inst);
+            }
             ok++;
         }
         catch (Model.Refused e)
@@ -398,4 +425,28 @@ static (List<string>, TenetZfc.Metamath.Expr)? TryListInduction(ListInduction li
     {
         return null;   // a term or step outside what the translator covers
     }
+}
+
+// The instance of a constant at the levels its name gives (c.{1,0}), or with every universe parameter at 0. A recursor's
+// motive level may be left out: c.rec.{1} is the recursor of c.{1}.
+static Name InstanceOf(Terms t, Monomorph mono, string given)
+{
+    var m = System.Text.RegularExpressions.Regex.Match(given, @"^(.*)\.\{([0-9]+(?:,[0-9]+)*)\}$");
+    string baseName = m.Success ? m.Groups[1].Value : given;
+    ConstInfo c = mono.Env.Find(t.Of(baseName)) ?? throw new Model.Refused($"{baseName} is not in the export");
+    if (!m.Success)
+    {
+        return mono.Instance(c.Name, c.LevelParams.Select(_ => t.Zero).ToArray());
+    }
+    Level Lv(int k) => k == 0 ? t.Zero : t.Succ(Lv(k - 1));
+    var levels = m.Groups[2].Value.Split(',').Select(x => Lv(int.Parse(x))).ToList();
+    if (c.Kind == ConstKind.Recursor && levels.Count == c.LevelParams.Length - 1)
+    {
+        levels.Insert(0, t.Zero);
+    }
+    if (levels.Count != c.LevelParams.Length)
+    {
+        throw new Model.Refused($"{baseName} has {c.LevelParams.Length} universe parameters, given {levels.Count}");
+    }
+    return mono.Instance(c.Name, levels.ToArray());
 }

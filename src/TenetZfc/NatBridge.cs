@@ -48,35 +48,66 @@ public sealed class NatBridge
     public const string Zero = "( lean.Nat.zero ` U )";
     public static string Succ(string t) => $"( ( lean.Nat.succ ` U ) ` {t} )";
 
-    public NatBridge(Prover pr)
+    /// <summary>The class the universe argument ranges over: lean.-tower (the default), or Univ in the one-universe model.</summary>
+    private readonly string D;
+
+    public NatBridge(Prover pr, bool tower = true)
     {
         _pr = pr;
         _k = new ProofKit(pr);
+        D = tower ? Model.TowerToken : "Univ";
     }
 
     /// <summary>
     /// The whole bridge as a set.mm file: the model's definitions of Nat, its constructors, Nat.add and the literal
-    /// maps, then every bridge theorem, a theorem F ( n ) = n for each numeral given, and the proof that Nat.below
-    /// is empty in the current model. The export must contain Nat.add.
+    /// maps, then every bridge theorem and a theorem F ( n ) = n for each numeral given. The export must contain Nat.add.
+    ///
+    /// In tower mode (the default) Nat.add's computation rules are proved from its definition, so ⟦Nat.add⟧ = + holds
+    /// with no hypotheses but the tower's; each theorem named in <paramref name="restate"/> (Nat.add_zero, Nat.zero_add)
+    /// is then proved through the model and restated in set.mm's arithmetic. In the one-universe model the rules are
+    /// hypotheses, and the output proves instead that Nat.below, and so Nat.add, collapses there.
     /// </summary>
     public static (string Text, List<(string Label, string Comment, MmExpr Statement, List<string> Proof, string[] Distinct)> Theorems) Emit(
-        string export, string setmm, IEnumerable<System.Numerics.BigInteger> numerals, bool compress = true)
+        string export, string setmm, IEnumerable<System.Numerics.BigInteger> numerals, bool compress = true, bool tower = true,
+        IReadOnlyList<string>? restate = null)
     {
         var t = new Terms();
         Environment env = Reader.ReadExport(t, export);
         var pr = new Prover(Database.Read(setmm));
-        var model = new Model(t, env, pr);
-        var bridge = new NatBridge(pr);
+        var bridge = new NatBridge(pr, tower);
+        Model model;
+        TheoremTranslator? tt = null;
+        if (tower)
+        {
+            tt = new TheoremTranslator(t, env, pr);
+            model = tt.Model;
+        }
+        else
+        {
+            model = new Model(t, env, pr, tower: false);
+        }
         foreach (string c in new[] { "Nat", "Nat.zero", "Nat.succ", "Nat.add" })
         {
-            model.Define(t.Of(c));
+            model.Define(tt is null ? t.Of(c) : ((Const)tt.Const0(c)).Name);
         }
         model.Class(t.Nat(2), "U", new Dictionary<ulong, string>());   // declares the literal maps
         bridge.ProveAll(numerals);
-        var (bstmt, bproof, bdistinct) = model.Equation(t.Of("Nat.below"));
-        bridge.Add("lean-Nat.below-eq", "The definitional equation of Nat.below.", bstmt, bproof, bdistinct);
-        bridge.BelowCollapses(bdistinct);
+        if (tt is not null)
+        {
+            bridge.NatAddRules(tt);
+            foreach (string name in restate ?? [])
+            {
+                bridge.Restate(tt, name);
+            }
+        }
+        else
+        {
+            var (bstmt, bproof, bdistinct) = model.Equation(t.Of("Nat.below"));
+            bridge.Add("lean-Nat.below-eq", "The definitional equation of Nat.below.", bstmt, bproof, bdistinct);
+            bridge.BelowCollapses(bdistinct);
+        }
         var w = new Writer(Path.GetFileName(setmm), "tenet-zfc bridge theorems: the model's Nat is NN0 (docs/bridges.md)", compress ? pr.Database : null);
+        w.Assumptions(model.Assumptions());
         w.Raw(model.Declarations);
         foreach (var th in bridge.Theorems)
         {
@@ -98,7 +129,7 @@ public sealed class NatBridge
                 throw new InvalidOperationException($"the model's {label} is not the encoding the Nat bridge proves things about:\n  have {have}\n  want {text}");
             }
         }
-        Expect("df-lean.Nat", $"lean.Nat = ( u e. Univ |-> U_ x e. _om ( {U(Rf)} ` x ) )");
+        Expect("df-lean.Nat", $"lean.Nat = ( u e. {D} |-> U_ x e. _om ( {U(Rf)} ` x ) )");
         Expect("df-lean.Nat.-step", "lean.Nat.-step = ( y e. _V |-> " + Step("( 2nd ` y )") + " )");
         Expect("df-lean.Nat.-lit", $"{Lit} = ( rec ( ( x e. _V |-> {S("x")} ) , {Z} ) |` _om )");
         Expect("df-lean.Nat.-ofnum", $"lean.Nat.-ofnum = `' {Gm}");
@@ -210,15 +241,15 @@ public sealed class NatBridge
     {
         // Nat.zero and Nat.succ at the universe U, by fvmpt. (The model's own definitional equations declare every
         // variable distinct, U from A included, which would stop A from being a term that mentions U.)
-        Proof z = UseS("fvmpt", [("D", "Univ")], Lift("u = U", UseS("eqid", [("A", Z)])), Ax("df-lean.Nat.zero"), Opex("(/)", "(/)"));
+        Proof z = UseS("fvmpt", [("D", D)], Lift("u = U", UseS("eqid", [("A", Z)])), Ax("df-lean.Nat.zero"), Opex("(/)", "(/)"));
         Thm("lean-nat-zeroeq", "The model's zero at the universe U.", z);
 
-        const string h = "( U e. Univ /\\ A e. ( lean.Nat ` U ) )";
+        string h = $"( U e. {D} /\\ A e. ( lean.Nat ` U ) )";
         string mpt = $"( x e. {Nat} |-> {S("x")} )";
         Proof f1 = Use("fvmpt", SubEq("u", "U", $"( x e. ( lean.Nat ` u ) |-> {S("x")} )"), Ax("df-lean.Nat.succ"),
             UseS("mptex", [("x", "x"), ("B", S("x"))], Fvex("lean.Nat", "U")));
         Proof f2 = Use("fvmpt", SubEq("x", "A", S("x")), UseS("eqid", [("A", mpt)]), Opex("1o", "<. (/) , <. A , (/) >. >."));
-        Proof e1 = Ce("( Y ` A )", Use("syl", Hyp(h, "U e. Univ"), f1));
+        Proof e1 = Ce("( Y ` A )", Use("syl", Hyp(h, $"U e. {D}"), f1));
         Thm("lean-nat-succeq", "The model's successor at the universe U.", Trans(e1, Use("syl", Hyp(h, "A e. ( lean.Nat ` U )"), f2)));
     }
 
@@ -303,15 +334,15 @@ public sealed class NatBridge
 
         // Its range is inside the model's Nat.
         {
-            const string h = "( U e. Univ /\\ n e. _om )";
+            string h = $"( U e. {D} /\\ n e. _om )";
             Proof hn = Hyp(h, "n e. _om");
             Proof ls = Imp(h, "lean-nat-litstage", [hn]);
             Proof ssi = Imp(h, "ssiun2s", [Imp(h, "peano2", [hn])], closed: [SubEq("x", "suc n", St("x"))], s: [("A", "_om")]);
             Proof m = Use("mpd", ls, UseS("sseld", [("C", Lt("n"))], ssi));
-            Proof m2 = Use("eleqtrrd", m, Imp(h, "lean-nat-iun", [Hyp(h, "U e. Univ")]));
+            Proof m2 = Use("eleqtrrd", m, Imp(h, "lean-nat-iun", [Hyp(h, $"U e. {D}")]));
             Proof all = Use("ralrimiva", m2);
             Thm("lean-nat-litrnss", "Every literal is in the model's Nat.",
-                Imp("U e. Univ", "fnfvrnss", [Lift("U e. Univ", litfn), all]));
+                Imp($"U e. {D}", "fnfvrnss", [Lift($"U e. {D}", litfn), all]));
         }
 
         // The model's successor of a literal is a literal.
@@ -348,7 +379,7 @@ public sealed class NatBridge
 
         // So the literals are exactly the model's Nat.
         {
-            const string h = "U e. Univ";
+            string h = $"U e. {D}";
             Proof all = Use("rgen", UseS("lean-nat-stagern", [("A", "x"), ("U", "U")]));
             Proof iss = Use("mpbir", all, UseG("iunss", $"( U_ x e. _om {St("x")} C_ ran {Lit} <-> A. x e. _om {St("x")} C_ ran {Lit} )"));
             Proof natss = Use("eqsstrd", Imp(h, "lean-nat-iun", [Hyp(h, h)]), Lift(h, iss));
@@ -431,7 +462,7 @@ public sealed class NatBridge
             Proof f1 = Use("mpbir", Use("pm3.2i", f, inj),
                 UseG("dff13", $"( {Lit} : _om -1-1-> ran {Lit} <-> ( {Lit} : _om --> ran {Lit} /\\ A. x e. _om A. y e. _om ( ( {Lit} ` x ) = ( {Lit} ` y ) -> x = y ) ) )"));
             Thm("lean-nat-litf1o", "The literal map is a bijection from omega onto its range.", Imp(null, "f1f1orn", [f1]));
-            const string h = "U e. Univ";
+            string h = $"U e. {D}";
             Proof bi = Imp(h, "f1oeq3", [Imp(h, "lean-nat-rnlit", [Hyp(h, h)])], s: [("F", Lit), ("C", "_om")]);
             Thm("lean-nat-litf1onat", "The literal map is a bijection from omega onto the model's Nat.",
                 Use("mpbid", Lift(h, Ax("lean-nat-litf1o")), bi));
@@ -471,15 +502,15 @@ public sealed class NatBridge
 
         // Headline: F is a bijection from the model's Nat onto NN0.
         {
-            const string h = "U e. Univ";
+            string h = $"U e. {D}";
             Proof c = Imp(h, "f1ocnv", [Imp(h, "lean-nat-litf1onat", [Hyp(h, h)])]);
             Proof obi = Imp(null, "f1oeq1", [Use("eqcomi", Ax("lean-nat-ofnumcnv"))], s: [("A", "_om"), ("B", "NN0")]);
             Proof o = Use("mpbi", gom, obi);
             Thm("lean-nat-f1o", "Bridge: F is a bijection from the model's Nat onto NN0.", Imp(h, "f1oco", [Lift(h, o), c]));
         }
         {
-            const string h = "( U e. Univ /\\ A e. ( lean.Nat ` U ) )";
-            Proof f = Imp(h, "f1of", [Imp(h, "lean-nat-f1o", [Hyp(h, "U e. Univ")])]);
+            string h = $"( U e. {D} /\\ A e. ( lean.Nat ` U ) )";
+            Proof f = Imp(h, "f1of", [Imp(h, "lean-nat-f1o", [Hyp(h, $"U e. {D}")])]);
             Thm("lean-nat-fcn", "The bridge F takes the model's Nat into CC.", Imp(h, "nn0cn", [Imp(h, "ffvelcdm", [f, Hyp(h, "A e. ( lean.Nat ` U )")])]));
         }
         {
@@ -488,14 +519,14 @@ public sealed class NatBridge
             Thm("lean-nat-gcn", "set.mm's map from omega onto NN0 takes values in CC.", Imp(h, "nn0cn", [Imp(h, "ffvelcdm", [f, Hyp(h, h)])]));
         }
         {
-            const string h = "( U e. Univ /\\ A e. _om )";
-            Proof f = Imp(h, "f1of", [Imp(h, "lean-nat-litf1onat", [Hyp(h, "U e. Univ")])]);
+            string h = $"( U e. {D} /\\ A e. _om )";
+            Proof f = Imp(h, "f1of", [Imp(h, "lean-nat-litf1onat", [Hyp(h, $"U e. {D}")])]);
             Thm("lean-nat-litnat", "Every literal is in the model's Nat.", Imp(h, "ffvelcdm", [f, Hyp(h, "A e. _om")]));
         }
 
         // Headline: F takes zero to 0.
         {
-            const string h = "U e. Univ";
+            string h = $"U e. {D}";
             Proof z = Imp(h, "lean-nat-zeroeq", [Hyp(h, h)]);
             Proof e = Trans(z, Lift(h, Use("eqcomi", Ax("lean-nat-lit0"))));
             Proof f2 = Lift(h, Imp(null, "lean-nat-flit", [Use("peano1")]));
@@ -505,9 +536,9 @@ public sealed class NatBridge
 
         // Headline: F takes succ to + 1.
         {
-            const string h = "( U e. Univ /\\ A e. ( lean.Nat ` U ) )";
+            string h = $"( U e. {D} /\\ A e. ( lean.Nat ` U ) )";
             string k = $"( `' {Lit} ` A )";
-            Proof hu = Hyp(h, "U e. Univ");
+            Proof hu = Hyp(h, $"U e. {D}");
             Proof se = Imp(h, "lean-nat-succeq", [Hyp(h, h)]);
             Proof ar = Rw(Hyp(h, "A e. ( lean.Nat ` U )"), Symm(Imp(h, "lean-nat-rnlit", [hu])));
             Proof kom = Imp(h, "f1ocnvdm", [Lift(h, litf1o), ar]);
@@ -537,15 +568,15 @@ public sealed class NatBridge
             Proof f1 = Imp(h, "lean-nat-flit", [om]);
             Proof f3 = Imp(h, "f1ocnvfv2", [Lift(h, gom), Hyp(h, h)]);
             Thm("lean-nat-flitnum", "Bridge: F takes the model's literal of a numeral to the numeral.", Trans(f1, Ce(Gv("Y"), o), f3));
-            const string h2 = "( U e. Univ /\\ A e. NN0 )";
+            string h2 = $"( U e. {D} /\\ A e. NN0 )";
             Thm("lean-nat-litnumel", "The literal of a numeral is in the model's Nat.",
-                Imp(h2, "lean-nat-litnat", [Hyp(h2, "U e. Univ"), Imp(h2, "lean-nat-ofnumom", [Hyp(h2, "A e. NN0")])]));
+                Imp(h2, "lean-nat-litnat", [Hyp(h2, $"U e. {D}"), Imp(h2, "lean-nat-ofnumom", [Hyp(h2, "A e. NN0")])]));
         }
 
         // Equality in the model's Nat is equality of F's values.
         {
-            const string h = "( U e. Univ /\\ ( A e. ( lean.Nat ` U ) /\\ B e. ( lean.Nat ` U ) ) )";
-            Proof f1 = Imp(h, "f1of1", [Imp(h, "lean-nat-f1o", [Hyp(h, "U e. Univ")])]);
+            string h = $"( U e. {D} /\\ ( A e. ( lean.Nat ` U ) /\\ B e. ( lean.Nat ` U ) ) )";
+            Proof f1 = Imp(h, "f1of1", [Imp(h, "lean-nat-f1o", [Hyp(h, $"U e. {D}")])]);
             Proof bi = Imp(h, "f1fveq", [f1, Hyp(h, "( A e. ( lean.Nat ` U ) /\\ B e. ( lean.Nat ` U ) )")]);
             Thm("lean-nat-eq", "Bridge: two elements of the model's Nat are equal when their values under F are.", Use("bicomd", bi));
         }
@@ -554,8 +585,8 @@ public sealed class NatBridge
     // ================================================================ addition
 
     /// <summary>Nat.add's computation rules for a function G: a + 0 = a and a + succ b = succ (a + b).</summary>
-    public static string Rules(string g) =>
-        $"( ( U e. Univ /\\ A. a e. {Nat} ( ( {g} ` a ) ` {Zero} ) = a ) /\\ " +
+    public string Rules(string g) =>
+        $"( ( U e. {D} /\\ A. a e. {Nat} ( ( {g} ` a ) ` {Zero} ) = a ) /\\ " +
         $"A. a e. {Nat} A. b e. {Nat} ( ( {g} ` a ) ` {Succ("b")} ) = {Succ($"( ( {g} ` a ) ` b )")} )";
 
     private static string Ga(string g, string a, string b) => $"( ( {g} ` {a} ) ` {b} )";
@@ -574,7 +605,7 @@ public sealed class NatBridge
             string r1 = $"A. a e. {Nat} A. b e. {Nat} ( ( {g} ` a ) ` {Succ("b")} ) = {Succ($"( ( {g} ` a ) ` b )")}";
 
             // Base: A + 0 = A.
-            Proof hu = Hyp(c0, "U e. Univ"), ha = Hyp(c0, $"A e. {Nat}");
+            Proof hu = Hyp(c0, $"U e. {D}"), ha = Hyp(c0, $"A e. {Nat}");
             Proof l0 = Trans(Lift(c0, Ax("lean-nat-lit0")), Symm(Imp(c0, "lean-nat-zeroeq", [hu])));
             Proof rz = Spec(SubBi("a", "A", $"( ( {g} ` a ) ` {Zero} ) = a"), Hyp(c0, r0), ha);
             Proof g0 = Trans(Ce(Ga(g, "A", "Y"), l0), rz);
@@ -587,7 +618,7 @@ public sealed class NatBridge
             // Step: A + succ j = succ (A + j).
             string pj = ProofKit.Replace(p, "n", "j");
             string h = $"( ( j e. _om /\\ {c0} ) /\\ {pj} )";
-            Proof hj = Hyp(h, "j e. _om"), hu2 = Hyp(h, "U e. Univ"), ha2 = Hyp(h, $"A e. {Nat}");
+            Proof hj = Hyp(h, "j e. _om"), hu2 = Hyp(h, $"U e. {D}"), ha2 = Hyp(h, $"A e. {Nat}");
             string x = Ga(g, "A", Lt("j"));
             Proof xm = Use("simpld", Hyp(h, pj));
             Proof xf = Use("simprd", Hyp(h, pj));
@@ -610,7 +641,7 @@ public sealed class NatBridge
         // Headline: F ( G A B ) = F A + F B.
         {
             string h = $"( {h0} /\\ ( A e. {Nat} /\\ B e. {Nat} ) )";
-            Proof hu = Hyp(h, "U e. Univ");
+            Proof hu = Hyp(h, $"U e. {D}");
             Proof ar = Rw(Hyp(h, $"B e. {Nat}"), Symm(Imp(h, "lean-nat-rnlit", [hu])));
             Proof litf1o = Ax("lean-nat-litf1o");
             Proof kom = Imp(h, "f1ocnvdm", [Lift(h, litf1o), ar]);
@@ -627,7 +658,7 @@ public sealed class NatBridge
         {
             string l2 = Lt(Ofn("2")), l4 = Lt(Ofn("4"));
             string h = h0;
-            Proof hu = Hyp(h, "U e. Univ");
+            Proof hu = Hyp(h, $"U e. {D}");
             Proof l2n = Imp(h, "lean-nat-litnumel", [hu, Lift(h, Use("2nn0"))]);
             Proof l4n = Imp(h, "lean-nat-litnumel", [hu, Lift(h, Use("4nn0"))]);
             string x = Ga(g, l2, l2);
@@ -642,7 +673,8 @@ public sealed class NatBridge
                 Use("mpbird", Lift(h, Use("2p2e4")), iff));
         }
 
-        // The same, for the model's own Nat.add.
+        // The same, for the model's own Nat.add, given its rules (in tower mode they are proved: NatAddRules).
+        if (D == "Univ")
         {
             (string, string)[] s = [("G", "( lean.Nat.add ` U )"), ("U", "U"), ("A", "A"), ("B", "B")];
             Thm("lean-nat-natadd", "Bridge: the model's Nat.add is + through F, given its computation rules.", UseS("lean-nat-add", s));
@@ -650,6 +682,233 @@ public sealed class NatBridge
                 UseS("lean-nat-2p2e4", [("G", "( lean.Nat.add ` U )"), ("U", "U")]));
         }
     }
+
+    // ================================================================ Nat.add's computation rules, proved (tower mode)
+
+    /// <summary>
+    /// In tower mode Nat.add satisfies its computation rules, so they are theorems: n + 0 = n and n + succ m = succ (n + m),
+    /// each proved from Nat.add's definition by the theorem translator's conversion steps (through Nat.brecOn, Nat.below and
+    /// Nat.rec). Then lean-nat-add applies with no hypotheses but the tower's: ⟦Nat.add⟧ is + through F.
+    /// </summary>
+    public void NatAddRules(TheoremTranslator tt)
+    {
+        Expr natT = tt.Const0("Nat"), zeroT = tt.Const0("Nat.zero"), succT = tt.Const0("Nat.succ"), addT = tt.Const0("Nat.add");
+        Terms t = tt.Terms;
+        Expr Plus(Expr a, Expr b) => t.App(t.App(addT, a), b);
+        Expr Succ1(Expr a) => t.App(succT, a);
+        var (zs, zp) = tt.ProveDefEq([natT], v => (Plus(v[0], zeroT), v[0]));
+        Add("lean-nat-natadd-zero", "Nat.add's first computation rule, n + 0 = n, proved from its definition: it holds in tower mode.",
+            zs, zp, Required(zp));
+        var (ss, sp) = tt.ProveDefEq([natT, natT], v => (Plus(v[0], Succ1(v[1])), Succ1(Plus(v[0], v[1]))));
+        Add("lean-nat-natadd-succ", "Nat.add's second computation rule, n + succ m = succ (n + m), proved from its definition: it holds in tower mode.",
+            ss, sp, Required(sp));
+
+        const string g = "( lean.Nat.add ` U )";
+        string h = $"U e. {D}";
+        {
+            Proof l0 = Imp(h, "lean-nat-litnat", [Hyp(h, h), Lift(h, Use("peano1"))]);
+            Proof e = Trans(Lift(h, Ax("lean-nat-lit0")), Symm(Imp(h, "lean-nat-zeroeq", [Hyp(h, h)])));
+            Thm("lean-nat-zeroel", "The model's zero is in the model's Nat.", Rw(l0, e));
+        }
+        // A. a e. N ( G a 0 ) = a
+        Proof z = UseS("lean-nat-natadd-zero", [("U", "U"), ("A", "a")]);
+        Proof r0 = Use("ralrimiva", z);
+        // A. a e. N A. b e. N ( G a ( succ b ) ) = succ ( G a b )
+        Proof sb = UseS("lean-nat-natadd-succ", [("U", "U"), ("A", "a"), ("B", "b")]);
+        Proof r1 = Use("ralrimiva", Use("ralrimiva", sb));
+        Proof rules = Use("jca", Use("jca", UseS("id", [("ph", h)]), r0), r1);
+        if (_k.Split(ProofKit.Of(rules)).X != Rules(g))
+        {
+            throw new InvalidOperationException($"Nat.add's rules came out as {ProofKit.Of(rules)}, not {Rules(g)}");
+        }
+        Thm("lean-nat-natadd-rules", "In tower mode the model's Nat.add satisfies its computation rules.", rules);
+
+        string hab = $"( {h} /\\ ( A e. {Nat} /\\ B e. {Nat} ) )";
+        Proof rr = Imp(hab, "lean-nat-natadd-rules", [Hyp(hab, h)]);
+        Proof ab = Hyp(hab, $"( A e. {Nat} /\\ B e. {Nat} )");
+        Thm("lean-nat-natadd", "Bridge: the model's Nat.add is + through F (no hypotheses but the tower's).",
+            Imp(hab, "lean-nat-add", [rr, ab]));
+        Thm("lean-nat-natadd-el", "The model's Nat.add stays in the model's Nat.", Imp(hab, "lean-nat-addel", [rr, ab]));
+        Thm("lean-nat-natadd-2p2e4", "Cross-check: 2 + 2 = 4 for the model's Nat.add, from set.mm's 2p2e4.",
+            Imp(h, "lean-nat-2p2e4", [Imp(h, "lean-nat-natadd-rules", [Hyp(h, h)])]));
+    }
+
+    /// <summary>
+    /// A Lean theorem about Nat, proved through the model and restated in set.mm's arithmetic. The theorem must be
+    /// ∀ (a b … : Nat), l = r with l and r built from +, 0, literals, Nat.succ and the variables (Nat.add_zero,
+    /// Nat.zero_add). Three theorems are written:
+    /// - lean-thm-T: (/) e. ⟦l = r⟧ in the model, from its proof term (TheoremTranslator);
+    /// - lean-nat-T: ( F ` ⟦l⟧ ) = ( F ` ⟦r⟧ ) computed in NN0, for a b … in the model's Nat: Eq is =, l and r unfold to
+    ///   Nat.add, Nat.zero and Nat.succ (conversion), and F takes those to +, 0 and + 1 (lean-nat-natadd, …);
+    /// - lean-nn0-T: the statement in NN0, for A B … e. NN0, by substituting ( `' F ` A ) and F's inverse.
+    /// So ( A + 0 ) = A, for instance, is derived from Lean's proof of Nat.add_zero, not from set.mm's addrid.
+    /// </summary>
+    public void Restate(TheoremTranslator tt, string name)
+    {
+        Terms t = tt.Terms;
+        var ops = new Ops(t);
+        string lp = Model.LabelPart(name);
+        var (tstmt, tproof) = tt.Prove(t.Of(name));
+        Add($"lean-thm-{lp}", $"The Lean theorem {name}, proved through the model from its proof term.", tstmt, tproof, Required(tproof));
+
+        // The statement: binders over Nat, then @Eq Nat l r.
+        Expr natT = tt.Const0("Nat");
+        Expr ty = tt.Type0(name);
+        var binderTypes = new List<Expr>();
+        for (Expr b = ty; b is Binder { IsPi: true } pb; b = pb.Body)
+        {
+            binderTypes.Add(natT);
+        }
+        (Expr L, Expr R, Expr T) Sides(IReadOnlyList<Expr> fvs)
+        {
+            Expr e = ty;
+            int i = 0;
+            while (e is Binder { IsPi: true } pb)
+            {
+                if (!ReferenceEquals(Ops.Spine(pb.Domain, out _), Ops.Spine(natT, out _)) && $"{pb.Domain}" != $"{natT}")
+                {
+                    throw new Model.Refused($"{name}: restating needs every binder in Nat, not {pb.Domain}");
+                }
+                e = ops.Instantiate(pb.Body, [fvs[i++]]);
+            }
+            if (Ops.Spine(e, out List<Expr> a) is not Const { } eq || !$"{eq.Name}".StartsWith("Eq.{", StringComparison.Ordinal) || a.Count != 3)
+            {
+                throw new Model.Refused($"{name}: restating needs an equation, not {e}");
+            }
+            return (a[1], a[2], a[0]);
+        }
+        var (nfls, nflp) = tt.ProveDefEq(binderTypes, v => { var (l, _, _) = Sides(v); return (l, Nf(tt, l)); });
+        var (nfrs, nfrp) = tt.ProveDefEq(binderTypes, v => { var (_, r, _) = Sides(v); return (r, Nf(tt, r)); });
+        Add($"lean-nat-{lp}-lhs", $"The left side of {name}, unfolded to Nat.add, Nat.zero and Nat.succ.", nfls, nflp, Required(nflp));
+        Add($"lean-nat-{lp}-rhs", $"The right side of {name}, unfolded to Nat.add, Nat.zero and Nat.succ.", nfrs, nfrp, Required(nfrp));
+        Proof thm = Use($"lean-thm-{lp}");
+        Proof dl = Use($"lean-nat-{lp}-lhs"), dr = Use($"lean-nat-{lp}-rhs");
+        string ph = _k.Split(ProofKit.Of(thm)).H;
+        Proof hu = Hyp(ph, $"U e. {D}");
+        string nfl = _k.Sides(_k.Split(ProofKit.Of(dl)).X).R, nfr = _k.Sides(_k.Split(ProofKit.Of(dr)).X).R;
+
+        // Eq is =: lean.Eq.{1} at ( N , L , R ) is if ( R = L , 1o , (/) ).
+        Name eqInst = t.Of("Eq.{1}");
+        var (es, ep, ed) = tt.Model.Equation(eqInst);
+        if (!Db.Statements.ContainsKey("lean-Eq.u1-eq"))
+        {
+            Add("lean-Eq.u1-eq", "The definitional equation of Eq.{1}.", es, ep, ed);
+        }
+        Proof lm = Use("eqeltrd", dl, Mem(ph, nfl, hu));
+        Proof rm = Use("eqeltrd", dr, Mem(ph, nfr, hu));
+        Proof tyNat = Imp(ph, "lean-ty-Nat", [hu]);
+        Proof eqv = Imp(ph, "lean-Eq.u1-eq", [Use("jca", Use("jca", Use("jca", hu, tyNat), lm), rm)]);
+        Proof holds = Rw(thm, eqv);
+        string cond = _k.Split(ProofKit.Of(holds)).X;   // (/) e. if ( R = L , 1o , (/) )
+        string rEqL = _pr.Render(ProofKit.Child(ProofKit.Child(_k.Wff(cond), "B"), "ph"));
+        Proof rl = Use("sylib", holds, UseS("lean-prop", [("ph", rEqL)]));
+        Proof nfEq = Trans(Symm(dl), Symm(rl), dr);   // ( ph -> NfL = NfR )
+        Proof fEq = Ce(Fv("Y"), nfEq);
+        Proof model = Trans(Symm(FVal(ph, nfl, hu)), fEq, FVal(ph, nfr, hu));
+        Thm($"lean-nat-{lp}", $"The Lean theorem {name} in NN0, for elements of the model's Nat: through the bridge F, from its proof through the model.", model);
+
+        // For A B … in NN0: substitute ( `' F ` A ), which is in the model's Nat, and F ( `' F ` A ) = A.
+        var vars = Enumerable.Range(0, binderTypes.Count).Select(i => ((char)('A' + i)).ToString()).ToList();
+        string Inv(string v) => $"( `' {F} ` {v} )";
+        Proof inst = UseS($"lean-nat-{lp}", [("U", "U"), .. vars.Select(v => (v, Inv(v)))]);
+        string ph2 = vars.Aggregate($"U e. {D}", (acc, v) => $"( {acc} /\\ {v} e. NN0 )");
+        Proof hu2 = Hyp(ph2, $"U e. {D}");
+        Proof f1o = Imp(ph2, "lean-nat-f1o", [hu2]);
+        Proof cnv = Imp(ph2, "f1ocnv", [f1o]);
+        Proof cnvf = Imp(ph2, "f1of", [cnv]);
+        Proof ctx = hu2;
+        foreach (string v in vars)
+        {
+            ctx = Use("jca", ctx, Imp(ph2, "ffvelcdm", [cnvf, Hyp(ph2, $"{v} e. NN0")]));
+        }
+        Proof r = Use("syl", ctx, inst);
+        foreach (string v in vars)
+        {
+            r = Rw(r, Imp(ph2, "f1ocnvfv2", [f1o, Hyp(ph2, $"{v} e. NN0")]));
+        }
+        Thm($"lean-nn0-{lp}", $"The Lean theorem {name}, restated in set.mm's arithmetic: derived from Lean's proof through the model and the bridge F.", r);
+    }
+
+    /// <summary>A side of an equation about Nat, as Nat.add, Nat.zero and Nat.succ over the free variables.</summary>
+    private static Expr Nf(TheoremTranslator tt, Expr e)
+    {
+        Terms t = tt.Terms;
+        Expr zero = tt.Const0("Nat.zero"), succ = tt.Const0("Nat.succ"), add = tt.Const0("Nat.add");
+        Expr Lit(System.Numerics.BigInteger n) => n == 0 ? zero : t.App(succ, Lit(n - 1));
+        Expr h = Ops.Spine(e, out List<Expr> a);
+        string hn = h is Const c ? $"{c.Name}" : "";
+        return (h, hn, a.Count) switch
+        {
+            (FVar, _, 0) => e,
+            (NatLit l, _, 0) when l.Value <= 10 => Lit(l.Value),
+            (_, "Nat.zero", 0) => zero,
+            (_, "Nat.succ", 1) => t.App(succ, Nf(tt, a[0])),
+            (_, "Nat.add", 2) => t.App(t.App(add, Nf(tt, a[0])), Nf(tt, a[1])),
+            (_, "HAdd.hAdd.{0,0,0}", 6) => t.App(t.App(add, Nf(tt, a[4])), Nf(tt, a[5])),
+            (_, "OfNat.ofNat.{0}", 3) when a[1] is NatLit l && l.Value <= 10 => Lit(l.Value),
+            _ => throw new Model.Refused($"restating: {e} is not built from +, literals, Nat.succ and variables"),
+        };
+    }
+
+    /// <summary>( ph -> nf e. ( lean.Nat ` U ) ) for a text built from Nat.add, Nat.zero, Nat.succ and class variables in Nat.</summary>
+    private Proof Mem(string ph, string nf, Proof hu)
+    {
+        SyntaxTree n = _k.Tree("class", nf.Split(' '));
+        if (nf == Zero)
+        {
+            return Imp(ph, "lean-nat-zeroel", [hu]);
+        }
+        if (n.Rule.Label == "cfv" && _pr.Render(n.Children[1]) is string f)
+        {
+            string arg = _pr.Render(n.Children[0]);
+            if (f == "( lean.Nat.succ ` U )")
+            {
+                return Imp(ph, "lean-nat-succel", [hu, Mem(ph, arg, hu)]);
+            }
+            SyntaxTree inner = n.Children[1];
+            if (inner.Rule.Label == "cfv" && _pr.Render(inner.Children[1]) == "( lean.Nat.add ` U )")
+            {
+                string x = _pr.Render(inner.Children[0]);
+                return Imp(ph, "lean-nat-natadd-el", [hu, Use("jca", Mem(ph, x, hu), Mem(ph, arg, hu))]);
+            }
+        }
+        return Hyp(ph, $"{nf} e. {Nat}");
+    }
+
+    /// <summary>( ph -> ( F ` nf ) = arithmetic ) for a text as in <see cref="Mem"/>: + for Nat.add, 0 for zero, + 1 for succ.</summary>
+    private Proof FVal(string ph, string nf, Proof hu)
+    {
+        SyntaxTree n = _k.Tree("class", nf.Split(' '));
+        if (nf == Zero)
+        {
+            return Imp(ph, "lean-nat-fzero", [hu]);
+        }
+        if (n.Rule.Label == "cfv")
+        {
+            string f = _pr.Render(n.Children[1]), arg = _pr.Render(n.Children[0]);
+            if (f == "( lean.Nat.succ ` U )")
+            {
+                Proof inner = FVal(ph, arg, hu);
+                return Trans(Imp(ph, "lean-nat-fsucc", [hu, Mem(ph, arg, hu)]), Ce("( Y + 1 )", inner));
+            }
+            SyntaxTree g = n.Children[1];
+            if (g.Rule.Label == "cfv" && _pr.Render(g.Children[1]) == "( lean.Nat.add ` U )")
+            {
+                string x = _pr.Render(g.Children[0]);
+                Proof add = Imp(ph, "lean-nat-natadd", [hu, Use("jca", Mem(ph, x, hu), Mem(ph, arg, hu))]);
+                Proof fx = FVal(ph, x, hu), fy = FVal(ph, arg, hu);
+                string ry = _k.Sides(_k.Split(ProofKit.Of(fy)).X).L;
+                Proof c1 = Ce($"( Y + {ry} )", fx);
+                string lx = _k.Sides(_k.Split(ProofKit.Of(fx)).X).R;
+                Proof c2 = Ce($"( {lx} + Y )", fy);
+                return Trans(add, c1, c2);
+            }
+        }
+        return _k.Refl(ph, Fv(nf));
+    }
+
+    private string[] Required(List<string> proof) =>
+        DistinctVars.Required(Db, proof).Select(p => $"{p.Item1} {p.Item2}").ToArray();
 
     // ================================================================ a limit of the current model
 
@@ -661,7 +920,7 @@ public sealed class NatBridge
     /// </summary>
     public void BelowCollapses(string[] belowEqDistinct)
     {
-        const string h = "U e. Univ";
+        string h = $"U e. {D}";
         string m = "( z e. ( lean.Nat ` U ) |-> U )";
         SyntaxTree df = _k.Tree("wff", Db["df-lean.Nat.rec"].Expr.Symbols);
         string inner = _pr.Render(ProofKit.Child(ProofKit.Child(df, "B"), "B"));
@@ -671,11 +930,11 @@ public sealed class NatBridge
             UseG("mptex", $"{innerU} e. _V", UseS("ovex", [("A", "U"), ("F", "^m"), ("B", Nat)])));
 
         // The motive ( z e. Nat |-> U ) is not a function into U: its value U would be in U.
-        const string h2 = "( U e. Univ /\\ ( z e. ( lean.Nat ` U ) |-> U ) e. ( U ^m ( lean.Nat ` U ) ) )";
+        string h2 = $"( U e. {D} /\\ ( z e. ( lean.Nat ` U ) |-> U ) e. ( U ^m ( lean.Nat ` U ) ) )";
         Proof f = Imp(h2, "elmapi", [Hyp(h2, $"{m} e. {dom}")]);
-        Proof zn = Imp(h2, "lean-nat-litnat", [Hyp(h2, "U e. Univ"), Lift(h2, Use("peano1"))]);
+        Proof zn = Imp(h2, "lean-nat-litnat", [Hyp(h2, $"U e. {D}"), Lift(h2, Use("peano1"))]);
         Proof fv = Imp(h2, "ffvelcdm", [f, zn]);
-        Proof mv = UseS("fvmptd3", [("V", "Univ")], UseS("eqid", [("A", m)]), Lift($"z = {Lt("(/)")}", UseS("eqid", [("A", "U")])), zn, Hyp(h2, "U e. Univ"));
+        Proof mv = UseS("fvmptd3", [("V", D)], UseS("eqid", [("A", m)]), Lift($"z = {Lt("(/)")}", UseS("eqid", [("A", "U")])), zn, Hyp(h2, $"U e. {D}"));
         Proof uu = Rw(fv, mv);
         Proof notIn = Use("mtod", Lift(h, UseS("elirr", [("A", "U")])), Use("ex", uu));
         Proof domSs = Rw(Lift(h, Use("dmmptss", UseS("eqid", [("A", innerU)]))), Symm(Use("syl", Hyp(h, h), rec)));
@@ -686,7 +945,7 @@ public sealed class NatBridge
         // So Nat.below is (/) everywhere.
         Proof eq = Use("lean-Nat.below-eq");
         string ant = _k.Split(ProofKit.Of(eq)).H;
-        Proof r = Rw(eq, Imp(ant, "lean-nat-belowmotive", [Hyp(ant, "U e. Univ")]));
+        Proof r = Rw(eq, Imp(ant, "lean-nat-belowmotive", [Hyp(ant, $"U e. {D}")]));
         while (ZeroApp(_k.Split(ProofKit.Of(r)).X) is string arg)
         {
             r = Rw(r, Lift(ant, UseS("0fv", [("A", arg)])));

@@ -21,7 +21,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("strings.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         m.Define(t.Of("Lean.origin"));
         m.Define(t.Of("String.instInhabited"));
         string d = m.Declarations;
@@ -39,7 +39,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("axioms.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         m.Define(t.Of("propext"));
         m.Define(t.Of("Quot.ind"));
         Assert.Contains("df-lean.propext $a |- lean.propext = ( u e. Univ |-> (/) ) $.", m.Declarations);
@@ -58,7 +58,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("axioms.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         m.Define(t.Of("Quot.lift"));
         string d = m.Declarations;
         output.WriteLine(d);
@@ -76,7 +76,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
             return;
         }
         var t = new Terms();
-        var m = new Model(t, Reader.ReadExport(t, Fixture("strings.ndjson")), new Prover(Database.Read(Path.Combine(SetMm, "set.mm"))));
+        var m = new Model(t, Reader.ReadExport(t, Fixture("strings.ndjson")), new Prover(Database.Read(Path.Combine(SetMm, "set.mm"))), tower: false);
         var w = new Writer("set.mm", "tenet-zfc string literals test");
         var eqs = new[] { "Lean.origin", "String.instInhabited" }.Select(n => (n, m.Equation(t.Of(n)))).ToList();
         w.Raw(m.Declarations);
@@ -95,7 +95,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
             return;
         }
         var t = new Terms();
-        var m = new Model(t, Reader.ReadExport(t, Fixture("axioms.ndjson")), new Prover(Database.Read(Path.Combine(SetMm, "set.mm"))));
+        var m = new Model(t, Reader.ReadExport(t, Fixture("axioms.ndjson")), new Prover(Database.Read(Path.Combine(SetMm, "set.mm"))), tower: false);
         var w = new Writer("set.mm", "tenet-zfc axioms and quotients test");
         var eqs = new[] { "propext", "Quot", "Quot.mk", "Quot.lift", "Classical.choice", "Classical.choose", "Classical.propDecidable" }
             .Select(n => (n, m.Equation(t.Of(n)))).ToList();
