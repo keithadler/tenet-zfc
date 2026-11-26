@@ -563,3 +563,9 @@ Both verifiers accept them, and every definition passes the definition check. Th
 |---|---|
 | a name a `set.mm` token can't hold (`'`, `?`, `₂`) | at least 1,494, over the 25 most common reasons (the largest: `BitVec.extractLsb'` 373, `Lean.Syntax.getPos?` 296) |
 | `Acc` (a premise that is a function into `Acc`) | 334 |
+
+## Bridge theorems: the model's `Nat` is `NN0` (built)
+
+`tenet-zfc nat-bridge` proves that `F = ( `' lean.Nat.-ofnum o. `' lean.Nat.-lit )` is a bijection from the model's `Nat` onto `NN0`. It takes zero to `0`, `succ` to `+ 1` and each literal to its numeral. Any function with `Nat.add`'s computation rules is `+` through `F`. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. Milestone 2's table entries for `Nat` become these theorems. All three checkers accept the output, and CI runs them.
+
+**A limit found on the way.** In the one-universe model, `⟦Nat.below⟧` is `(/)` everywhere. Its motive returns `U`, and `U e. U` is impossible. So `⟦Nat.add⟧`, compiled through `brecOn`, doesn't satisfy its own computation rules, and neither does any other structurally recursive definition. Both the motive lemma and the collapse of `Nat.below` are proved, and the bridge for `Nat.add` takes the rules as hypotheses until milestone 4 separates universe levels. See [bridges.md](bridges.md).
