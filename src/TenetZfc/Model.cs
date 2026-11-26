@@ -1610,6 +1610,10 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         if (count > 1)
         {
             SyntaxTree n = pr.Parse("wff", cond.Split(' '))!;
+            if (n.Rule.Label != "wo")
+            {
+                throw new Refused($"a proposition's cases aren't a disjunction: {cond}");
+            }
             string l = pr.Render(n.Children[0]), r = pr.Render(n.Children[1]);
             return j == count - 1
                 ? pr.Apply("olcd", S(("ph", ph), ("ps", r), ("ch", l)), ProveWff(ph, r))
@@ -1621,7 +1625,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     /// <summary>( ph -> w ) for T., A = A, conjunctions, and E. x e. T w' witnessed by (/) (a proof field).</summary>
     private Proof ProveWff(string ph, string w)
     {
-        SyntaxTree n = pr.Parse("wff", w.Split(' '))!;
+        SyntaxTree n = pr.Parse("wff", w.Split(' ')) ?? throw new Refused($"not a formula: {w}");
         switch (n.Rule.Label)
         {
             case "wtru":

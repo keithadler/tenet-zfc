@@ -148,12 +148,20 @@ if (args.Length >= 5 && args[0] == "theorem")
         try
         {
             var (stmt, proof) = translator.Prove(tt.Of(name));
+            // Replayed here (every step's hypotheses, and the $d conditions), so a broken proof fails on its own.
+            _ = TenetZfc.Metamath.DistinctVars.Required(tpr.Database, proof);
             done.Add(($"lean-thm-{Model.LabelPart(name)}", stmt, proof, name));
             Console.WriteLine($"{name}: {stmt} ({tpr.Database.Shared.Size(proof)} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
         }
         catch (Model.Refused e)
         {
             Console.WriteLine($"{name}: refused: {e.Message}");
+            tstatus = 1;
+        }
+        catch (InvalidOperationException e)
+        {
+            // A proof step that doesn't check: a bug in the translator, reported, and the other theorems go on.
+            Console.WriteLine($"{name}: failed: {e.Message}");
             tstatus = 1;
         }
     }

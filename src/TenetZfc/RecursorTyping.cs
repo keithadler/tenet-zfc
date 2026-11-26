@@ -185,6 +185,15 @@ public sealed partial class Model
         // ( ctx -> parts C_ Q ) for the left-nested union of the constructors' parts.
         Proof PartsSub(string ctx, string parts, int count, string s, Func<string, Proof> rInI, Func<string, Proof> rInS)
         {
+            if (count == 0)
+            {
+                // No constructors (False, Empty): the type is empty, and the empty set is a subset of anything.
+                if (parts != "(/)")
+                {
+                    throw new Refused($"{ind.Name} has no constructors, but its set is {parts}");
+                }
+                return _d.Lift(ctx, pr.Apply("0ss", S(("A", q))));
+            }
             if (count == 1)
             {
                 return PartSub(ctx, parts, 0, [], s, rInI, rInS);

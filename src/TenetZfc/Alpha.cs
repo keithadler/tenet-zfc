@@ -161,6 +161,20 @@ public sealed partial class Model
                 Proof? p2 = Alpha(type, mid, b);
                 return p2 is Proof q ? TransT(type, p1, q) : p1;
             }
+            int di = na.Rule.Label is "wral" or "wrex" ? 2 : na.Rule.Label is "cmpt" or "cixp" or "ciun" ? 1 : -1;
+            if (di >= 0 && KidA(di).Split(' ').Any(tok => tok == xa || tok == xb))
+            {
+                // The renaming lemma needs both names out of the domain, where they can occur only bound: rename the
+                // domain's own binders apart first (the binder's domain is outside its scope).
+                string dom2 = RenameApart(KidA(di), new HashSet<string> { xa, xb }, a, b);
+                var kids = na.Children.Select(k => pr.Render(k)).ToList();
+                kids[di] = dom2;
+                var hv = vars.Select(h => h.Var!).ToList();
+                string mid = string.Join(' ', na.Rule.Expr.Symbols.Select(sym => hv.IndexOf(sym) is int vi and >= 0 ? kids[vi] : sym));
+                Proof p1 = Alpha(type, a, mid) ?? throw new Refused("renaming a domain apart changed nothing");
+                Proof? p2 = Alpha(type, mid, b);
+                return p2 is Proof q ? TransT(type, p1, q) : p1;
+            }
             Proof r = RenameProof(type, na, sv, xb);
             Proof? rest = Alpha(type, RenameBinder(na, sv, xb), b);
             return rest is Proof q2 ? TransT(type, r, q2) : r;
