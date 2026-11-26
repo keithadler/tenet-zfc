@@ -135,9 +135,16 @@ public sealed class Typing(Terms t, Environment env)
     private Level SortOf(Expr ty, IReadOnlyDictionary<ulong, Expr> ctx) =>
         Whnf(Infer(ty, ctx)) is Sort s ? s.Level : throw new Stuck("a type whose type isn't a sort");
 
+    /// <summary>A stronger reduction (with iota) to fall back on when a projection's structure type doesn't show.</summary>
+    public Func<Expr, Expr>? Reduce { get; set; }
+
     private Expr InferProj(Proj p, IReadOnlyDictionary<ulong, Expr> ctx)
     {
         Expr st = Whnf(Infer(p.Struct, ctx));
+        if (Reduce is not null && (Ops.Spine(st, out _) is not Const sc || env.Find(sc.Name) is not { Kind: ConstKind.Inductive }))
+        {
+            st = Reduce(st);
+        }
         if (Ops.Spine(st, out List<Expr> args) is not Const ic || env.Find(ic.Name) is not { Kind: ConstKind.Inductive, Ctors.Length: 1 } ind)
         {
             throw new Stuck("a projection out of something that isn't a structure");

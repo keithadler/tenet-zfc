@@ -353,10 +353,37 @@ So a literal stays as short as its decimal digits: `UInt8.size` is `… ( lean.N
 | axioms (`propext`, `Classical.choice`, …) and quotients | 109 |
 
 **Next:**
-- **Set variables.** Definitions with many nested binders need more than set.mm's 26. They can be declared by the output itself, as new `$v` and `$f` statements, which add no axioms.
 - **Nested types** (`Lean.Syntax`), through the replayer's existing reduction to a mutual block.
 - **Strings**, as lists of characters.
 - **Axioms**, which are milestone 3's last item: `propext` holds in the model, and `Classical.choice` comes from `set.mm`'s choice.
+
+## Step 3, fifth part: extra set variables (built)
+
+set.mm has 26 set variables, the lowercase letters, and 1,058 definitions in `Init` needed more: a structure with many fields, such as `Lean.Grind.Config`, binds one variable per field in its recursor, inside the motive's and the minor premise's binders.
+
+**The output declares its own,** `xx1`, `xx2`, …, after the letters are used up. No token of `set.mm` is `xx` followed by digits. Each is declared once, at the top level, before the first definition or proof that uses it:
+
+```
+$v xx1 $.
+vxx1 $f setvar xx1 $.
+```
+
+- A `$v` and a `$f` add a variable, not an axiom, so nothing new can be proved about sets.
+- The prover learns each one through `Database.Extend`, as it learns the definitions.
+- The rules for the letters hold for the new variables too. A binder's variable differs from every enclosing binder's and from its own domain's variables, and the `$d` lists name every set variable a definition binds.
+- `frr2` and `exse` reserve none of the new variables, since no `set.mm` proof uses them, so the recursion may take them after its own pool.
+
+**Checked:** `Lean.Grind.Config.casesOn` binds 27 new variables. Its definitional equation states them too: the minor premise ranges over a Π-type of 27 fields. `Lean.Meta.Simp.Config.zeta` binds 10. Both verifiers accept their equations (235,000 proof steps for `casesOn`), and the definitions pass the definition check, in a test and in CI (`tests/fixtures/setvars.ndjson`).
+
+**The effect on `Init`:** 12,178 of 17,590 definitions now translate with everything they use, up from 11,780. 398 of them use the new variables, at most 77 in one definition. No definition stops for lack of set variables any more. The other 660 of the 1,058 now stop at the next blocker in their dependencies, mostly string literals.
+
+| What stops a definition next | Definitions |
+|---|---|
+| the nested type `Lean.Syntax` | 1,483 |
+| string literals | 996 |
+| names with characters a `set.mm` token can't have (`'`, `?`, `₂`) | 750 or more |
+| `Acc` (a premise that is a function into `Acc`) | 325 |
+| axioms and quotients | 112 |
 
 ## Proof size: compressed proofs with sharing (built)
 
@@ -485,8 +512,169 @@ Not yet handled: an inductive type, or a packed helper (a recursive type's step 
 
 Names with `'` or `?` were hidden behind string literals before. They need an escaping scheme for tokens, a small change to `Model.Token`.
 
+## Step 3, sixth part: mutual and nested inductive types (built)
+
+Before this part, 1,483 definitions in `Init` stopped at "`Lean.Syntax` is a mutual or nested inductive type". `Lean.Syntax` holds an `Array Syntax`, so it is nested.
+
+**A block is one least fixed point over a tagged sum.** The types of a mutual block, `I_0 … I_n-1`, are built together. A nested block first goes through the kernel's reduction to a mutual block, the one the replayer already checks (`Nested.cs`, now exposed as `Replayer.AuxiliaryBlock`). For `Rose α`, which holds a `List (Rose α)`, that block is `Rose` and an auxiliary type standing for `List (Rose α)`. `Lean.Syntax`'s block has three types: `Syntax`, `Array Syntax` and `List Syntax`.
+
+- **Elements** of the fixed point are pairs `<. ix , v >.`. Here `ix` is the type's index (`(/)`, `1o`, `2o`, `suc 2o`, …), and `v` is a tagged tuple, as for any inductive type.
+- **The step**, `lean.I_0.-mstep`, adds `<. ix , tag(fields) >.` for every constructor of every type. A recursive field of type `t` ranges over `( X " { ix_t } )`, the values of type `t` in the last stage.
+- **Each original type is its slice.** The fixed point is the union of its ω-chain of stages, as before:
+
+  ```
+  df-lean.Tm $a |- lean.Tm = ( u e. Univ |-> ( x e. u |->
+      ( U_ y e. _om ( rec ( ( r e. _V |-> ( lean.Tm.-mstep ` <. <. u , <. x , (/) >. >. , r >. ) ) , (/) ) ` y ) " { (/) } ) ) ) $.
+  ```
+
+- **Constructors** build tagged tuples. An auxiliary type's constructors are the nested type's own (`List.nil`, `List.cons`), so a value of `List (Rose α)` is the same set whichever way it is read.
+- **The recursors are one recursion.** `frecs ( RankLt , _V , H )` runs over every set. Its value at `a` is the tuple of every type's case analysis on `a`, `<. case_0 , <. case_1 , … (/) >. >.`, computed by `lean.I_0.-mcase`. `I_t.rec`, and a nested block's `I.rec_k`, read component `t` at the major premise. A recursive field `r` of type `t'` gets component `t'` of the recursion at `r`.
+- **Why every set.** The recursion runs over `_V` rather than the block, so its computation rules need no membership in it: `frr2` only needs `X e. _V`. That takes one new lemma, besides `lean-rankfr`:
+
+  `lean-rankse $p |- { <. x , y >. | ( rank ` x ) e. ( rank ` y ) } Se _V`, in 550 steps. The sets of smaller rank than `z` all lie in `( R1 ` ( rank ` z ) )` (`rankr1ag`), which is a set.
+
+**The computation rules** follow the recursive types' four steps:
+1. **The value is in the major premise's type.**
+   - For an original type, `<. ix , tag >.` is in a stage after every recursive field's (`eliun`, `lean-stagess`, the step, `rdgsuc`), and `elimasng` reads it back as a member of the slice.
+   - For an auxiliary type, the value is the nested type's own constructor, in the nested type itself (`List.cons s l` in `List (Rose α)`), as for any recursive or non-recursive type.
+2. **`frr2`** unfolds the recursion once, with `lean-rankfr` and `lean-rankse` on `_V`.
+3. **The case analysis** is evaluated on the tag, and component `t` of the tuple is read off by the simplifier.
+4. **The recursion at each recursive field** is component `t'` of the recursion there, which is `I_t'.rec` at it, since it has smaller rank (`elpredg`, `fvres`).
+
+**Nested fields need a bridge.** `Rose.node a l` takes `l` in the real `List (Rose α)`, but the fixed point's step takes it from the auxiliary type's slice. So step 1 proves that every value of the nested type is a value of its auxiliary type: `⟦List (Rose α)⟧ C_ ( Fix " { 1o } )`.
+- For a recursive nested type like `List`, this is induction over its stages (`finds`). Stage `(/)` is empty (`rdg0`). If stage `y` is in the slice, so is stage `suc y`: it is the step at stage `y` (`rdgsuc`), each constructor's part is in the slice (`iunssd`, `snssd`), and its recursive fields range over stage `y`.
+- For a non-recursive one like `Array`, the constructors' parts are in the slice directly, and `Array Syntax`'s field of type `List Syntax` uses that type's bridge.
+- The nested type's parameter (`Rose α`) is in `U`, because the field's type is the nested type applied to it (`elfvdm`, `dmmptss`). So these rules need no hypothesis beyond Lean's own.
+- The block's bound variables are chosen apart from the nested types' definitions, so substituting their fields into the block's step never captures a variable.
+
+**Checked** (`tests/fixtures/Mutual.lean`, exported to `mutual.ndjson`), in a test and in CI:
+- the mutual block `Tm`/`Args`: the computation rules of `Tm.var`, `Tm.app`, `Args.nil` and `Args.cons`. `Tm.app`'s fields recurse into both types, through `Tm.rec` and `Args.rec`.
+- the nested type `Rose`: `Rose.node` (through the bridge for `List (Rose α)`), and `Rose.rec_1` on `List.nil` and `List.cons`. `List.cons`'s head recurses through `Rose.rec` and its tail through `Rose.rec_1`.
+
+Both verifiers accept them, and every definition passes the definition check. The flat proofs are long, from 319,000 steps (`Args.nil`) to 1,643,000 (`Rose.rec_1` on `List.cons`); compressed, `mutual.mm` is 267 KB. Generating them takes about 25 minutes of CPU, mostly in the prover's flat proof search. `Lean.Syntax`'s types, constructors and recursors are defined the same way (a test checks them, from `syntax.ndjson`).
+
+**A fix on the way.** The recursors' definitional equations exposed a `$d` bug in the sethood prover. When two minor premises both bind `w` (`X_ w e. …`), a hypothesis mentioning `w` was carried under `ralrimivw` over `w`. It now drops hypotheses the term doesn't use before going under a binder.
+
+**Not yet handled:** mutual or nested inductive propositions and indexed families, nested occurrences inside a nested type that is itself mutual, nested types with more than one parameter in computation rules (the bridge needs each parameter in `U`), and nested types that contain each other. Each is refused with the reason.
+
+**The effect on `Init`:** 13,953 of 17,590 definitions now translate with everything they use, up from 13,192 on the same code without this part (all of PRs #1–#4 merged). No inductive type stops any definition any more. Of the 1,513 definitions `Lean.Syntax` stopped, 761 now translate; most of the others stop next at a name a token can't hold, such as `Lean.Syntax.getPos?`.
+
+| What stops a definition next | Definitions |
+|---|---|
+| a name a `set.mm` token can't hold (`'`, `?`, `₂`) | at least 1,494, over the 25 most common reasons (the largest: `BitVec.extractLsb'` 373, `Lean.Syntax.getPos?` 296) |
+| `Acc` (a premise that is a function into `Acc`) | 334 |
+
 ## Bridge theorems: the model's `Nat` is `NN0` (built)
 
 `tenet-zfc nat-bridge` proves that `F = ( `' lean.Nat.-ofnum o. `' lean.Nat.-lit )` is a bijection from the model's `Nat` onto `NN0`. It takes zero to `0`, `succ` to `+ 1` and each literal to its numeral. Any function with `Nat.add`'s computation rules is `+` through `F`. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. Milestone 2's table entries for `Nat` become these theorems. All three checkers accept the output, and CI runs them.
 
 **A limit found on the way.** In the one-universe model, `⟦Nat.below⟧` is `(/)` everywhere. Its motive returns `U`, and `U e. U` is impossible. So `⟦Nat.add⟧`, compiled through `brecOn`, doesn't satisfy its own computation rules, and neither does any other structurally recursive definition. Both the motive lemma and the collapse of `Nat.below` are proved, and the bridge for `Nat.add` takes the rules as hypotheses until milestone 4 separates universe levels. See [bridges.md](bridges.md).
+
+## Theorems through the model (built: `Nat.add_zero` and `Nat.zero_add`)
+
+Until now no Lean theorem was proved through the generic model; milestone 2's `2 + 2 = 4` and `List.length_append` went through a hand-written table. `tenet-zfc theorem <export> <set.mm> <out.mm> <name>…` (`TheoremTranslator.cs`) now proves Lean theorems from their proof terms, in the model's own terms.
+
+### First, a gap in the model: one universe makes `Nat.add` empty
+
+Every function `Init` defines by structural recursion went to `(/)` in the model. So `Nat.add_zero` (`n + 0 = n`) was false there for `n ≠ 0`, and `⟦Nat.add⟧ = +` couldn't be proved.
+
+- Structural recursion compiles to `Nat.brecOn`, whose functional takes an argument of type `Nat.below motive t`.
+- `Nat.below` is `Nat.rec` at the motive `fun _ => Sort (max 1 u)`, which translates to `( z e. ( lean.Nat ` u ) |-> u )`.
+- The recursor's motives range over `( u ^m ( lean.Nat ` u ) )`. That motive is in it only if `u e. u`, which is false. So `⟦Nat.below⟧` is a map applied outside its domain, `(/)`.
+- From there `Nat.brecOn.go`'s motive is `(/)` everywhere, its minor premise can't be in it, and `⟦Nat.brecOn …⟧ = ( 1st ` ( 2nd ` (/) ) ) = (/)`.
+
+The cause is the one universe for every level: large elimination into `Sort (u+1)` needs `Sort u ∈ Sort (u+1)`.
+
+### Tower mode (`Universes.cs`, `Monomorph.cs`)
+
+The fix is opt-in (`new Model(…, tower: true)`, `define --tower`), so default outputs don't change:
+
+- **A tower of universes.** The universe argument ranges over `lean.-tower`, a new definition:
+
+  ```
+  df-lean.-tower $a |- lean.-tower = { f | ( ( f : _om --> Univ /\ _om e. ( f ` (/) ) ) /\ A. n e. _om ( f ` n ) e. ( f ` suc n ) ) } $.
+  ```
+
+  An increasing ω-sequence of Grothendieck universes, the first containing ω. `Prop` is `2o`, and `Sort (k+1)` is `( U ` k )` for a concrete level `k`.
+- **Monomorphization.** Each constant used at concrete levels becomes its own constant, `c.{l1,l2}` (labels write it `c.ul1_l2`, since labels can't hold braces). A recursor's motive level stays a parameter, and it means the whole tower, `U. ran U`. It occurs only as the motive's codomain, so one recursor per type instance serves every elimination level.
+- **Π-types into `Prop` are propositions**, `if ( A. x e. ⟦A⟧ (/) e. ⟦B⟧ , 1o , (/) )`, rather than sets of functions. A proof, `(/)`, is then in a Π-proposition exactly when it holds, as it is in any other proposition.
+
+`Nat.below.{1}`'s motive is now `( z e. ( lean.Nat ` u ) |-> ( u ` (/) ) )`, in `( U. ran u ^m ( lean.Nat ` u ) )`. The definitions pass the definition check, and the definitional equations and computation rules verify as before.
+
+**What a theorem assumes.** `U e. lean.-tower`. ZFC doesn't prove that such a tower exists (it needs inaccessible cardinals), so, as before, a theorem holds in every model of the hypotheses. It adds no axiom.
+
+### How a theorem is proved
+
+The model is meant to be sound for Lean's typing: if `Γ ⊢ e : T` then `⟦e⟧ ∈ ⟦T⟧`. A proof `p : P` translates to `(/)`, so translating the typing of `p` proves `(/) e. ⟦P⟧`: the statement holds in the model. The output is
+
+```
+|- ( ( U e. lean.-tower /\ A e. ⟦T1⟧ /\ … ) -> (/) e. ⟦statement⟧ )
+```
+
+with the statement's leading binders opened as hypotheses: `A e. ⟦T⟧` for data, `(/) e. ⟦P⟧` for a hypothesis.
+
+**Typing becomes membership.**
+
+| Lean | `set.mm` step |
+|---|---|
+| `f a`, `f : (x : A) → B` | `fvixp`, or `elmapi` and `ffvelcdmd` for a non-dependent arrow |
+| `h a`, `h` a proof of a Π-proposition | `lean-prop` (below), then `rspcdv` |
+| `fun x => b` | `ralrimiva`, then `mptelixpg` or `fmpt` and `elmapd` |
+| a proof `fun x => b` | `ralrimiva`, then `lean-prop` |
+| `s.i` | `lean-proj-S-i`: down the structure's unions (`eliun`, `rexlimdva`) to `s = tuple` (`elsni`) |
+| a constant `c` | `lean-ty-c`, a typing lemma proved once (below) |
+| a sort, a type as an argument | `UniverseMembership.cs`: closure of `( U ` k )` under pairs, singletons, unions and function spaces (`gruop`, `grusn`, `gruun`, `gruiun`, `grumap`) |
+| a literal `n` | as `Nat.zero` or `Nat.succ (n-1)` (below) |
+
+**Conversions become equations.** Where Lean checks `T ≡ T'`, the translator proves `( ph -> ⟦T⟧ = ⟦T'⟧ )` by normalizing both sides:
+- beta: `fvmptd3`, with the argument's membership in the domain;
+- delta: the constant's definition;
+- iota: the constructor's computation rule, `lean-iota-c`;
+- projections: the constructor's equation, then `op1stg` and `op2ndg`;
+- Nat literals: `( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 0 ) ) = ( lean.Nat.zero ` U )`, and so on, through `set.mm`'s isomorphism of `_om` and `NN0` (`om2uzf1oi`, `f1ocnvfv`, `frsuc`);
+- congruence on applications, projections and Π-types (`fveq12d`, `ixpeq2dva`, `ralbidva`, `ixpconstg`).
+
+Texts that differ only in the names of bound variables are equal by `Alpha.cs` (`cbvmptv`, `cbvixpv`, `cbviunv`, `cbvralvw` and congruence).
+
+**Each constant is typed once**, by a lemma in the output:
+- **definitions and theorems:** their value, typed;
+- **constructors:** their tuple is in the type (`lean-in-c`, the first step of the computation rule's proof);
+- **inductive types:** their sets are in the universe of their sort. A recursive type's stages are, by induction over ω (`finds2`);
+- **recursors:** `lean-recty-I`, `⟦I params⟧ C_ { t | ( R ` t ) e. ( B ` t ) }` for the recursor `R` and motive `B`. Each stage is a subset by `finds2`; a constructor's tuple is in it by its computation rule and its minor premise's type;
+- **recursors into `Prop`** (induction): `lean-ind-I`, from `lean-recty-I` with each minor premise, a proof, replaced by a witness of its data type: the map that is `(/)` everywhere. It is in that type because each motive value it lands in holds, by the minor premise;
+- **`Eq.rec` into `Prop`** (substitution): `lean-subst-Eq`. The major premise holds, so `b = a`, and the motive at `b` is the motive at `a`.
+
+Three small lemmas are proved once per output: `lean-tw` (what the tower hypothesis says) with `lean-tw-u`, `lean-tw-s` and `lean-tw-om`; `lean-prop`, `|- ( (/) e. if ( ph , 1o , (/) ) <-> ph )`; and `lean-pf`, `|- ( ( A e. 2o /\ B e. A ) -> (/) e. A )`, so that a member of a proposition makes it hold.
+
+**Distinct variables.** Each lemma carries exactly the `$d` conditions its proof needs, computed by replaying the proof (`Distinct.cs`). A blanket `$d` over all its variables would stop the lemma being used with a term that binds one of them. Where a lemma needs a bound variable distinct from a class variable, the term is renamed apart first and brought back by alpha-equivalence. The replay also checks every step's hypotheses, so a broken proof fails where it is made, not in a verifier.
+
+### Results
+
+`tests/fixtures/theorems.ndjson` is `leanout Init -- Nat.add_zero Nat.zero_add Nat.succ_add List.length_append` (Lean 4.36.0).
+
+| Theorem | Proof term | Lemmas (flat steps) | Theorem (flat steps) | Output (compressed) | Time |
+|---|---|---|---|---|---|
+| `Nat.add_zero` | `rfl`, so `n + 0` is unfolded to `n` through `Nat.add`, `Nat.brecOn`, `Nat.rec` and the literal `0` | 45 (1,147,634) | 1,665,317 | 383 KB | 6 min |
+| `Nat.zero_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg`, `rfl` | 61 (22,854,344) | 69,124 | 678 KB | 15 min |
+
+Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its own and together. CI proves both into one output (863 KB, 13 minutes here; the second reuses the first's lemmas) and runs all three checks on it.
+
+**`Nat.succ_add` and `List.length_append` aren't proved yet.** Both get past every construct they use: induction on `Nat` and on `List α`, `Eq.rec`, `congrArg`, `congrFun'`, `propext`, `eq_self`, the literal `1`. Both then run out of `set.mm`'s 26 set variables, in the typing of `Nat.succ_add._f` and `List.append._f`, whose matchers nest binders deeper than that. PR #2 (extra set variables) lifts that limit; the translator already takes its quantified variables from set.mm's letters, so it merges with #2 as it is.
+
+`propext` holds in the model and is typed by a lemma (`Propext.cs`): a proposition is `(/)` or `1o` (`lean-2oif`, `|- ( A e. 2o -> A = if ( (/) e. A , 1o , (/) ) )`), so two that hold together are equal.
+
+**Refused, with the reason:** a constant that isn't a theorem; universe levels above 4; Nat literals above 10; recursors with indices or several motives (other than one-constructor propositions like `Eq`, by substitution); axioms other than `propext`; nested and mutual types (left to the model).
+
+`Nat.add_zero`'s statement, as proved:
+
+```
+|- ( ( U e. lean.-tower /\ A e. ( lean.Nat ` U ) ) -> (/) e. ( ( ( ( lean.Eq.{1} ` U ) ` ( lean.Nat ` U ) ) `
+     ( ( ( ( ( ( ( lean.HAdd.hAdd.{0,0,0} ` U ) ` ( lean.Nat ` U ) ) ` ( lean.Nat ` U ) ) ` ( lean.Nat ` U ) ) `
+         ( ( ( lean.instHAdd.{0} ` U ) ` ( lean.Nat ` U ) ) ` ( lean.instAddNat ` U ) ) ) ` A ) `
+       ( ( ( ( lean.OfNat.ofNat.{0} ` U ) ` ( lean.Nat ` U ) ) ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 0 ) ) ) `
+         ( ( lean.instOfNatNat ` U ) ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 0 ) ) ) ) ) ) ` A ) )
+```
+
+That is, `A + 0 = A` in the model, with `+` as Lean defines it. Restating it as `( A + 0 ) = A` in `set.mm`'s arithmetic needs the bridge theorem `⟦Nat.add⟧ = +`, now possible in tower mode.
+
+**Where the size goes.** Most of the steps are typing lemmas for the constants structural recursion goes through: `Nat.brecOn.go` (361,529 steps), `Nat.add._f` (289,688), the computation rules. `Nat.zero_add._f` alone is 20.9 million flat steps: its matcher's motive carries the whole statement, and each typing step repeats it. Compression shares the repeats (678 KB), but proving takes 15 minutes. Sharing types between steps, as Lean's kernel does, is the obvious next optimization.

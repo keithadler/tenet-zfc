@@ -10,7 +10,7 @@ const string Usage = """
                                                          replay, then write set.mm theorems for the theorems the
                                                          emitter covers (Nat arithmetic equations, and induction
                                                          on lists like List.length_append)
-      tenet-zfc define <export.ndjson> <set.mm> <out.mm> <name>...
+      tenet-zfc define [--tower] <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: translate definitions by the generic model,
                                                          each with its definitional equation as a theorem
       tenet-zfc define-all <export.ndjson> <set.mm> <outdir> [--chunk-size N] [--chunks a[-b]] [--jobs N] [--budget seconds]
@@ -19,6 +19,9 @@ const string Usage = """
                                                          verify independently (scripts/verify-all); refusals are listed
                                                          per constant in chunk-NNNN.tsv
       tenet-zfc bridge <set.mm> <out.mm>                 milestone 3: the bridge lemmas recursive types rest on
+      tenet-zfc theorem <export.ndjson> <set.mm> <out.mm> <name>...
+                                                         milestone 3: prove Lean theorems through the generic model
+                                                         (tower mode), |- ( hypotheses -> (/) e. [statement] )
       tenet-zfc nat-bridge <export.ndjson> <set.mm> <out.mm> [<n>...]
                                                          milestone 3: prove that the model's Nat is NN0 (zero, succ,
                                                          Nat.add and literals, each numeral n given), from an export
@@ -44,22 +47,42 @@ if (args.Length == 5 && args[0] == "emit")
 {
     return Emit(args[1], args[2], args[3], args[4], uncompressed);
 }
+bool towerMode = args.Length >= 2 && args[0] == "define" && args[1] == "--tower";
+if (towerMode)
+{
+    args = args.Where((_, i) => i != 1).ToArray();
+}
 if (args.Length >= 5 && args[0] == "define")
 {
-    // Milestone 3: definitions through the generic model, each with its definitional equation.
+    // Milestone 3: definitions through the generic model, each with its definitional equation. With --tower, the
+    // universe argument is a tower of universes and constants are monomorphized first (docs/milestone3.md).
     var dt = new Terms();
     TenetZfc.Environment denv = Reader.ReadExport(dt, args[1]);
+    Monomorph? mono = null;
+    if (towerMode)
+    {
+        mono = new Monomorph(dt, denv);
+        denv = mono.Env;
+    }
     var dpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
-    var model = new Model(dt, denv, dpr);
+    var model = new Model(dt, denv, dpr, tower: towerMode);
     var theorems = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean definitions translated by tenet-zfc's model (docs/milestone3.md)", CompressAgainst(dpr.Database));
     var proved = new List<(string Label, TenetZfc.Metamath.Expr Statement, List<string> Proof, string[] Distinct, string Name)>();
     int status = 0;
-    foreach (string name in args[4..])
+    foreach (string given in args[4..])
     {
+        string name = given;
         try
         {
+            if (mono is not null)
+            {
+                // Each universe parameter at level 0, written c.{0,…}; a recursor keeps its motive level.
+                ConstInfo gc = denv.Find(dt.Of(given)) ?? throw new Model.Refused($"{given} is not in the export");
+                Name inst = mono.Instance(gc.Name, gc.LevelParams.Select(_ => dt.Zero).ToArray());
+                name = $"{inst}";
+            }
             var (stmt, proof, distinct) = model.Equation(dt.Of(name));
-            proved.Add(($"lean-{name}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
+            proved.Add(($"lean-{Model.LabelPart(name)}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
             Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps)");
             if (name == "Quot.lift")
             {
@@ -81,12 +104,22 @@ if (args.Length >= 5 && args[0] == "define")
                 try
                 {
                     var (istmt, iproof, idistinct) = model.Iota(dt.Of(name));
-                    proved.Add(($"lean-{name}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {name}."));
+                    proved.Add(($"lean-{Model.LabelPart(name)}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {name}."));
                     Console.WriteLine($"{name} (computation rule): {istmt} ({iproof.Count} proof steps)");
                 }
                 catch (Model.Refused e) when (e.Message.Contains("only into Prop"))
                 {
                     Console.WriteLine($"{name} (computation rule): none needed: {e.Message}");
+                }
+            }
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"\.rec_[0-9]+$"))
+            {
+                // A nested block's auxiliary recursor (Rose.rec_1, on List (Rose α)): the computation rule on each of the
+                // nested type's constructors (List.nil, List.cons).
+                foreach (var (ctor, istmt, iproof, idistinct) in model.RecursorIotas(dt.Of(name)))
+                {
+                    proved.Add(($"lean-{name}-{ctor}-iota", istmt, iproof, idistinct, $"The computation rule of {name} on {ctor}."));
+                    Console.WriteLine($"{name} on {ctor} (computation rule): {istmt} ({iproof.Count} proof steps)");
                 }
             }
         }
@@ -108,6 +141,40 @@ if (args.Length >= 4 && args[0] == "define-all")
 {
     return DefineAllCommand(args[1], args[2], args[3], args[4..], uncompressed);
 }
+if (args.Length >= 5 && args[0] == "theorem")
+{
+    // Milestone 3: Lean theorems proved through the generic model, in its tower mode (docs/milestone3.md).
+    var tt = new Terms();
+    TenetZfc.Environment tenv = Reader.ReadExport(tt, args[1]);
+    var tpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
+    var translator = new TheoremTranslator(tt, tenv, tpr);
+    var tw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean theorems proved through tenet-zfc's model (docs/milestone3.md)", CompressAgainst(tpr.Database));
+    var done = new List<(string Label, TenetZfc.Metamath.Expr Statement, List<string> Proof, string Name)>();
+    int tstatus = 0;
+    foreach (string name in args[4..])
+    {
+        var sw1 = Stopwatch.StartNew();
+        try
+        {
+            var (stmt, proof) = translator.Prove(tt.Of(name));
+            done.Add(($"lean-thm-{Model.LabelPart(name)}", stmt, proof, name));
+            Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
+        }
+        catch (Model.Refused e)
+        {
+            Console.WriteLine($"{name}: refused: {e.Message}");
+            tstatus = 1;
+        }
+    }
+    tw.Raw(translator.Declarations);
+    foreach (var d in done)
+    {
+        var dv = TenetZfc.Metamath.DistinctVars.Required(tpr.Database, d.Proof);
+        tw.Theorem(d.Label, $"The Lean theorem {d.Name}, proved through the model from its proof term.", d.Statement, d.Proof, dv.Select(p => $"{p.Item1} {p.Item2}"));
+    }
+    File.WriteAllText(args[3], tw.ToString());
+    return tstatus;
+}
 if (args.Length == 3 && args[0] == "bridge")
 {
     // Milestone 3: the bridge lemmas recursive types rest on, written as set.mm theorems.
@@ -118,6 +185,9 @@ if (args.Length == 3 && args[0] == "bridge")
     Console.WriteLine($"lean-rankfr: {stmt} ({proof.Count} proof steps)");
     var bw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[1]), "tenet-zfc bridge lemmas for recursive types (docs/milestone3.md)", CompressAgainst(bdb));
     bw.Theorem("lean-rankfr", "Smaller rank is a well-founded relation on any class.", stmt, proof, distinct);
+    var (sstmt, sproof, sdistinct) = rb.RankSe();
+    Console.WriteLine($"{Recursion.RankSeLabel}: {sstmt} ({sproof.Count} proof steps)");
+    bw.Theorem(Recursion.RankSeLabel, "Smaller rank is a set-like relation on every set.", sstmt, sproof, sdistinct);
     File.WriteAllText(args[2], bw.ToString());
     return 0;
 }
@@ -201,6 +271,19 @@ if (args.Length == 2 && args[0] == "survey")
     Console.WriteLine("theorems whose constants are all covered, after adding the top k of that ranking:");
     Console.WriteLine("        k  statements  with proofs");
     foreach ((int k, int s, int f) in r.Curve) Console.WriteLine($"  {k,7}  {s,10}  {f,11}");
+    return 0;
+}
+if (args.Length >= 3 && args[0] == "show")
+{
+    // Diagnostics: a constant's kind, type and value, as the export has them.
+    var sht = new Terms();
+    TenetZfc.Environment shenv = Reader.ReadExport(sht, args[1]);
+    foreach (string name in args[2..])
+    {
+        ConstInfo? c = shenv.Find(sht.Of(name));
+        Console.WriteLine(c is null ? $"{name}: not in the export"
+            : $"{name} ({c.Kind}, params {c.NumParams}, fields {c.NumFields})\n  type:  {c.Type}\n  value: {c.Value ?? c.OpaqueValue}\n");
+    }
     return 0;
 }
 if (args.Length >= 4 && args[0] == "mm-parse")

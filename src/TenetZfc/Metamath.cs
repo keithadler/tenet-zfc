@@ -32,6 +32,9 @@ public sealed class Statement
 
     /// <summary>For an $f: the variable it types.</summary>
     public string? Var => Kind == 'f' ? Expr.Symbols[0] : null;
+
+    /// <summary>For an assertion, its mandatory distinct-variable pairs.</summary>
+    public IReadOnlyList<(string, string)> Distinct { get; init; } = [];
 }
 
 /// <summary>The statements of a Metamath database, by label, and its syntax axioms by typecode.</summary>
@@ -41,6 +44,7 @@ public sealed class Database
     private readonly HashSet<string> _constants = new();
     private readonly Dictionary<string, Statement> _floatOf = new();   // variable → its (last) $f
     private readonly List<List<Statement>> _scopes = [new()];          // the hypotheses active at each nesting level
+    private readonly List<List<List<string>>> _dScopes = [new()];      // the $d lists active at each nesting level
 
     public IReadOnlyDictionary<string, Statement> Statements => _byLabel;
     public Dictionary<string, List<Statement>> SyntaxByType { get; } = new();
@@ -108,9 +112,11 @@ public sealed class Database
             {
                 case "${":
                     scopes.Add(new List<Statement>());
+                    _dScopes.Add(new List<List<string>>());
                     break;
                 case "$}":
                     scopes.RemoveAt(scopes.Count - 1);
+                    _dScopes.RemoveAt(_dScopes.Count - 1);
                     break;
                 case "$c":
                     foreach (string c in Until("$."))
@@ -119,8 +125,10 @@ public sealed class Database
                     }
                     break;
                 case "$v":
-                case "$d":
                     Until("$.");
+                    break;
+                case "$d":
+                    _dScopes[^1].Add(Until("$."));
                     break;
                 case "$[":
                     Until("$]");
@@ -148,7 +156,8 @@ public sealed class Database
                             Until("$.");   // the proof: not needed here
                         }
                         var expr = new Expr(body[0], body.Skip(1).ToList());
-                        var s = new Statement { Label = label!, Kind = tok[1], Expr = expr, Hyps = Mandatory(scopes, expr) };
+                        List<Statement> hyps = Mandatory(scopes, expr);
+                        var s = new Statement { Label = label!, Kind = tok[1], Expr = expr, Hyps = hyps, Distinct = MandatoryDistinct(hyps) };
                         _byLabel[label!] = s;
                         if (s.Kind == 'a' && expr.Type != "|-")
                         {
@@ -169,6 +178,27 @@ public sealed class Database
                     break;
             }
         }
+    }
+
+    /// <summary>The active $d pairs between two mandatory variables.</summary>
+    private List<(string, string)> MandatoryDistinct(List<Statement> hyps)
+    {
+        var vars = hyps.Where(h => h.Kind == 'f').Select(h => h.Var!).ToHashSet();
+        var r = new HashSet<(string, string)>();
+        foreach (List<string> d in _dScopes.SelectMany(x => x))
+        {
+            for (int i = 0; i < d.Count; i++)
+            {
+                for (int j = i + 1; j < d.Count; j++)
+                {
+                    if (vars.Contains(d[i]) && vars.Contains(d[j]) && d[i] != d[j])
+                    {
+                        r.Add(string.CompareOrdinal(d[i], d[j]) < 0 ? (d[i], d[j]) : (d[j], d[i]));
+                    }
+                }
+            }
+        }
+        return r.ToList();
     }
 
     /// <summary>The mandatory hypotheses, in order, of an assertion with this statement made where the database ends.</summary>
@@ -217,36 +247,30 @@ public sealed class Prover
     public SyntaxTree? Parse(string type, IReadOnlyList<string> syms)
     {
         CheckDeadline();
-        // The model parses the same long hypotheses again and again (picking one conjunct out of many, splitting an
-        // implication): cache whole parses. Trees are immutable, so sharing them is safe. Bounded by total key length.
+        // Successful parses are cached: proofs re-parse the same long terms many times. (A parse stays valid when the
+        // database grows; a failure might not, so failures aren't cached.)
         string key = type + " " + string.Join(' ', syms);
         if (_parsed.TryGetValue(key, out SyntaxTree? hit))
         {
             return hit;
         }
-        SyntaxTree? result = null;
         var memo = new Dictionary<(string, int), List<(int End, SyntaxTree Tree)>>();
         foreach ((int end, SyntaxTree tree) in ParseAt(type, syms, 0, memo))
         {
             if (end == syms.Count)
             {
-                result = tree;
-                break;
+                if (_parsed.Count > 2_000_000)
+                {
+                    _parsed.Clear();
+                }
+                _parsed[key] = tree;
+                return tree;
             }
         }
-        if (_parsedChars + key.Length > ParseCacheChars)
-        {
-            _parsed.Clear();
-            _parsedChars = 0;
-        }
-        _parsed[key] = result;
-        _parsedChars += key.Length;
-        return result;
+        return null;
     }
 
-    private const long ParseCacheChars = 100_000_000;
-    private readonly Dictionary<string, SyntaxTree?> _parsed = new();
-    private long _parsedChars;
+    private readonly Dictionary<string, SyntaxTree> _parsed = new();
 
     private List<(int, SyntaxTree)> ParseAt(string type, IReadOnlyList<string> syms, int pos, Dictionary<(string, int), List<(int, SyntaxTree)>> memo)
     {
