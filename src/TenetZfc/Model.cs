@@ -85,6 +85,8 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
             case Const c:
                 Define(c.Name);
                 return $"( {Token(c.Name)} ` {sc.Universe} )";
+            case App a when Unwrapped(a) is Expr inner:
+                return Tr(inner, sc);
             case App a:
                 return $"( {Tr(a.Fn, sc)} ` {Tr(a.Arg, sc)} )";
             case Binder b:
@@ -183,6 +185,33 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 return;
         }
         throw new Refused($"{n} is not a definition but {(c.Kind == ConstKind.Inductive ? "an inductive type" : "a " + c.Kind.ToString().ToLowerInvariant())}; not in the model yet");
+    }
+
+    /// <summary>
+    /// The type inside an optParam, autoParam, outParam or semiOutParam wrapper, or null. The kernel strips these from
+    /// an inductive's locals when it makes the recursor (Recursors.ConsumeAnnotations), so a recursor's binder types
+    /// lack them while its constructors' keep them, and a computation rule, which matches hypotheses as text, fails
+    /// (HAdd.mk, found by the Init-wide run). Each is the identity on its first argument, so translating through it
+    /// changes no value. Like the kernel, only a wrapper the export defines as that identity is looked through.
+    /// </summary>
+    private Expr? Unwrapped(App a)
+    {
+        Expr head = Ops.Spine(a, out List<Expr> args);
+        string n = head is Const c ? $"{c.Name}" : "";
+        int arity = n is "optParam" or "autoParam" ? 2 : n is "outParam" or "semiOutParam" ? 1 : 0;
+        if (arity == 0 || args.Count != arity || env.Find(((Const)head).Name) is not { Kind: ConstKind.Definition, Value: Expr v })
+        {
+            return null;
+        }
+        for (int i = 0; i < arity; i++)
+        {
+            if (v is not Binder { IsPi: false } lam)
+            {
+                return null;
+            }
+            v = lam.Body;
+        }
+        return v is BVar b && b.Idx == arity - 1 ? args[0] : null;
     }
 
     private Scope NewScope()
@@ -928,6 +957,7 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         {
             setvars.UnionWith(_values[tok].Split(' ').Where(s => SetVars.Contains(s)));
         }
+        setvars.UnionWith(_renamedTo);
         return [string.Join(' ', setvars.Concat(classVars).Append("U"))];
     }
 
@@ -1013,8 +1043,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         // The recursor at the constructor's value: its case analysis, on the tag, then simplified.
         var allArgs = recArgs.Append(v).ToList();
         (Proof eqR, string lastVar, string lastBody) = Unfold(ph, rtok, allArgs, (i, dom) => i < nrec ? Pick(i, $"{allArgs[i]} e. {dom}") : inType);
-        Proof toTag = _d.Congruence("class", Subst(lastBody, lastVar, "Z"), "Z", eqV);
-        Proof cur = _d.Trans(eqR, toTag);
+        // A recursor whose case analysis doesn't look at its value (one constructor, no fields: PUnit.rec, found by the
+        // Init-wide run) needs no rewriting to the tagged tuple.
+        string context = Subst(lastBody, lastVar, "Z");
+        Proof cur = context.Split(' ').Contains("Z") ? _d.Trans(eqR, _d.Congruence("class", context, "Z", eqV)) : eqR;
         if (Simp(ph, Rhs(cur)) is Proof simp)
         {
             cur = _d.Trans(cur, simp);
@@ -1750,6 +1782,32 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
         return _d.Syl(restrict, ExistsIn(sub, x));
     }
 
+    private readonly HashSet<string> _renamedTo = new();   // set variables RenameBound introduced, for the $d lists
+
+    /// <summary>
+    /// ( ph -> X e. _V ) for an indexed union or product X whose bound variable v also occurs in ph. ralrimivw needs v
+    /// disjoint from ph, and sibling binders may share a variable, so a hypothesis can bind the same v (the equation of
+    /// Nat.add.match_1, whose hypotheses D and E both bind w; found by the Init-wide run). So rename v first, to a
+    /// variable in neither ph nor X (cbvixpv, cbviunv), and carry the sethood back (eqeltrid).
+    /// </summary>
+    private Proof? RenameBound(string ph, string x, string label, string v, string dom, string body)
+    {
+        var taken = new HashSet<string>(ph.Split(' ').Concat(x.Split(' ')));
+        string? y = Enumerable.Reverse(SetVars).FirstOrDefault(s => !taken.Contains(s) && pr.Database.FloatOf(s) is not null);
+        if (y is null)
+        {
+            return null;
+        }
+        _renamedTo.Add(y);
+        string body2 = Subst(body, v, y);
+        string x2 = label == "cixp" ? $"X_ {y} e. {dom} {body2}" : $"U_ {y} e. {dom} {body2}";
+        Proof sub = body.Split(' ').Contains(v)
+            ? _d.Congruence("class", Subst(body, v, "Z"), "Z", pr.Apply("id", S(("ph", $"{v} = {y}"))))
+            : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", $"{v} = {y}")), pr.Apply("eqid", S(("A", body))));
+        Proof eq = pr.Apply(label == "cixp" ? "cbvixpv" : "cbviunv", S(("x", v), ("y", y), ("A", dom), ("B", body), ("C", body2)), sub);
+        return pr.Apply("eqeltrid", S(("ph", ph), ("A", x), ("B", x2), ("C", "_V")), eq, ExistsIn(ph, x2));
+    }
+
     private Proof ExistsIn(string ph, string x)
     {
         SyntaxTree n = pr.Parse("class", x.Split(' ')) ?? throw new Refused($"does not parse: {x}");
@@ -1785,6 +1843,10 @@ public sealed class Model(Terms t, Environment env, Prover pr, bool dryRun = fal
                 {
                     // Pointwise sethood of the body, for every x in the domain (ralrimivw), then iunexg or ixpexg.
                     string v = C(0), dom = C(1), body = C(2);
+                    if (ph.Split(' ').Contains(v) && RenameBound(ph, x, n.Rule.Label, v, dom, body) is Proof renamed)
+                    {
+                        return renamed;
+                    }
                     Proof all = pr.Apply("ralrimivw", S(("ph", ph), ("ps", $"{body} e. _V"), ("x", v), ("A", dom)), ExistsIn(ph, body));
                     if (n.Rule.Label == "cixp")
                     {

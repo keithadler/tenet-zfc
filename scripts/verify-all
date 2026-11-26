@@ -3,7 +3,8 @@
 #   - metamath-exe: every lean-* proof (set.mm's own proofs are checked once, elsewhere), no ?Error line;
 #   - mmverify.py: every proof from the chunk's first $p on, exit status 0;
 #   - scripts/check-definitions: mmj2's definitionCheck on every df-lean.* definition.
-# Writes verify-all.tsv in the output folder, one line per chunk, and prints the totals.
+# Writes verify-all.tsv in the output folder, one line per chunk, and prints the totals. Chunks already checked
+# (chunk-NNNN.verify newer than chunk-NNNN.mm) are not checked again.
 #
 # usage: scripts/verify-all [-j jobs] <outdir>
 # The tools come from the same variables the tests use:
@@ -70,7 +71,16 @@ out="$(cd "$1" && pwd)"
 start=$(now)
 tsv="$out/verify-all.tsv"
 printf 'chunk\tresult\tbytes\ttheorems\tmetamath_errors\tmetamath_s\tmmverify_status\tmmverify_s\tdefcheck_status\tdefcheck_s\tfailing_labels\n' > "$tsv"
-ls "$out"/chunk-*.mm | xargs -P "$jobs" -n 1 "$0" --one | sort | tee -a "$tsv" | awk -F'\t' '{ printf "%s %s  %8.1f MiB  %5d theorems  metamath %ss  mmverify %ss  definitionCheck %ss\n", $1, $2, $3/1048576, $4, $6, $8, $10 }'
+# Each chunk's result is kept in chunk-NNNN.verify, so a rerun checks only chunks that are new or rewritten: a long
+# define-all run can be verified as its chunks appear.
+for f in "$out"/chunk-*.mm; do
+  [ -e "$f" ] || continue
+  v="${f%.mm}.verify"
+  [ -s "$v" ] && [ "$v" -nt "$f" ] || echo "$f"
+done | xargs -P "$jobs" -n 1 sh -c '"$0" --one "$1" > "${1%.mm}.verify.tmp" && mv "${1%.mm}.verify.tmp" "${1%.mm}.verify"' "$0" \
+  && true
+cat "$out"/chunk-*.verify 2>/dev/null | sort >> "$tsv"
+tail -n +2 "$tsv" | awk -F'\t' '{ printf "%s %s  %8.1f MiB  %5d theorems  metamath %ss  mmverify %ss  definitionCheck %ss\n", $1, $2, $3/1048576, $4, $6, $8, $10 }'
 end=$(now)
 awk -F'\t' -v wall="$(sub "$end" "$start")" -v jobs="$jobs" 'NR > 1 {
     n++; bytes += $3; thm += $4; mm += $6; mv += $8; dc += $10
@@ -80,7 +90,7 @@ awk -F'\t' -v wall="$(sub "$end" "$start")" -v jobs="$jobs" 'NR > 1 {
     printf "theorems: %d in passing chunks, of %d\n", pthm, thm
     printf "size: %.1f MiB\n", bytes / 1048576
     printf "checker time (CPU-serial sum): metamath-exe %.0fs, mmverify.py %.0fs, definitionCheck %.0fs\n", mm, mv, dc
-    printf "wall time: %.0fs with %d jobs\n", wall, jobs
+    printf "wall time of this invocation: %.0fs with %d jobs\n", wall, jobs
   }' "$tsv" | tee "$out/verify-all.txt"
 grep -q 'FAIL' "$tsv" && exit 1
 exit 0
