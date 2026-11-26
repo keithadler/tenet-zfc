@@ -363,7 +363,19 @@ static int DefineAllCommand(string export, string setmm, string outDir, string[]
     Console.WriteLine($"read {export} in {sw.Elapsed.TotalSeconds:F0}s: {targets.Count} constants to translate, in {chunks} chunks of {chunkSize}");
     int lo = Math.Max(from, 0), hi = Math.Min(chunks, to + 1);
     var results = new List<DefineAll.Outcome>[Math.Max(hi - lo, 0)];
-    Parallel.For(lo, hi, new ParallelOptions { MaxDegreeOfParallelism = jobs }, k =>
+    // Each chunk on a thread of its own with a large stack: the prover recurses over terms, and a stack overflow can't be
+    // caught, so on a default-sized stack one deep term would end the whole run.
+    int next = lo;
+    var workers = Enumerable.Range(0, Math.Min(jobs, Math.Max(hi - lo, 0))).Select(_ => new Thread(() =>
+    {
+        for (int k; (k = Interlocked.Increment(ref next) - 1) < hi;)
+        {
+            RunChunk(k);
+        }
+    }, 256 * 1024 * 1024)).ToList();
+    workers.ForEach(w => w.Start());
+    workers.ForEach(w => w.Join());
+    void RunChunk(int k)
     {
         var csw = Stopwatch.StartNew();
         List<DefineAll.Outcome> outcomes = run.Chunk(k, targets.Skip(k * chunkSize).Take(chunkSize).ToList(), outDir);
@@ -371,7 +383,7 @@ static int DefineAllCommand(string export, string setmm, string outDir, string[]
         long size = new FileInfo(Path.Combine(outDir, $"chunk-{k:D4}.mm")).Length;
         Console.WriteLine($"chunk-{k:D4}: {outcomes.Count(o => o.Status == "ok")} of {outcomes.Count} translated, "
             + $"{outcomes.Count(o => o.Iota == "ok")} computation rules, {size / 1024} KiB, {csw.Elapsed.TotalSeconds:F0}s");
-    });
+    }
     List<DefineAll.Outcome> all = results.SelectMany(r => r).ToList();
     // The summary of this invocation: counts by kind and status, and the reasons for refusals.
     var s = new System.Text.StringBuilder();
