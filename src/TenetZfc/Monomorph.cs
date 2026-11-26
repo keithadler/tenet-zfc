@@ -72,6 +72,17 @@ public sealed class Monomorph
         }
         Expr Inst(Expr e) => Rewrite(_ops.InstantiateLevels(e, ps, levels));
         Name SameLevels(Name m) => Instance(m, levels);   // constructors and block members share the type's levels
+        // A recursor rule's constructor: of the block's own types at the block's levels, but a nested block's auxiliary
+        // recursor (I.rec_1 over Array I) has rules on the nested type's constructors (Array.mk), at the levels the
+        // nesting uses, which the instantiated recursor type names.
+        Name RuleCtor(Name ctor)
+        {
+            if (_src.Find(ctor)?.Induct is Name ind && LevelsOf(_ops.InstantiateLevels(c.Type, ps, levels), ind) is Level[] ls)
+            {
+                return Instance(ctor, ls);
+            }
+            return SameLevels(ctor);
+        }
         Env.Add(new ConstInfo
         {
             Name = inst,
@@ -89,7 +100,7 @@ public sealed class Monomorph
             NumMinors = c.NumMinors,
             NumIndices = c.NumIndices,
             K = c.K,
-            Rules = c.Rules.Select(r => new RecRule(SameLevels(r.Ctor), r.NumFields, Inst(r.Rhs))).ToArray(),
+            Rules = c.Rules.Select(r => new RecRule(RuleCtor(r.Ctor), r.NumFields, Inst(r.Rhs))).ToArray(),
             BlockLevelParams = [],
             BlockMembers = c.Kind == ConstKind.Inductive
                 ? c.BlockMembers.Where(m => _src.Find(m)?.Kind is ConstKind.Inductive or ConstKind.Constructor).Select(SameLevels).ToArray()
@@ -110,6 +121,17 @@ public sealed class Monomorph
         }
         return inst;
     }
+
+    /// <summary>The levels of the first occurrence of constant n in e, or null.</summary>
+    private static Level[]? LevelsOf(Expr e, Name n) => e switch
+    {
+        Const c when ReferenceEquals(c.Name, n) || $"{c.Name}" == $"{n}" => c.Levels,
+        App a => LevelsOf(a.Fn, n) ?? LevelsOf(a.Arg, n),
+        Binder b => LevelsOf(b.Domain, n) ?? LevelsOf(b.Body, n),
+        Let l => LevelsOf(l.Type, n) ?? LevelsOf(l.Value, n) ?? LevelsOf(l.Body, n),
+        Proj p => LevelsOf(p.Struct, n),
+        _ => null,
+    };
 
     private Expr Rw(Expr e, Dictionary<Expr, Expr> memo)
     {
