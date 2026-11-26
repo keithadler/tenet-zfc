@@ -690,7 +690,10 @@ public sealed partial class Model
             sub[a.Var] = avoid.Count > 0 && text.Split(' ').Any(avoid.Contains) ? RenameApart(text, avoid, c.Ph) : text;
             if (sub[a.Var].Split(' ').Any(avoid.Contains))
             {
-                throw new Refused($"{label} needs {a.Var} free of a variable that {text} has free");
+                // A free variable of the term is one the lemma binds: use an alpha-variant of the lemma that binds
+                // another one instead.
+                var clash = sub[a.Var].Split(' ').Where(avoid.Contains).ToHashSet();
+                return InstLemma(c, VariantLemma(label, clash, string.Join(' ', args.Select(x => TrIn(c, x.E)))), args);
             }
         }
         foreach (Statement h in st.Hyps.Where(h => h.Kind == 'f'))
@@ -737,6 +740,30 @@ public sealed partial class Model
         }
         return r;
     }
+
+    /// <summary>
+    /// An alpha-variant of a lemma whose statement binds none of the given variables (or the ones in avoidText),
+    /// proved from the lemma by alpha-equivalence of its hypotheses and conclusion, and written once.
+    /// </summary>
+    private string VariantLemma(string label, HashSet<string> clash, string avoidText)
+    {
+        Statement st = pr.Database[label];
+        (string ante, string concl) = _d.Split(st.Expr);
+        string ante2 = RenameApart(ante, clash, avoidText, concl), concl2 = RenameApart(concl, clash, avoidText, ante, ante2);
+        string vlabel = $"{label}-a{_variants++}";
+        Proof orig = ApplyId(label, new Dictionary<string, string>());
+        Proof toAnte = ante2 == ante ? pr.Apply("id", S(("ph", ante)))
+            : Bi1(pr.Apply("mptru", S(("ph", $"( {ante2} <-> {ante} )")), Alpha("wff", ante2, ante)!.Value));
+        Proof p = _d.Syl(toAnte, orig);
+        if (concl2 != concl)
+        {
+            p = _d.Syl(p, Bi1(pr.Apply("mptru", S(("ph", $"( {concl} <-> {concl2} )")), Alpha("wff", concl, concl2)!.Value)));
+        }
+        EmitLemma(vlabel, $"{label} with its bound variables renamed.", p);
+        return vlabel;
+    }
+
+    private int _variants;
 
     /// <summary>
     /// lean-proj-S-i: field i of a member of the structure S is in its field's type,
