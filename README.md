@@ -27,7 +27,7 @@ lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
 
 ## Status
 
-**About 45% of the way to the goal.** The first real Lean theorems now come out of the generic model as ZFC proofs that both verifiers accept.
+**About 50% of the way to the goal.** 28 real Lean theorems about `Nat` and `List`, `List.length_append` among them, now come out of the generic model as ZFC proofs that both verifiers accept. Every definition the model translates in Lean core has been verified at scale.
 
 | | Milestone | Gate | Status |
 |---|---|---|---|
@@ -82,7 +82,7 @@ v0.1 is the first version someone else can install and use to get independently 
 - [x] A generic model for every kind of Lean declaration: definitions, inductive types, recursors, quotients and axioms
 - [x] More set variables than `set.mm`'s 26, declared by the output
 - [ ] Translate the rest of `Init`'s definitions. The blockers left include `Acc`, whose premises are functions into the type, so its stages must go beyond ω.
-- [ ] Verify every translated `Init` definition with all three checkers, and publish the counts ([#7](https://github.com/keithadler/tenet-zfc/pull/7), running)
+- [x] Verify every translated `Init` definition with all three checkers, and publish the counts: 15,958 equations and 471 computation rules verified, none rejected ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-built))
 
 **Theorems**
 - [x] Prove theorems from their proof terms through the model: `Nat.add_zero`, `Nat.zero_add`
