@@ -33,6 +33,9 @@ public sealed class TheoremTranslator
     /// <summary>The declarations and lemmas written so far, in order.</summary>
     public string Declarations => _model.Declarations;
 
+    /// <summary>The flat size of each lemma written so far, by label.</summary>
+    public IReadOnlyDictionary<string, long> LemmaSteps => _model.LemmaSteps;
+
     /// <summary>
     /// The theorem as |- ( hypotheses -> (/) e. ⟦statement⟧ ), its leading binders opened as hypotheses: U e. lean.-tower,
     /// then A e. ⟦T⟧ for each data binder and (/) e. ⟦P⟧ for each hypothesis. Its universe parameters are set to 0.

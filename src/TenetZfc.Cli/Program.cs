@@ -145,6 +145,8 @@ if (args.Length >= 5 && args[0] == "theorem")
     foreach (string name in args[4..])
     {
         var sw1 = Stopwatch.StartNew();
+        int lemmasBefore = translator.LemmaSteps.Count;
+        long stepsBefore = translator.LemmaSteps.Values.Sum();
         try
         {
             var (stmt, proof) = translator.Prove(tt.Of(name));
@@ -152,10 +154,15 @@ if (args.Length >= 5 && args[0] == "theorem")
             _ = TenetZfc.Metamath.DistinctVars.Required(tpr.Database, proof);
             done.Add(($"lean-thm-{Model.LabelPart(name)}", stmt, proof, name));
             Console.WriteLine($"{name}: {stmt} ({tpr.Database.Shared.Size(proof)} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
+            Console.WriteLine($"{name}: {translator.LemmaSteps.Count - lemmasBefore} new lemmas ({translator.LemmaSteps.Values.Sum() - stepsBefore} flat steps)");
         }
         catch (Model.Refused e)
         {
             Console.WriteLine($"{name}: refused: {e.Message}");
+            if (System.Environment.GetEnvironmentVariable("TENET_DEBUG") is not null)
+            {
+                Console.Error.WriteLine(e.StackTrace);
+            }
             tstatus = 1;
         }
         catch (InvalidOperationException e)

@@ -108,6 +108,65 @@ public class TheoremTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void ALabelHoldsOnlyCharactersMetamathAllows()
+    {
+        // Lean names can hold characters labels can't (congrFun'): they are written as their codes.
+        Assert.Equal("lean.Nat.below.u1", Model.LabelPart("lean.Nat.below.{1}"));
+        Assert.Equal("lean.congrFun-27-.u1_1", Model.LabelPart("lean.congrFun'.{1,1}"));
+    }
+
+    /// <summary>
+    /// Starter-library theorems (tests/fixtures/library.ndjson), proved in one translator so they share their lemmas,
+    /// and checked by both verifiers: a few quick ones here; CI's theorem step and docs/milestone3.md cover all of them.
+    /// </summary>
+    [Fact]
+    public void LibraryTheoremsAreProvedThroughTheModelAndVerify()
+    {
+        if (SetMm is null || System.Environment.GetEnvironmentVariable("TENET_ZFC_THEOREMS") is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("library.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        var tr = new TheoremTranslator(t, env, pr);
+        var proved = new List<(string Name, TenetZfc.Metamath.Expr Stmt, List<string> Proof)>();
+        foreach (string name in new[] { "Nat.add_succ", "Nat.pred_succ", "List.length_cons", "List.nil_append" })
+        {
+            var sw = Stopwatch.StartNew();
+            var (stmt, proof) = tr.Prove(t.Of(name));
+            output.WriteLine($"{name}: {pr.Database.Shared.Size(proof)} flat steps, {sw.Elapsed.TotalSeconds:F1}s");
+            proved.Add((name, stmt, proof));
+        }
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc theorem test", pr.Database);
+        w.Raw(tr.Declarations);
+        foreach (var (name, stmt, proof) in proved)
+        {
+            w.Theorem($"lean-test-{Model.LabelPart(name)}", "test", stmt, proof, DistinctVars.Required(pr.Database, proof).Select(p => $"{p.Item1} {p.Item2}"));
+        }
+        string file = Path.Combine(SetMm, $"tenet-zfc-lib-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mm);
+            Assert.Contains("All proofs in the database were verified", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
     private static string Run(string exe, string dir, string args, out int code)
     {
         var psi = new ProcessStartInfo(exe, args) { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true };

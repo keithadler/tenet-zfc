@@ -101,7 +101,8 @@ public sealed partial class Model
                 // Induction on a proposition: the major premise is a proof, written (/), and the member tv of the
                 // proposition is (/) too (lean-pf0), so the motive holds there.
                 EnsurePf0();
-                Proof isProp = FixMem(d.Ph, MemOf(d, d.Types[d.LastFv]).P, iapp, "2o");
+                Expr majTy = d.Types[d.LastFv];
+                Proof isProp = FixMem(d.Ph, Check(d, majTy, InferIn(d, majTy), "2o"), iapp, "2o");
                 Proof is0 = _d.Syl(_d.Jca(isProp, HypIn(d, $"{tv} e. {iapp}")), pr.Apply("lean-pf0", S(("A", iapp), ("B", tv))));
                 Proof eq = _d.Congruence("class", Subst(mt, tv, "Z"), "Z", is0);
                 r = pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", "(/)"), ("B", mt), ("C", Rhs(eq))), r, eq);

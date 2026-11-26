@@ -16,7 +16,23 @@ public sealed class SharedProofs
     private readonly List<string[]> _body = new();
     private readonly List<Expr> _proves = new();
     private readonly List<long> _size = new();
-    private readonly Dictionary<string, string> _intern = new();
+    private readonly Dictionary<string[], string> _intern = new(new StepsComparer());
+
+    /// <summary>Equal step lists, compared by their steps (labels are interned strings, so mostly by reference).</summary>
+    private sealed class StepsComparer : IEqualityComparer<string[]>
+    {
+        public bool Equals(string[]? a, string[]? b) => a!.AsSpan().SequenceEqual(b);
+
+        public int GetHashCode(string[] a)
+        {
+            var h = new HashCode();
+            foreach (string s in a)
+            {
+                h.Add(s);
+            }
+            return h.ToHashCode();
+        }
+    }
 
     public static bool IsRef(string step) => step.Length > 1 && step[0] == '@';
 
@@ -31,13 +47,13 @@ public sealed class SharedProofs
     /// <summary>A step standing for this proof of this expression. Equal proofs get the same step.</summary>
     public string Add(List<string> proof, Expr proves)
     {
-        string key = string.Join(' ', proof);
+        string[] key = [.. proof];
         if (_intern.TryGetValue(key, out string? known))
         {
             return known;
         }
         string r = "@" + _body.Count.ToString(CultureInfo.InvariantCulture);
-        _body.Add([.. proof]);
+        _body.Add(key);
         _proves.Add(proves);
         _size.Add(Size(proof));
         _intern[key] = r;

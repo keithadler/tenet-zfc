@@ -276,11 +276,7 @@ public sealed class Prover
         {
             if (end == syms.Count)
             {
-                if (_parsed.Count > 2_000_000)
-                {
-                    _parsed.Clear();
-                }
-                _parsed[key] = tree;
+                Remember(key, tree);
                 return tree;
             }
         }
@@ -288,6 +284,22 @@ public sealed class Prover
     }
 
     private readonly Dictionary<string, SyntaxTree> _parsed = new();
+    private long _parsedChars;
+
+    /// <summary>Cache a parse; the cache is emptied when its keys pass about 100 million characters.</summary>
+    private void Remember(string key, SyntaxTree tree)
+    {
+        if (_parsed.TryAdd(key, tree))
+        {
+            _parsedChars += key.Length;
+            if (_parsedChars > 100_000_000)
+            {
+                _parsed.Clear();
+                _rendered.Clear();
+                _parsedChars = 0;
+            }
+        }
+    }
     private int[] _close = [];
 
     private List<(int, SyntaxTree)> ParseAt(string type, IReadOnlyList<string> syms, int pos, Dictionary<(string, int), List<(int, SyntaxTree)>> memo)
@@ -422,7 +434,7 @@ public sealed class Prover
             _rendered.Clear();
         }
         _rendered[n] = text;
-        _parsed.TryAdd(n.Rule.Expr.Type + " " + text, n);
+        Remember(n.Rule.Expr.Type + " " + text, n);
         return text;
     }
 
@@ -584,6 +596,10 @@ public sealed class Prover
             if (p.Count > ShareSyntaxAbove)
             {
                 p = [_db.Shared.Add(p, e)];
+            }
+            if (_syntaxShared.Count > 500_000)
+            {
+                _syntaxShared.Clear();
             }
             _syntaxShared[key] = p;
         }
