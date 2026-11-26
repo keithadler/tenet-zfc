@@ -16,6 +16,7 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `axioms.ndjson` | 4.36.0 | leanout (`leanout Init -- Quot.lift Quot.ind propext Classical.choice Classical.choose Classical.propDecidable`): the quotient block, Init's two axioms, and definitions that use choice |
 | `syntax.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Syntax`): the nested inductive `Lean.Syntax` (it holds an `Array Syntax`) with its 272 dependencies; the same file as Tenet's `tests/fixtures/nested/Lean.Syntax.ndjson` |
 | `setvars.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Grind.Config.casesOn Lean.Meta.Simp.Config.zeta`): two definitions that need more set variables than set.mm's 26 letters |
+| `natadd.ndjson` | 4.36.0 | leanout (`leanout Init -- Nat.add`): `Nat.add` with `Nat`, `Nat.below`, `Nat.brecOn` and its other dependencies, for `tenet-zfc nat-bridge` |
 
 Each `.trace.ndjson` was made from the export beside it by Tenet's main branch (commit `125fd3d` or later), which records checking-mode inference as `Check` and recalls earlier conclusions with `"of"`:
 

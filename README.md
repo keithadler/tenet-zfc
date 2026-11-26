@@ -53,7 +53,14 @@ About 40% of the way to the goal. The parts done so far:
 
 On Lean 4.36's `Init`, **13,192 of 17,590 definitions** translate together with everything they use. Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
 
-**In progress:** strings, axioms and quotients (`Classical.choice`, `Quot`), nested and mutual types, bridge theorems from the model's `Nat` to `set.mm`'s `NN0`, proving Init's theorems through the model, and verifying all of Init. See [docs/milestone3.md](docs/milestone3.md) for the full design and the numbers.
+**Bridge theorems** prove that the model's `Nat` is `set.mm`'s `NN0`, from the model's definitions:
+- a bijection `F` takes zero to `0`, `succ` to `+ 1` and each literal to its numeral;
+- any function with `Nat.add`'s computation rules is `+` through `F`;
+- Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`.
+
+They also prove a limit of the current one-universe model: `Nat.below` is empty, so `Nat.add` and other structurally recursive definitions don't yet satisfy their computation rules. Until milestone 4 fixes that, those rules are hypotheses. See [docs/bridges.md](docs/bridges.md).
+
+**In progress:** strings, axioms and quotients (`Classical.choice`, `Quot`), nested and mutual types, bridge theorems for `List` and `Word`, proving Init's theorems through the model, and verifying all of Init. See [docs/milestone3.md](docs/milestone3.md) for the full design and the numbers.
 
 ## How it works
 
@@ -110,6 +117,7 @@ scripts/check-definitions java path/to/mmj2 rec.mm
 | `emit <export> <trace> <set.mm> <out.mm>` | Writes `set.mm` theorems for the theorems the milestone 2 translator covers |
 | `define <export> <set.mm> <out.mm> <name>…` | Translates constants through the generic model, with their equations and computation rules |
 | `bridge <set.mm> <out.mm>` | Writes the one-time lemmas recursive types rest on |
+| `nat-bridge <export> <set.mm> <out.mm> [n…]` | Proves that the model's `Nat` is `NN0` (zero, successor, literals, `Nat.add`), with `F ( n ) = n` for each numeral given |
 | `survey <export>`, `model-survey <export>` | Measure how much of an export translates, and what blocks the rest |
 
 To make a trace, run `tenet check <export.ndjson> --trace <trace.ndjson>` with [Tenet](https://github.com/keithadler/tenet). To make an export, run `leanout <Module> -o <out.ndjson>` with [leanout](https://github.com/keithadler/leanout).
@@ -121,6 +129,8 @@ src/TenetZfc/          the replayer, the generic model, the Metamath prover and 
   Replay.cs …          re-derives Tenet's traces (milestone 1)
   Model.cs             the generic set-theoretic model of Lean's kernel (milestone 3)
   Recursion.cs         one-time lemmas for recursive types
+  NatBridge.cs         bridge theorems: the model's Nat is NN0
+  ProofKit.cs          a small tactic layer for writing set.mm proofs in C#
   Typing.cs            type inference, for proof irrelevance
   Metamath.cs          reads set.mm, parses its syntax, assembles and compresses proofs
 src/TenetZfc.Cli/      the tenet-zfc command
@@ -133,6 +143,7 @@ docs/                  spec, design and status
 
 - [docs/spec.md](docs/spec.md): goals, architecture, milestones and risks
 - [docs/milestone3.md](docs/milestone3.md): the generic model, step by step, with measurements
+- [docs/bridges.md](docs/bridges.md): bridge theorems from the model to `set.mm`'s vocabulary
 - [docs/interpretation.md](docs/interpretation.md): milestone 2's interpretation and the universe question
 - [docs/trace-format.md](docs/trace-format.md): Tenet's trace format, and what replay checks
 - [docs/rule-map.md](docs/rule-map.md): each kernel rule and the bridge lemma it needs
