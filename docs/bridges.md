@@ -103,7 +103,7 @@ The steps from the first to the last:
 3. Through `F`, those are `+`, `0` and `+ 1` (`lean-nat-natadd`, `lean-nat-fzero`, `lean-nat-fsucc`), given that each subterm is in the model's `Nat` (`lean-nat-natadd-el`, `lean-nat-succel`, `lean-nat-zeroel`).
 4. For `A e. NN0`, `( `' F ` A )` is in the model's `Nat` and `F` takes it back to `A` (`f1ocnv`, `f1ocnvfv2`).
 
-So `( A + 0 ) = A` here comes from Lean's proof of `Nat.add_zero`, through the model and the bridge, not from `set.mm`'s `addrid`. `Nat.zero_add` gives `( 0 + A ) = A` the same way. The restatement takes theorems of the form `∀ (a b … : Nat), l = r` with `l` and `r` built from `+`, literals, `Nat.succ` and the variables. CI proves both theorems and their restatements into one output and runs the three checkers on it.
+So `( A + 0 ) = A` here comes from Lean's proof of `Nat.add_zero`, through the model and the bridge, not from `set.mm`'s `addrid`. `Nat.zero_add` gives `( 0 + A ) = A` the same way. The restatement takes theorems of the form `∀ (a b … : Nat), l = r` with `l` and `r` built from `+`, literals, `Nat.succ` and the variables. CI proves both theorems and their restatements into one output, with the bridge and the literals 2, 4 and 256: 122 theorems, 1.29 MB compressed, about 15 CPU minutes. The three checkers accept it.
 
 ## In the one-universe model, the rules are false
 

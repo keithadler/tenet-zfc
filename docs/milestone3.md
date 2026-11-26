@@ -623,9 +623,22 @@ Since tower mode makes structurally recursive definitions mean what Lean means, 
 
 Every fixture CI translates (`model`, `ind`, `props`, `rec`, `tree`, `natle`, `setvars`, `strings`, `mutual`; `axioms` in the one-universe model) passes metamath-exe, mmverify.py and mmj2's `definitionCheck` in tower mode. One instance is refused that the one-universe model translated: the computation rule of `Eq.refl.{0}` and `HEq.refl.{0}`, equality of proofs, whose field is a proof (`no hypothesis (/) e. A`). At `Eq.{1}` both translate.
 
+### `model-survey` in the tower
+
+`model-survey` now monomorphizes each definition at level 0, then translates it in the tower. On Lean 4.36's `Init`, **14,105 of 17,590 definitions** translate with everything they use, against 13,958 in the one-universe model on the same code before this change. That is 147 more, although the definitions that reach quotients or `Classical.choice` (95 counted first under those two reasons) are now refused. The first reasons for the rest, from the 25 most common:
+
+| Definitions | First reason |
+|---|---|
+| 1,368 or more | a name with characters a `set.mm` token can't hold (`'`, `?`, `₂`): `BitVec.extractLsb'` 338, `Lean.Syntax.getPos?` 301, … |
+| 268 + 9 | `Acc.intro`: a premise that is a function into the type, so its stages must go beyond ω |
+| 58 + 37 | `Classical.choice`, `Quot`: not in the tower model yet |
+| 56 | a constant not in the export |
+
+The first run found a bug in the change: a nested block's auxiliary recursor (`Lean.Syntax.rec_1`, over `Array Syntax`) has computation rules on the nested type's constructors (`Array.mk`), at the levels the nesting uses, not the block's. `Monomorph` now reads those levels from the recursor's type. Before the fix the count was 12,542, with 3,253 definitions stopped there.
+
 ### Each output states its assumptions
 
-The spec's universe-analysis stage asks every output to say which universes it uses, and which declarations need them. Each output of `define`, `theorem` and `nat-bridge` now starts with that, after its title (`Model.Assumptions`, `Writer.Assumptions`). The `nat-bridge` output's:
+The spec's universe-analysis stage asks every output to say which universes it uses, and which declarations need them. Each output of `define`, `theorem` and `nat-bridge` now starts with that, after its title (`Model.Assumptions`, `Writer.Assumptions`). The header of CI's `nat-bridge` output, with `Nat.add_zero` and `Nat.zero_add`:
 
 ```
 $(
@@ -634,18 +647,25 @@ Universes: a tower U of Grothendieck universes. Each theorem has the hypothesis 
 an increasing omega-sequence of Grothendieck universes, the first containing omega, and Lean's Sort (k+1)
 is ( U ` k ). ZFC does not prove that such a tower exists (that needs inaccessible cardinals), so each
 theorem holds in every model of ZFC that has one. No axiom is added.
-Levels used: 1 universe, ( U ` (/) ) (Lean's Type 0).
+Levels used: 2 universes, ( U ` (/) ) to ( U ` 1o ) (Lean's Type 0 to Type 1).
 ( U ` (/) ) (Type 0) is used directly by: PProd.{1,1}, PProd.mk.{1,1}, PProd.{1,1}.rec, Nat.below.{1},
-  Nat.brecOn.go.{1}, Nat.brecOn.{1}, Nat.casesOn.{1}, Nat.add.match_1.{1}.
-U. ran U, the whole tower, is the codomain of the motives of: Nat.rec, PUnit.{1}.rec, PProd.{1,1}.rec, PProd.rec.
+  Nat.brecOn.go.{1}, Nat.brecOn.{1}, Nat.casesOn.{1}, Nat.add.match_1.{1}, Eq.{1}, Eq.refl.{1}, Eq.{1}.rec,
+  HAdd.{0,0,0}, HAdd.mk.{0,0,0}, HAdd.{0,0,0}.rec, HAdd.hAdd.{0,0,0}, Add.{0}, Add.mk.{0}, Add.{0}.rec,
+  Add.add.{0}, instHAdd.{0}, OfNat.{0}, OfNat.mk.{0}, OfNat.{0}.rec, OfNat.ofNat.{0}, PProd.{0,1},
+  PProd.mk.{0,1}, PProd.{0,1}.rec, Nat.below.{0}.
+( U ` 1o ) (Type 1) is used directly by: outParam.{2}.
+U. ran U, the whole tower, is the codomain of the motives of: Nat.rec, PUnit.{1}.rec, PProd.{1,1}.rec,
+  PProd.rec, Eq.{1}.rec, HAdd.{0,0,0}.rec, HAdd.rec, Add.{0}.rec, Add.rec, OfNat.{0}.rec, OfNat.rec,
+  PProd.{0,1}.rec.
   (a recursor's motive level is left open, so one recursor serves every elimination level)
-U. ran U also stands for a universe parameter left open, in: PProd, PProd.mk.
-  (a projection names its structure without universe levels, so the structure is defined with them open)
+U. ran U also stands for a universe parameter left open, in: PProd, PProd.mk, outParam, HAdd, HAdd.mk, Add,
+  Add.mk, OfNat, OfNat.mk.
+  (a projection names its structure without universe levels, so the structure, and what its type uses, is defined with them open)
 $)
 ```
 
-- **Levels used** counts the tower's levels that some definition names, `( U ` k )` for Lean's `Type k`. One level means one universe, the first, which contains ω. A definition counts when it uses the level directly; one that only uses other constants needs what they need.
-- **The whole tower** appears where a level is left open: a recursor's motive level (one recursor serves every elimination level), and a structure that a projection names. A projection carries no universe levels, so its structure isn't monomorphized; that structure is translated with its parameters ranging over the whole tower.
+- **Levels used** counts the tower's levels that some definition names, `( U ` k )` for Lean's `Type k`. One level means one universe, the first, which contains ω. Here `outParam.{2}`, the identity on `Type 1` that marks an output parameter of a class, names the second level, so the output uses two. A definition counts when it uses the level directly; one that only uses other constants needs what they need.
+- **The whole tower** appears where a level is left open: a recursor's motive level (one recursor serves every elimination level), and a structure that a projection names. A projection carries no universe levels, so its structure isn't monomorphized; that structure, and what its type uses (here `outParam`), is translated with its parameters ranging over the whole tower.
 - A one-universe output says instead that it has the hypothesis `U e. Univ`, and that structurally recursive definitions collapse in it.
 
 ### How a theorem is proved

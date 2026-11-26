@@ -55,7 +55,7 @@ lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
 | quotients, `propext`, `Classical.choice` | equivalence classes; `set.mm`'s choice | `Quot.lift`'s computation rule |
 | more than 26 bound variables | set variables the output declares itself (`$v`, `$f setvar`), which add no axiom | definitional equations |
 
-On Lean 4.36's `Init`, **13,958 of 17,590 definitions (79%)** translate together with everything they use, up from 48 when milestone 3 began.
+On Lean 4.36's `Init`, **14,105 of 17,590 definitions (80%)** translate together with everything they use, in the tower model, up from 48 when milestone 3 began (13,958 in the one-universe model).
 
 **Theorems.** `tenet-zfc theorem` proves Lean theorems from their own proof terms, through the model. A proof's typing becomes membership, `(/) e. ⟦P⟧`, and each conversion becomes an equation.
 

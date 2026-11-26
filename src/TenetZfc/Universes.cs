@@ -161,7 +161,7 @@ public sealed partial class Model
         if (open.Count > 0)
         {
             Wrap(sb, "U. ran U also stands for a universe parameter left open, in: ", open);
-            sb.AppendLine("  (a projection names its structure without universe levels, so the structure is defined with them open)");
+            sb.AppendLine("  (a projection names its structure without universe levels, so the structure, and what its type uses, is defined with them open)");
         }
         return Ascii(sb.ToString());
     }
