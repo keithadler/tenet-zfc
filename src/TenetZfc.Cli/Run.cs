@@ -345,7 +345,7 @@ public static class RunCommand
 
     /// <summary>
     /// Runs a `define` or `theorem` subprocess on <paramref name="batch"/> and reads each declaration's result from its
-    /// output line: `name: |- …` translated, `name: refused: why` refused. A crash or time-out is pinned on the first
+    /// output line: `name: |- …` translated, `name: refused: why` refused, `name: failed: why` a translator error. A crash or time-out is pinned on the first
     /// declaration without a result, which is set aside; the caller runs the rest again.
     /// </summary>
     private const string SetAside = "(set aside while another declaration crashed)";
@@ -364,6 +364,7 @@ public static class RunCommand
             if (m is null) continue;
             string rest = m.Result("$'");
             if (rest.StartsWith("refused: ", StringComparison.Ordinal)) { d.Status = "refused"; d.Detail = rest["refused: ".Length..]; }
+            else if (rest.StartsWith("failed: ", StringComparison.Ordinal)) { d.Status = "failed"; d.Detail = $"translator error: {rest["failed: ".Length..]}"; }
             else d.Status = "translated";
         }
         bool crashed = r.TimedOut || r.ExitCode is not (0 or 1);

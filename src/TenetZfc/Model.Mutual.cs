@@ -331,7 +331,7 @@ public sealed partial class Model
             {"${"}
               {string.Join(" ", distinct.Select(d => $"$d {d} $."))}
               {Recursion.RankSeLabel} $p {stmt} $=
-                {string.Join(' ', proof)} $.
+                {string.Join(' ', pr.Database.Shared.Expand(proof))} $.
             {"$}"}
 
             """;

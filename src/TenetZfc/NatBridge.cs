@@ -111,7 +111,7 @@ public sealed class NatBridge
         w.Raw(model.Declarations);
         foreach (var th in bridge.Theorems)
         {
-            w.Theorem(th.Label, th.Comment, th.Statement, th.Proof, th.Distinct);
+            w.Theorem(th.Label, th.Comment, th.Statement, compress ? th.Proof : pr.Database.Shared.Expand(th.Proof), th.Distinct);
         }
         return (w.ToString(), bridge.Theorems);
     }
@@ -200,7 +200,8 @@ public sealed class NatBridge
                 (f.Expr.Type == "setvar" ? setvars : others).Add(s);
             }
         }
-        foreach (string l in p.Proof)
+        // Inside shared subproofs too (the prover shares them once a TheoremTranslator has turned sharing on).
+        foreach (string l in Db.Shared.Labels(p.Proof))
         {
             if (Db.Statements.TryGetValue(l, out Statement? st) && st.Kind == 'f' && st.Expr.Type == "setvar")
             {

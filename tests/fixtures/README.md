@@ -18,6 +18,8 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `syntax.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Syntax`): the nested inductive `Lean.Syntax` (it holds an `Array Syntax`) with its 272 dependencies; the same file as Tenet's `tests/fixtures/nested/Lean.Syntax.ndjson` |
 | `setvars.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Grind.Config.casesOn Lean.Meta.Simp.Config.zeta`): two definitions that need more set variables than set.mm's 26 letters |
 | `natadd.ndjson` | 4.36.0 | leanout (`leanout Init -- Nat.add`): `Nat.add` with `Nat`, `Nat.below`, `Nat.brecOn` and its other dependencies, for `tenet-zfc nat-bridge` |
+| `theorems.ndjson` | 4.36.0 | leanout (`leanout Init -- Nat.add_zero Nat.zero_add Nat.succ_add List.length_append`): the first theorems proved through the model, for `tenet-zfc theorem` |
+| `library.ndjson` | 4.36.0 | leanout (`leanout Init -- Nat.add_zero Nat.zero_add Nat.succ_add Nat.add_succ Nat.add_one Nat.succ_eq_add_one Nat.add_comm Nat.add_assoc Nat.add_left_comm Nat.add_right_comm Nat.succ_ne_zero Nat.mul_zero Nat.mul_succ Nat.zero_mul Nat.pred_succ Nat.pred_zero Nat.sub_zero Nat.succ_sub_succ Nat.le_refl List.length_nil List.length_cons List.append_nil List.nil_append List.cons_append List.append_assoc List.length_append List.map_nil List.map_cons List.length_map List.reverse_nil`): the starter library of theorems through the model (docs/milestone3.md) |
 
 Each `.trace.ndjson` was made from the export beside it by Tenet's main branch (commit `125fd3d` or later), which records checking-mode inference as `Check` and recalls earlier conclusions with `"of"`:
 

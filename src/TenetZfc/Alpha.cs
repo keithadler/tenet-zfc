@@ -17,6 +17,7 @@ public sealed partial class Model
     /// </summary>
     private string SubstFree(string text, string x, string with)
     {
+        using var prof = Prof.Time("SubstFree");
         if (!text.Split(' ').Contains(x))
         {
             return text;
@@ -44,6 +45,7 @@ public sealed partial class Model
     /// <summary>An alpha-variant of the text whose binders avoid the given variables (renamed to fresh ones).</summary>
     private string RenameApart(string text, ISet<string> avoid, params string[] alsoAvoid)
     {
+        using var prof = Prof.Time("RenameApart");
         var used = new HashSet<string>(text.Split(' ').Concat(avoid).Concat(alsoAvoid.SelectMany(a => a.Split(' '))));
         SyntaxTree n = pr.Parse("class", text.Split(' ')) ?? pr.Parse("wff", text.Split(' ')) ?? throw new Refused($"does not parse: {text}");
         string Go(SyntaxTree m)
@@ -87,6 +89,7 @@ public sealed partial class Model
     /// </summary>
     private Proof SubstEq(string type, string body, string x, string h)
     {
+        using var prof = Prof.Time("SubstEq");
         string v = h.StartsWith($"{x} = ", StringComparison.Ordinal) ? h[(x.Length + 3)..] : h;
         string hyp = $"{x} = {v}";
         string ctx = SubstFree(body, x, "Z");
@@ -106,6 +109,7 @@ public sealed partial class Model
     /// <summary>( ph -> x = y ) for alpha-equivalent class texts.</summary>
     private Proof AlphaIn(string ph, string x, string y)
     {
+        using var prof = Prof.Time("AlphaIn");
         if (x == y)
         {
             return _d.Refl(ph, x);
@@ -117,6 +121,7 @@ public sealed partial class Model
     /// <summary>( T. -> a = b ) or ( T. -> ( a <-> b ) ), or null when the texts are equal.</summary>
     private Proof? Alpha(string type, string a, string b)
     {
+        using var prof = Prof.Time("Alpha");
         if (a == b)
         {
             return null;
@@ -153,6 +158,20 @@ public sealed partial class Model
                     throw new Refused($"can't rename {xb} apart in {a}");
                 }
                 Proof p1 = Alpha(type, a, mid) ?? throw new Refused("renaming apart changed nothing");
+                Proof? p2 = Alpha(type, mid, b);
+                return p2 is Proof q ? TransT(type, p1, q) : p1;
+            }
+            int di = na.Rule.Label is "wral" or "wrex" ? 2 : na.Rule.Label is "cmpt" or "cixp" or "ciun" ? 1 : -1;
+            if (di >= 0 && KidA(di).Split(' ').Any(tok => tok == xa || tok == xb))
+            {
+                // The renaming lemma needs both names out of the domain, where they can occur only bound: rename the
+                // domain's own binders apart first (the binder's domain is outside its scope).
+                string dom2 = RenameApart(KidA(di), new HashSet<string> { xa, xb }, a, b);
+                var kids = na.Children.Select(k => pr.Render(k)).ToList();
+                kids[di] = dom2;
+                var hv = vars.Select(h => h.Var!).ToList();
+                string mid = string.Join(' ', na.Rule.Expr.Symbols.Select(sym => hv.IndexOf(sym) is int vi and >= 0 ? kids[vi] : sym));
+                Proof p1 = Alpha(type, a, mid) ?? throw new Refused("renaming a domain apart changed nothing");
                 Proof? p2 = Alpha(type, mid, b);
                 return p2 is Proof q ? TransT(type, p1, q) : p1;
             }
