@@ -18,7 +18,8 @@ cd "$dir"
 params="tenet-zfc-runparams-$$.txt"
 log="tenet-zfc-mmj2-$$.log"
 printf 'LoadFile,%s\nSetParser,mmj.verify.LRParser\nVerifyProof,*\nParse,*\nRunMacro,definitionCheck,ax-*,df-bi,df-clab,df-cleq,df-clel\n' "$name" > "$params"
-"$java" -Xms512M -Xmx2048M -jar "$mmj2/mmj2.jar" "$params" > "$log" 2>&1 || true
+# Without mmj2's failure popup (its second argument, n): on a crash the popup would wait forever.
+"$java" -Xms512M -Xmx2048M -jar "$mmj2/mmj2.jar" "$params" n > "$log" 2>&1 || true
 rm -f "$params"
 skip='I-UT-0015|I-MA-0001'
 if [ "$longok" = "--long-proofs-ok" ]; then
