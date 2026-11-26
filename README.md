@@ -53,8 +53,9 @@ lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
 | recursive propositions (`Nat.le`) | least sets of index tuples | |
 | `Nat` and string literals | decimal numerals, through `_om`; lists of characters | |
 | quotients, `propext`, `Classical.choice` | equivalence classes; `set.mm`'s choice | `Quot.lift`'s computation rule |
+| more than 26 bound variables | set variables the output declares itself (`$v`, `$f setvar`), which add no axiom | definitional equations |
 
-On Lean 4.36's `Init`, **13,953 of 17,590 definitions (79%)** translate together with everything they use, up from 48 when milestone 3 began.
+On Lean 4.36's `Init`, **13,958 of 17,590 definitions (79%)** translate together with everything they use, up from 48 when milestone 3 began.
 
 **Theorems.** `tenet-zfc theorem` proves Lean theorems from their own proof terms, through the model. A proof's typing becomes membership, `(/) e. ⟦P⟧`, and each conversion becomes an equation.
 
@@ -92,7 +93,7 @@ v0.1 is the first version someone else can install and use to get independently 
 
 **Release engineering**
 - [x] CI on Linux, macOS and Windows; every fixture checked by metamath-exe, mmverify.py and mmj2
-- [ ] The full test suite passing on macOS: one test overflows the stack there, and [#2](https://github.com/keithadler/tenet-zfc/pull/2) fixes it
+- [x] The full test suite passing on macOS: one test overflowed the stack there, fixed by [#2](https://github.com/keithadler/tenet-zfc/pull/2)
 - [ ] One command from a Lean module to checked output: export, trace, translate, verify
 - [ ] A packaged CLI (a `dotnet tool` or prebuilt binaries) and a tagged release with the verified outputs attached
 

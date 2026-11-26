@@ -221,6 +221,10 @@ public sealed partial class Model
     /// <summary>Sethood for the forms the builtins use; null for any other form.</summary>
     private Proof? ExistsMore(string ph, SyntaxTree n)
     {
+        if (n.Rule.Label is not ("cin" or "cxp" or "crn" or "cqs" or "cpw" or "crio" or "cec"))
+        {
+            return null;   // before rendering: most calls get here with a class variable, under a large term
+        }
         string term = pr.Render(n);
         string K(string v) => Kid("class", term, v);
         switch (n.Rule.Label)
