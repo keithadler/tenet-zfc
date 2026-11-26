@@ -132,6 +132,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
         r = Regex.Replace(r, @"^\S+ (is a mutual|is a recursive|is an indexed)", "X $1");
         r = Regex.Replace(r, @"\(.*\)$", "");
         r = Regex.Replace(r, @"lean\.\S+", "lean.X");
+        r = Regex.Replace(r, @"^\S+'s definition has \d+ symbols", "X's definition has N symbols");
         return r.Length > 160 ? r[..160] + "…" : r.Trim();
     }
 }

@@ -4,9 +4,13 @@
 # earlier, with no free variables and its dummy variables distinct). mmj2's LR parser also checks that the new
 # syntax keeps the grammar unambiguous. Fails on any error or warning, as set.mm's scripts/verify-mmj2 does.
 #
-# usage: scripts/check-definitions <java> <mmj2 dir: mmj2.jar and macros/> <out.mm, next to set.mm>
+# usage: scripts/check-definitions <java> <mmj2 dir: mmj2.jar and macros/> <out.mm, next to set.mm> [--long-proofs-ok]
+#
+# --long-proofs-ok: mmj2 can't hold a proof step longer than 32,000 symbols (A-PR-0002, "wExpr array overflow"); with
+# this flag such theorems are listed but don't fail the check, since metamath-exe and mmverify.py check those proofs.
+# The definition check itself still has to run and pass. scripts/verify-all uses it for the Init-wide run.
 set -eu
-java="$1"; mmj2="$(cd "$2" && pwd)"; file="$3"
+java="$1"; mmj2="$(cd "$2" && pwd)"; file="$3"; longok="${4:-}"
 dir="$(cd "$(dirname "$file")" && pwd)"; name="$(basename "$file")"
 grep -q '^ *df-lean\.' "$file" || { echo "check-definitions: $file has no df-lean definitions to check"; exit 1; }
 cd "$dir"
@@ -16,7 +20,12 @@ log="tenet-zfc-mmj2-$$.log"
 printf 'LoadFile,%s\nSetParser,mmj.verify.LRParser\nVerifyProof,*\nParse,*\nRunMacro,definitionCheck,ax-*,df-bi,df-clab,df-cleq,df-clel\n' "$name" > "$params"
 "$java" -Xms512M -Xmx2048M -jar "$mmj2/mmj2.jar" "$params" > "$log" 2>&1 || true
 rm -f "$params"
-if grep -E 'Exception|.-..-[0-9]{4}' "$log" | grep -Ev 'I-UT-0015|I-MA-0001'; then
+skip='I-UT-0015|I-MA-0001'
+if [ "$longok" = "--long-proofs-ok" ]; then
+  grep 'A-PR-0002' "$log" | sed 's/^/check-definitions: too long for mmj2, checked by the other verifiers: /' | cut -c1-200 || true
+  skip="$skip|A-PR-0002 Theorem [^ ]*: VerifyProofs wExpr array overflow"
+fi
+if grep -E 'Exception|.-..-[0-9]{4}' "$log" | grep -Ev "$skip"; then
   echo "check-definitions: mmj2 reported the problems above in $file"
   rm -f "$log"; exit 1
 fi

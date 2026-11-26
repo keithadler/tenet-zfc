@@ -279,10 +279,22 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         return sc;
     }
 
+    /// <summary>The largest definition body written, in symbols: half of mmj2's 32,000, less a margin.</summary>
+    private const int MaxDefinitionSymbols = 15_000;
+
     private void Emit(Name n, string tok, string body, Scope sc, string what)
     {
         EnsureTower();
         body = WellOrderLayer(tok, body, sc);   // ModelBuiltins.cs: ( r e. ~P ( u X. u ) |-> … ) when it depends on choice
+        // mmj2's definition check proves |- body = body' for a copy with fresh dummies, and mmj2 can't hold an
+        // expression over 32,000 symbols: past that, the check crashes and checks nothing after it (stdNext, 33,685
+        // symbols, found by the Init-wide run). Every definition this writes must be checkable, so refuse larger ones.
+        int symbols = body.Count(ch => ch == ' ') + 1;
+        if (symbols > MaxDefinitionSymbols)
+        {
+            _defined.Remove(n);   // callers mark it defined first; it isn't, so what uses it must be refused too
+            throw new Refused($"{n}'s definition has {symbols} symbols, more than mmj2's definition check can hold ({MaxDefinitionSymbols})");
+        }
         string text = $"""
             $( The Lean {what} {n}, translated by the model of docs/milestone3.md. $)
             $c {tok} $.

@@ -1,5 +1,6 @@
 #!/bin/bash
-# Check every chunk that `tenet-zfc define-all` wrote, in parallel, with all three checkers:
+# Check every chunk that `tenet-zfc define-all` wrote, in parallel, with all three checkers (proofs too long for mmj2
+# are listed in chunk-NNNN.mmj2-long, and left to the other two):
 #   - metamath-exe: every lean-* proof (set.mm's own proofs are checked once, elsewhere), no ?Error line;
 #   - mmverify.py: every proof from the chunk's first $p on, exit status 0;
 #   - scripts/check-definitions: mmj2's definitionCheck on every df-lean.* definition.
@@ -41,7 +42,9 @@ if [ "${1:-}" = "--one" ]; then
   [ "$mmv" -ne 0 ] && { echo "== mmverify.py"; printf '%s\n' "$out" | tail -5; } >> "$log"
 
   if grep -q '^ *df-lean\.' "$f"; then
-    out=$("$here/check-definitions" "$TENET_ZFC_JAVA" "$TENET_ZFC_MMJ2" "$f" 2>&1); dc=$?
+    out=$("$here/check-definitions" "$TENET_ZFC_JAVA" "$TENET_ZFC_MMJ2" "$f" --long-proofs-ok 2>&1); dc=$?
+    # Proofs too long for mmj2 are listed, not failed (metamath-exe and mmverify.py check them): keep the list.
+    printf '%s\n' "$out" | grep 'too long for mmj2' > "$dir/$chunk.mmj2-long" || rm -f "$dir/$chunk.mmj2-long"
   else
     out="no definitions"; dc=0
   fi

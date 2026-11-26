@@ -23,6 +23,7 @@ def category(reason):
     r = re.sub(r"\bno hypothesis .*", "no hypothesis …", r)
     r = re.sub(r"came out as .*", "came out as …", r)
     r = re.sub(r"(the hole \S+ does not occur in) .*", r"\1 …", r)
+    r = re.sub(r"^\S+'s definition has \d+ symbols", "X's definition has N symbols", r)
     return r.strip()[:150]
 
 
@@ -70,6 +71,10 @@ def main(out):
           f"refused: {sum(r['iota'] == 'refused' for r in rows)}; errors: {sum(r['iota'] == 'error' for r in rows)}")
     print(f"proof steps (uncompressed count): {sum(r['eq'] for r in eqs):,} in equations, {sum(r['isteps'] for r in iotas):,} in computation rules")
 
+    long_ = sorted({re.search(r"Theorem (\S+):", l).group(1) for f in glob.glob(os.path.join(out, "chunk-*.mmj2-long"))
+                    for l in open(f) if "Theorem " in l})
+    print(f"proofs too long for mmj2 (checked by metamath-exe and mmverify.py only): {len(long_)}"
+          + (f", e.g. {', '.join(long_[:3])}" if long_ else ""))
     failing = sorted(set().union(*[v["failing"] for v in verify.values()])) if verify else []
     print(f"\ntheorems a checker rejected: {len(failing)}")
     for label in failing[:40]:
