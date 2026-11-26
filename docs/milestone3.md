@@ -748,7 +748,7 @@ The two `KeyNotFoundException`s among the errors (`Empty.rec`, `PEmpty.rec`) com
 **Limits of the checkers at this scale.**
 - **mmj2 can't hold an expression over 32,000 symbols.** Its definition check proves `|- body = body'` for a copy of the body with fresh dummy variables, hence the model's cap at 15,000 symbols. Its proof verifier hits the same limit on seven of `Lean.ParserDescr`'s computation rules (3.8 to 13.8 million steps). `check-definitions --long-proofs-ok`, which `verify-all` uses, lists those theorems instead of failing: the definition check still has to run and pass, and metamath-exe and mmverify.py check those proofs. CI calls `check-definitions` without the flag.
 - **mmj2's failure popup** waited forever on a headless run. `check-definitions` now turns it off.
-- **Stack overflows.** `define-all` runs each chunk on a thread with a 256 MB stack, because the prover recurses over terms and a stack overflow can't be caught. `SetVarTests` crashes the test host this way on macOS, on main as well.
+- **Stack overflows.** `define-all` runs each chunk on a thread with a 256 MB stack, because the prover recurses over terms and a stack overflow can't be caught. `SetVarTests` crashed the macOS test host this way until it was changed on main.
 
 **Cost.**
 - **Size.** 114.7 MiB of compressed output, 1.4 to 5.5 MiB per chunk. Each chunk repeats the definitions its constants use, so the total counts `Nat`, `List` and the rest 40 times.
