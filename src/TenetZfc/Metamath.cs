@@ -234,6 +234,7 @@ public sealed class Prover
         {
             return known;
         }
+        CheckDeadline();   // a single parse of a long expression can outlast the budget
         var results = new List<(int, SyntaxTree)>();
         memo[(type, pos)] = results;   // a left-recursive call sees no results yet
         // A variable of this typecode.

@@ -112,8 +112,17 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
         return outcomes;
     }
 
-    private static string Why(Exception e) =>
-        (e is Model.Refused ? e.Message : $"{e.GetType().Name}: {e.Message}").Replace('\t', ' ').Replace('\n', ' ');
+    private static string Why(Exception e)
+    {
+        string why = e is Model.Refused ? e.Message : $"{e.GetType().Name}: {e.Message}";
+        if (e is TimeoutException && e.StackTrace is string st)
+        {
+            // Where the budget ran out: the innermost few methods, for finding what is slow.
+            var at = st.Split('\n').Select(l => Regex.Match(l, @"at TenetZfc\.([\w.]+)\(").Groups[1].Value).Where(m => m != "").Distinct().Take(4);
+            why += " (in " + string.Join(" < ", at) + ")";
+        }
+        return why.Replace('\t', ' ').Replace('\n', ' ');
+    }
 
     /// <summary>A refusal's reason with the constant's own name taken out, so that equal reasons count together.</summary>
     public static string Category(string reason)
