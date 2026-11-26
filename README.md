@@ -33,7 +33,7 @@ lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
 |---|---|---|---|
 | 1 | **Trace** | Replaying Tenet's trace re-derives every check it made, on all of Lean core | ✅ 64,045 declarations, 86 million steps, 0 failures |
 | 2 | **Bridge library** | `2 + 2 = 4` and `List.length_append` translate, and both verifiers accept them | ✅ verified in CI |
-| 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 definitions mostly done; theorems started |
+| 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 definitions mostly done; 28 `Init` theorems proved through the model |
 | 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 started: a universe tower (opt-in) |
 | 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | not started |
 
@@ -59,16 +59,20 @@ On Lean 4.36's `Init`, **13,958 of 17,590 definitions (79%)** translate together
 
 **Theorems.** `tenet-zfc theorem` proves Lean theorems from their own proof terms, through the model. A proof's typing becomes membership, `(/) e. ⟦P⟧`, and each conversion becomes an equation.
 
-| Theorem | Proof term | Output (compressed) | Time |
-|---|---|---|---|
-| `Nat.add_zero` | `rfl`, unfolding `n + 0` through `Nat.add`, `Nat.brecOn` and `Nat.rec` | 383 KB | 6 min |
-| `Nat.zero_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg` | 678 KB | 15 min |
+A starter library of **28 `Init` theorems about `Nat` and `List`** is proved this way, and all three checkers accept every one. Proving all 28 takes about 8 minutes of CPU in one run, which shares their lemmas.
+
+| | Theorems | Proof terms |
+|---|---|---|
+| `Nat` | `add_zero`, `zero_add`, `succ_add`, `add_succ`, `add_one`, `succ_eq_add_one`, `add_comm`, `add_assoc`, `add_left_comm`, `add_right_comm`, `pred_succ`, `pred_zero`, `sub_zero`, `succ_sub_succ`, `mul_zero`, `mul_succ`, `zero_mul` | `rfl` through `Nat.add`, `Nat.sub`, `Nat.mul` and literals; structural induction (`Nat.brecOn`, matchers); rewriting (`Eq.mpr`, `congrArg`) |
+| `List` | `length_nil`, `length_cons`, `length_append`, `nil_append`, `cons_append`, `append_nil`, `append_assoc`, `map_nil`, `map_cons`, `length_map`, `reverse_nil` | `rfl` through `List.length`, `List.append`, `List.map`, `List.reverse`; induction (`List.rec`) with `simp`'s proofs (`of_eq_true`, `eq_self`, `congr`) |
+
+Two are refused, each with its reason: `Nat.succ_ne_zero` and `Nat.le_refl`. Sizes, times and reasons are in [docs/milestone3.md](docs/milestone3.md#results-a-starter-library).
 
 **Bridges.** The model's `Nat` is proved to be `set.mm`'s `NN0`: zero to `0`, `succ` to `+ 1`, literals to numerals. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. See [docs/bridges.md](docs/bridges.md).
 
 **Proof size.** Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
 
-**A gap found, and fixed opt-in.** With a single universe, `Nat.below` is empty, so `Nat.add` and every other function defined by structural recursion collapse in the model. Tower mode fixes this with an increasing sequence of Grothendieck universes, one per level. `theorem` uses it; `define` takes `--tower`. It isn't the default yet. See [docs/milestone3.md](docs/milestone3.md#theorems-through-the-model-built-natadd_zero-and-natzero_add).
+**A gap found, and fixed opt-in.** With a single universe, `Nat.below` is empty, so `Nat.add` and every other function defined by structural recursion collapse in the model. Tower mode fixes this with an increasing sequence of Grothendieck universes, one per level. `theorem` uses it; `define` takes `--tower`. It isn't the default yet. See [docs/milestone3.md](docs/milestone3.md#theorems-through-the-model-built-a-starter-library-of-28-nat-and-list-theorems).
 
 ## Road to the first release (v0.1)
 
@@ -82,9 +86,9 @@ v0.1 is the first version someone else can install and use to get independently 
 
 **Theorems**
 - [x] Prove theorems from their proof terms through the model: `Nat.add_zero`, `Nat.zero_add`
-- [ ] `Nat.succ_add` and `List.length_append` through the model, replacing milestone 2's hand table. They are unblocked by the extra set variables, and next to try.
-- [ ] A starter library of Init theorems about `Nat` and `List`, all verified, with sizes and times published
-- [ ] Share types between proof steps, as Lean's kernel does, so that proofs take minutes, not hours
+- [x] `Nat.succ_add` and `List.length_append` through the model, replacing milestone 2's hand table
+- [x] A starter library of Init theorems about `Nat` and `List`, all verified, with sizes and times published: 28 theorems, in [docs/milestone3.md](docs/milestone3.md#results-a-starter-library)
+- [x] Share types between proof steps, as Lean's kernel does, so that proofs take minutes, not hours: shared subproofs, memoized typing and a faster parser (`Nat.add_zero` 209 s → 6 s)
 
 **Soundness and trust**
 - [ ] Tower mode as the default, so that structurally recursive definitions mean what Lean means

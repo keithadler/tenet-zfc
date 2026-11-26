@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The whole theorem library (job theorem-library) takes longer than a pull request should wait: it runs by hand
+  # and weekly.
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 1'
 
 jobs:
   build-and-test:
@@ -108,9 +113,13 @@ jobs:
             if echo "$out" | grep -q '?Error'; then exit 1; fi
             (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" $g.mm)
           done
+      # The quick part of the starter library (docs/milestone3.md, "Theorems through the model"); the rest runs in
+      # the theorem-library job.
       - name: Prove Lean theorems through the generic model and verify (milestone 3, theorems through the model)
         run: |
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem tests/fixtures/theorems.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/thm.mm" Nat.add_zero Nat.zero_add
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem tests/fixtures/library.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/thm.mm" \
+            Nat.add_zero Nat.zero_add Nat.add_succ Nat.add_one Nat.succ_eq_add_one Nat.pred_succ Nat.pred_zero Nat.sub_zero Nat.mul_zero Nat.mul_succ \
+            List.length_nil List.length_cons List.nil_append List.cons_append List.append_nil List.map_nil List.map_cons List.reverse_nil
           out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read thm.mm" "verify proof *" "exit")
           echo "$out" | tail -2
           if echo "$out" | grep -q '?Error'; then exit 1; fi
@@ -122,3 +131,51 @@ jobs:
           curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
           for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
           for g in model ind props rec tree natle setvars strings axioms mutual natbridge thm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+
+  # The whole starter library, the heavy theorems included (induction with large motives: Nat.succ_add,
+  # List.length_append, List.append_assoc, ...), checked by all three checkers. By hand (workflow_dispatch) and weekly.
+  theorem-library:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SETMM_COMMIT: 6315535f37e5e58d14ece8c34ddb204926446264
+      METAMATH_EXE_COMMIT: 580b4bd5ae6f2a0d746398b0033cddccba1b418b
+      MMVERIFY_COMMIT: 63a2aa3815cd5bf67892dbfc7f2048cbb177524c
+      MMJ2_COMMIT: c8dd05548139c7003220caedde65a7abe44a00bf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '11'
+      - name: Fetch set.mm and the checkers
+        run: |
+          mkdir -p "$RUNNER_TEMP/mm/setmm" "$RUNNER_TEMP/mm/mmj2/macros"
+          curl -fsSL -o "$RUNNER_TEMP/mm/setmm/set.mm" "https://raw.githubusercontent.com/metamath/set.mm/$SETMM_COMMIT/set.mm"
+          git clone -q https://github.com/metamath/metamath-exe "$RUNNER_TEMP/mm/metamath-exe"
+          git -C "$RUNNER_TEMP/mm/metamath-exe" checkout -q "$METAMATH_EXE_COMMIT"
+          cc -O2 -w -o "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP"/mm/metamath-exe/src/*.c
+          git clone -q https://github.com/david-a-wheeler/mmverify.py "$RUNNER_TEMP/mm/mmverify"
+          git -C "$RUNNER_TEMP/mm/mmverify" checkout -q "$MMVERIFY_COMMIT"
+          raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
+          curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
+          for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
+      - name: Prove the starter library through the generic model
+        run: |
+          # Nat.succ_ne_zero and Nat.le_refl are refused (docs/milestone3.md); the step fails if any other is.
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem tests/fixtures/library.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/library.mm" \
+            Nat.add_zero Nat.zero_add Nat.succ_add Nat.add_succ Nat.add_one Nat.succ_eq_add_one Nat.add_comm Nat.add_assoc Nat.add_left_comm Nat.add_right_comm \
+            Nat.pred_succ Nat.pred_zero Nat.sub_zero Nat.succ_sub_succ Nat.mul_zero Nat.mul_succ Nat.zero_mul \
+            List.length_nil List.length_cons List.length_append List.nil_append List.cons_append List.append_nil List.append_assoc \
+            List.map_nil List.map_cons List.length_map List.reverse_nil
+      - name: Check it with metamath-exe, mmverify.py and mmj2's definitionCheck
+        run: |
+          out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read library.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" library.mm)
+          scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/library.mm"
