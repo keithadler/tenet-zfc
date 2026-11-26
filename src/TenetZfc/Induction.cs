@@ -25,6 +25,10 @@ public sealed partial class Model
         ConstInfo ind = env.Find(iname)!;
         Define(iname);
         Define(k.Name);
+        if (IsProposition(ind) && !ind.IsRec && ind.Ctors.Length == 1)
+        {
+            return _propRec[k.Name] = SubstRecLemma(k, rec, ind, iname);
+        }
         string rl = RecTyLemma(ind);
         EnsureTowerLemmas();
         EnsurePf();
@@ -96,6 +100,74 @@ public sealed partial class Model
         string label = $"lean-ind-{LabelPart($"{iname}")}";
         EmitLemma(label, $"Induction on {iname}: its recursor at a motive into Prop.", p);
         _propRec[k.Name] = (label, tyText);
+        return (label, tyText);
+    }
+
+    /// <summary>
+    /// The recursor of a one-constructor proposition (Eq) at a motive into Prop: substitution. The major premise holds,
+    /// so its condition does, equalities between the indices and the constructor's (b = a for Eq); the motive at the
+    /// indices is then the motive at the constructor's, where the minor premise holds. (lean-subst-I)
+    /// </summary>
+    private (string, string) SubstRecLemma(Const k, ConstInfo rec, ConstInfo ind, Name iname)
+    {
+        EnsureTowerLemmas();
+        var c = new PCtx { Ph = UHyp };
+        Expr ty0 = _ops.InstantiateLevels(rec.Type, rec.LevelParams, k.Levels);
+        string tyText = TrIn(c, ty0);
+        int np = ind.NumParams, ni = ind.NumIndices, nb = np + rec.NumMotives + rec.NumMinors;
+        string itok = Token(iname)!;
+        Proof p = IntroPiProp(c, ty0, (d, body) =>
+        {
+            var vs = d.Binders.TakeLast(nb + ni + 1).ToList();
+            string minorVar = vs[np + 1], majorVar = vs[^1];
+            string Ty(string v) => Conjuncts(d.Ph).First(x => x.StartsWith($"{v} e. ", StringComparison.Ordinal))[(v.Length + 4)..];
+            string pMinor = Ty(minorVar), pMajor = Ty(majorVar);
+            Proof minor = HypIn(d, $"(/) e. {pMinor}"), major = HypIn(d, $"(/) e. {pMajor}");
+            // The major premise's proposition, unfolded: if ( φ , 1o , (/) ), so φ.
+            var iargs = vs.Take(np).Concat(vs.Skip(nb).Take(ni)).ToList();
+            (Proof eqI, _, _) = Unfold(d.Ph, itok, iargs, (i, dom) => HypIn(d, $"{iargs[i]} e. {dom}"));
+            Proof inIf = pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", "(/)"), ("B", pMajor), ("C", Rhs(eqI))), major,
+                AlphaIn(d.Ph, pMajor, Lhs(eqI)) is var a1 ? _d.Trans(a1, eqI) : eqI);
+            SyntaxTree ifn = pr.Parse("class", Rhs(eqI).Split(' '))!;
+            string phi = pr.Render(ifn.Children[0]);
+            Proof holds = _d.Syl(inIf, Bi1(ApplyId("lean-prop", S(("ph", phi)))));
+            // The equalities, index = term, rewrite the goal to the minor premise's proposition.
+            var eqs = new List<Proof>();
+            void Split(string w, Proof pw)
+            {
+                SyntaxTree wn = pr.Parse("wff", w.Split(' '))!;
+                if (wn.Rule.Label == "wa")
+                {
+                    string l = pr.Render(wn.Children[0]), r = pr.Render(wn.Children[1]);
+                    Split(l, pr.Apply("simpld", S(("ph", d.Ph), ("ps", l), ("ch", r)), pw));
+                    Split(r, pr.Apply("simprd", S(("ph", d.Ph), ("ps", l), ("ch", r)), pw));
+                }
+                else if (wn.Rule.Label == "wceq")
+                {
+                    eqs.Add(pw);
+                }
+                else if (wn.Rule.Label != "wtru")
+                {
+                    throw new Refused($"{iname}'s condition isn't equalities: {w}");
+                }
+            }
+            Split(phi, holds);
+            string goal = TrIn(d, body);
+            Proof cur = _d.Refl(d.Ph, goal);
+            foreach (Proof e in eqs)
+            {
+                (string ix, string term, _) = _d.Sides(_d.Split(e.Proves).X);
+                string ctx = SubstFree(Rhs(cur), ix, "Z");
+                if (ctx.Split(' ').Contains("Z"))
+                {
+                    cur = _d.Trans(cur, _d.Congruence("class", ctx, "Z", e));
+                }
+            }
+            Proof toMinor = _d.Trans(cur, AlphaIn(d.Ph, Rhs(cur), pMinor));
+            return pr.Apply("eleqtrrd", S(("ph", d.Ph), ("A", "(/)"), ("B", pMinor), ("C", goal)), minor, toMinor);
+        });
+        string label = $"lean-subst-{LabelPart($"{iname}")}";
+        EmitLemma(label, $"Substitution along {iname}: its recursor at a motive into Prop.", p);
         return (label, tyText);
     }
 

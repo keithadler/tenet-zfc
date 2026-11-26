@@ -900,7 +900,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             Proof beta = Beta(ph, pr.Apply("eqid", S(("A", val))), x, dom, body, args[i], argIn(i, dom), val);
             cur = _d.Trans(cong, beta);
             app = $"( {app} ` {args[i]} )";
-            val = Subst(body, x, args[i]);
+            val = Eq(beta).R;   // the substituted body, as Beta wrote it (it may rename the map's variables)
             (lastVar, lastBody) = (x, body);
         }
         return (cur, lastVar, lastBody);

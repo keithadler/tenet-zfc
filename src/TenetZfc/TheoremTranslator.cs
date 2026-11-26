@@ -191,8 +191,8 @@ public sealed partial class Model
         var sc = new Scope("U");
         foreach (var kv in c.Vars) sc.Vars[kv.Key] = kv.Value;
         foreach (var kv in c.Types) sc.Types[kv.Key] = kv.Value;
-        // A new binder avoids the enclosing ones and every set variable of the hypotheses (ralrimiva needs $d x ph).
-        foreach (string v in c.Binders.Concat(c.Ph.Split(' ').Where(s => SetVars.Contains(s))).Distinct())
+        // A new binder avoids the enclosing ones. (Where ralrimiva needs it out of the hypotheses too, it is renamed.)
+        foreach (string v in c.Binders.Distinct())
         {
             sc.Active.Add(v);
         }
@@ -564,6 +564,15 @@ public sealed partial class Model
         }
         if (proof)
         {
+            string tyOrig = tyText;
+            if (c.Ph.Split(' ').Contains(x) || c.Binders.Contains(x) || dom.Split(' ').Contains(x))
+            {
+                // ralrimiva needs the binder out of the hypotheses: rename the quantifier's variable.
+                string y = FreshFor(c.Ph, tyText, string.Join(' ', c.Binders));
+                body = SubstFree(body, x, y);
+                x = y;
+                tyText = $"if ( A. {x} e. {dom} {body} , 1o , (/) )";
+            }
             (PCtx d, Expr fv) = Enter(c, lam.Domain, x, dom);
             Expr inner = _ops.Instantiate(lam.Body, [fv]);
             Expr innerTy = ((Binder)_typing.Whnf(lty)).Body is var bt ? _ops.Instantiate(bt, [fv]) : throw new Refused("no body type");
@@ -573,7 +582,7 @@ public sealed partial class Model
             EnsureTowerLemmas();
             string cond = $"A. {x} e. {dom} {body}";
             Proof r = _d.Syl(all, Bi2(ApplyId("lean-prop", S(("ph", cond)))));
-            return new Typed(r, tyText, lty);
+            return new Typed(FixMem(c.Ph, r, "(/)", tyOrig), tyOrig, lty);
         }
         Proof r2 = MapMem(c, lamText, lty, tyText, 1, (d2, _, bodyTy, target) => Check(d2, inner2(d2), bodyTy, target));
         return new Typed(r2, tyText, lty);
@@ -883,6 +892,14 @@ public sealed partial class Model
         }
         SyntaxTree all = n.Children[0];
         string x = pr.Render(all.Children[1]), dom = pr.Render(all.Children[2]), psi = pr.Render(all.Children[0]);
+        string allText = pr.Render(all);
+        if (c.Ph.Split(' ').Contains(x) || c.Binders.Contains(x) || dom.Split(' ').Contains(x))
+        {
+            string y = FreshFor(c.Ph, tyText, string.Join(' ', c.Binders));
+            psi = SubstFree(psi, x, y);
+            x = y;
+            allText = $"A. {x} e. {dom} {psi}";
+        }
         var pi = (Binder)_typing.Whnf(ty);
         (PCtx d, Expr fv) = Enter(c, pi.Domain, x, dom);
         Expr body = _ops.Instantiate(pi.Body, [fv]);
@@ -893,7 +910,8 @@ public sealed partial class Model
         }
         Proof ral = pr.Apply("ralrimiva", S(("ph", c.Ph), ("ps", psi), ("x", x), ("A", dom)), q);
         EnsureTowerLemmas();
-        return _d.Syl(ral, Bi2(ApplyId("lean-prop", S(("ph", pr.Render(all))))));
+        Proof r = _d.Syl(ral, Bi2(ApplyId("lean-prop", S(("ph", allText)))));
+        return FixMem(c.Ph, r, "(/)", tyText);
     }
 
     /// <summary>( d.Ph -> (/) e. ⟦I params indices⟧ ) by constructor j of the proposition I, its proof fields in the context.</summary>
@@ -1379,6 +1397,27 @@ public sealed partial class Model
             }
         }
         Expr ha = Ops.Spine(a, out List<Expr> xs), hb = Ops.Spine(b, out List<Expr> ys);
+        if (ha is Proj pa2 && hb is Proj pb2 && pa2.Idx == pb2.Idx && xs.Count == ys.Count && !IsProofIn(c, a))
+        {
+            // The same field of convertible structures, at convertible arguments.
+            try
+            {
+                Proof ps = Conv(c, pa2.Struct, pb2.Struct);
+                Proof cur0 = _d.Congruence("class", Field("( 2nd ` Z )", pa2.Idx), "Z", ps);
+                cur0 = _d.Trans(cur0, AlphaIn(c.Ph, Rhs(cur0), TrIn(c, pb2)));
+                for (int i = 0; i < xs.Count; i++)
+                {
+                    Proof pi = Conv(c, xs[i], ys[i]);
+                    cur0 = pr.Apply("fveq12d", S(("ph", c.Ph), ("F", Lhs(cur0)), ("G", Rhs(cur0)), ("A", Lhs(pi)), ("B", Rhs(pi))), cur0, pi);
+                }
+                return _d.Trans(AlphaIn(c.Ph, TrIn(c, a), Lhs(cur0)), cur0);
+            }
+            catch (Refused e)
+            {
+                Debug($"TryCongr (projection): {e.Message}");
+                return null;
+            }
+        }
         bool same = (ha, hb) switch
         {
             (Const p, Const q) => ReferenceEquals(p.Name, q.Name),

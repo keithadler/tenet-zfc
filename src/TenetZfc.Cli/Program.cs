@@ -14,6 +14,9 @@ const string Usage = """
                                                          milestone 3: translate definitions by the generic model,
                                                          each with its definitional equation as a theorem
       tenet-zfc bridge <set.mm> <out.mm>                 milestone 3: the bridge lemmas recursive types rest on
+      tenet-zfc theorem <export.ndjson> <set.mm> <out.mm> <name>...
+                                                         milestone 3: prove Lean theorems through the generic model
+                                                         (tower mode), |- ( hypotheses -> (/) e. [statement] )
       tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
                                                          which constants block the rest
 
