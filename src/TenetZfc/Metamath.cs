@@ -217,16 +217,36 @@ public sealed class Prover
     public SyntaxTree? Parse(string type, IReadOnlyList<string> syms)
     {
         CheckDeadline();
+        // The model parses the same long hypotheses again and again (picking one conjunct out of many, splitting an
+        // implication): cache whole parses. Trees are immutable, so sharing them is safe. Bounded by total key length.
+        string key = type + " " + string.Join(' ', syms);
+        if (_parsed.TryGetValue(key, out SyntaxTree? hit))
+        {
+            return hit;
+        }
+        SyntaxTree? result = null;
         var memo = new Dictionary<(string, int), List<(int End, SyntaxTree Tree)>>();
         foreach ((int end, SyntaxTree tree) in ParseAt(type, syms, 0, memo))
         {
             if (end == syms.Count)
             {
-                return tree;
+                result = tree;
+                break;
             }
         }
-        return null;
+        if (_parsedChars + key.Length > ParseCacheChars)
+        {
+            _parsed.Clear();
+            _parsedChars = 0;
+        }
+        _parsed[key] = result;
+        _parsedChars += key.Length;
+        return result;
     }
+
+    private const long ParseCacheChars = 100_000_000;
+    private readonly Dictionary<string, SyntaxTree?> _parsed = new();
+    private long _parsedChars;
 
     private List<(int, SyntaxTree)> ParseAt(string type, IReadOnlyList<string> syms, int pos, Dictionary<(string, int), List<(int, SyntaxTree)>> memo)
     {
