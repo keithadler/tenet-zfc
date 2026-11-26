@@ -232,16 +232,30 @@ public sealed class Prover
     /// <summary>The syntax tree of an expression of this typecode, or null if it does not parse.</summary>
     public SyntaxTree? Parse(string type, IReadOnlyList<string> syms)
     {
+        // Successful parses are cached: proofs re-parse the same long terms many times. (A parse stays valid when the
+        // database grows; a failure might not, so failures aren't cached.)
+        string key = type + " " + string.Join(' ', syms);
+        if (_parsed.TryGetValue(key, out SyntaxTree? hit))
+        {
+            return hit;
+        }
         var memo = new Dictionary<(string, int), List<(int End, SyntaxTree Tree)>>();
         foreach ((int end, SyntaxTree tree) in ParseAt(type, syms, 0, memo))
         {
             if (end == syms.Count)
             {
+                if (_parsed.Count > 2_000_000)
+                {
+                    _parsed.Clear();
+                }
+                _parsed[key] = tree;
                 return tree;
             }
         }
         return null;
     }
+
+    private readonly Dictionary<string, SyntaxTree> _parsed = new();
 
     private List<(int, SyntaxTree)> ParseAt(string type, IReadOnlyList<string> syms, int pos, Dictionary<(string, int), List<(int, SyntaxTree)>> memo)
     {

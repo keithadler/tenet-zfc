@@ -58,7 +58,7 @@ public static class DistinctVars
                     {
                         if (x == y)
                         {
-                            throw new InvalidOperationException($"{label} needs {a} and {b} distinct, but both contain {x}");
+                            throw new InvalidOperationException($"{label} needs {a} and {b} distinct, but both contain {x}: {a} = {string.Join(' ', sub[a])} ; {b} = {string.Join(' ', sub[b])} ; proving {string.Join(' ', st.Expr.Symbols.SelectMany(s => sub.TryGetValue(s, out string[]? v) ? v : [s]))}");
                         }
                         need.Add(string.CompareOrdinal(x, y) < 0 ? (x, y) : (y, x));
                     }

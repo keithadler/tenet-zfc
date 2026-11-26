@@ -101,6 +101,40 @@ if (args.Length >= 5 && args[0] == "define")
     File.WriteAllText(args[3], theorems.ToString());
     return status;
 }
+if (args.Length >= 5 && args[0] == "theorem")
+{
+    // Milestone 3: Lean theorems proved through the generic model, in its tower mode (docs/milestone3.md).
+    var tt = new Terms();
+    TenetZfc.Environment tenv = Reader.ReadExport(tt, args[1]);
+    var tpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
+    var translator = new TheoremTranslator(tt, tenv, tpr);
+    var tw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean theorems proved through tenet-zfc's model (docs/milestone3.md)", CompressAgainst(tpr.Database));
+    var done = new List<(string Label, TenetZfc.Metamath.Expr Statement, List<string> Proof, string Name)>();
+    int tstatus = 0;
+    foreach (string name in args[4..])
+    {
+        var sw1 = Stopwatch.StartNew();
+        try
+        {
+            var (stmt, proof) = translator.Prove(tt.Of(name));
+            done.Add(($"lean-thm-{Model.LabelPart(name)}", stmt, proof, name));
+            Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
+        }
+        catch (Model.Refused e)
+        {
+            Console.WriteLine($"{name}: refused: {e.Message}");
+            tstatus = 1;
+        }
+    }
+    tw.Raw(translator.Declarations);
+    foreach (var d in done)
+    {
+        var dv = TenetZfc.Metamath.DistinctVars.Required(tpr.Database, d.Proof);
+        tw.Theorem(d.Label, $"The Lean theorem {d.Name}, proved through the model from its proof term.", d.Statement, d.Proof, dv.Select(p => $"{p.Item1} {p.Item2}"));
+    }
+    File.WriteAllText(args[3], tw.ToString());
+    return tstatus;
+}
 if (args.Length == 3 && args[0] == "bridge")
 {
     // Milestone 3: the bridge lemmas recursive types rest on, written as set.mm theorems.

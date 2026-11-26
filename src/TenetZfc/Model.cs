@@ -201,15 +201,16 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         string text = $"""
             $( The Lean {what} {n}, translated by the model of docs/milestone3.md. $)
             $c {tok} $.
-            c{tok} $a class {tok} $.
+            c{LabelPart(tok)} $a class {tok} $.
             {"${"}
               {(sc.Bound.Count > 1 ? $"$d {string.Join(' ', sc.Bound)} $." : "")}
-              df-{tok} $a |- {tok} = ( {UniverseVar} e. {UniverseDomain} |-> {body} ) $.
+              df-{LabelPart(tok)} $a |- {tok} = ( {UniverseVar} e. {UniverseDomain} |-> {body} ) $.
             {"$}"}
 
             """;
         _out.AppendLine(text);
         _values[tok] = body;
+        _tokenNames[tok] = n;
         if (!dryRun)
         {
             pr.Database.Extend(text);
@@ -820,10 +821,10 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         string text = $"""
             $( The {what} of {n}, for the model of docs/milestone3.md. $)
             $c {tok} $.
-            c{tok} $a class {tok} $.
+            c{LabelPart(tok)} $a class {tok} $.
             {"${"}
               {(b.Count > 1 ? $"$d {string.Join(' ', b)} $." : "")}
-              df-{tok} $a |- {tok} = {definiens} $.
+              df-{LabelPart(tok)} $a |- {tok} = {definiens} $.
             {"$}"}
 
             """;
@@ -870,7 +871,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     {
         string valueu = _values[tok];
         string valueU = Subst(valueu, UniverseVar, "U");
-        Statement dfa = pr.Database["df-" + tok];
+        Statement dfa = pr.Database["df-" + LabelPart(tok)];
         // The definition, its own variables substituted by themselves (a citation still pushes their syntax).
         Proof df = pr.Apply(dfa.Label, dfa.Hyps.Where(h => h.Kind == 'f').ToDictionary(h => h.Var!, h => h.Var!));
         Proof cur = Beta(ph, df, UniverseVar, UniverseDomain, valueu, "U", Hyp(ph, UHyp)!.Value, tok);
@@ -1201,6 +1202,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
                 tagIn = pr.Apply("mpd", S(("ph", ctxs[i]), ("ps", $"E. {m} e. _om {r} e. {Stage(m)}"), ("ch", $"{tag} e. {iapp}")), somes[i], lim);
             }
         }
+        _ctorIn = (tagIn, extraVars.ToList());   // for the theorem translator's constructor typing (TheoremTranslator.cs)
         Proof vInSmall = pr.Apply("eqeltrd", S(("ph", small), ("A", v), ("B", tag), ("C", iapp)), eqV0, tagIn);
         Proof inType = _d.Syl(Restrict(ph, small), vInSmall);
         Proof eqV = _d.Syl(Restrict(ph, small), eqV0);
@@ -1305,7 +1307,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     /// <summary>( ph -> ( tok ` arg ) = body[w := arg] ) for a definition with no universe layer, tok = ( w e. _V |-> body ).</summary>
     private Proof UnfoldRaw(string ph, string tok, string arg)
     {
-        Statement dfa = pr.Database["df-" + tok];
+        Statement dfa = pr.Database["df-" + LabelPart(tok)];
         Proof df = pr.Apply(dfa.Label, dfa.Hyps.Where(h => h.Kind == 'f').ToDictionary(h => h.Var!, h => h.Var!));
         SyntaxTree m = pr.Parse("class", _values[tok].Split(' '))!;
         string w = pr.Render(m.Children[0]), body = pr.Render(m.Children[2]);
@@ -1715,6 +1717,22 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     /// </summary>
     private Proof Beta(string ph, Proof fIsMap, string x, string dom, string body, string arg, Proof argIn, string f)
     {
+        if (tower && (BoundIn(body).Contains(x) || BoundIn(body).Overlaps(ArgVars(arg))))
+        {
+            return BetaShadowed(ph, fIsMap, x, dom, body, arg, argIn, f);   // TheoremTranslator.cs
+        }
+        if (arg.Split(' ').Contains(x))
+        {
+            // fvmptd3 needs x distinct from the argument: rename the map's variable first (cbvmptv).
+            var taken = arg.Split(' ').Concat(body.Split(' ')).Concat(dom.Split(' ')).Concat(ph.Split(' ')).ToHashSet();
+            string y = FirstVar(v => !taken.Contains(v));
+            string bodyY = Subst(body, x, y);
+            Proof ren = pr.Apply("cbvmptv", S(("x", x), ("y", y), ("A", dom), ("B", body), ("C", bodyY)),
+                _d.Congruence("class", Subst(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}")))));
+            string mapX = $"( {x} e. {dom} |-> {body} )", mapY = $"( {y} e. {dom} |-> {bodyY} )";
+            fIsMap = pr.Apply("eqtri", S(("A", f), ("B", mapX), ("C", mapY)), fIsMap, ren);
+            (x, body) = (y, bodyY);
+        }
         string result = Subst(body, x, arg);
         string h = $"{x} = {arg}";
         Proof sub = body.Split(' ').Contains(x)

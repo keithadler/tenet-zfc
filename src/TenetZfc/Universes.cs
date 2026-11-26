@@ -18,6 +18,9 @@ public sealed partial class Model
 {
     public const string TowerToken = "lean.-tower";
 
+    /// <summary>Each defined constant by its token.</summary>
+    private readonly Dictionary<string, Name> _tokenNames = new();
+
     /// <summary>The class the universe argument ranges over: Univ, or the towers.</summary>
     private string UniverseDomain => tower ? TowerToken : "Univ";
 
@@ -80,6 +83,6 @@ public sealed partial class Model
         }
         EmitRaw(t.Of("-tower"), TowerToken,
             "{ f | ( ( f : _om --> Univ /\\ _om e. ( f ` (/) ) ) /\\ A. n e. _om ( f ` n ) e. ( f ` suc n ) ) }",
-            ["f", "n"], "universe towers: increasing ω-sequences of Grothendieck universes, the first containing ω");
+            ["f", "n"], "universe towers: increasing omega-sequences of Grothendieck universes, the first containing omega");
     }
 }
