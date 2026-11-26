@@ -19,10 +19,14 @@ const string Usage = """
                                                          verify independently (scripts/verify-all); refusals are listed
                                                          per constant in chunk-NNNN.tsv
       tenet-zfc bridge <set.mm> <out.mm>                 milestone 3: the bridge lemmas recursive types rest on
+      tenet-zfc nat-bridge <export.ndjson> <set.mm> <out.mm> [<n>...]
+                                                         milestone 3: prove that the model's Nat is NN0 (zero, succ,
+                                                         Nat.add and literals, each numeral n given), from an export
+                                                         with Nat.add (docs/bridges.md)
       tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
                                                          which constants block the rest
 
-    emit, define, define-all and bridge write proofs in Metamath's compressed format, sharing every repeated subproof;
+    emit, define, define-all, bridge and nat-bridge write proofs in Metamath's compressed format, sharing every repeated subproof;
     add --uncompressed (anywhere) for flat label lists.
 
     make a trace with Tenet (github.com/keithadler/tenet, main):
@@ -115,6 +119,26 @@ if (args.Length == 3 && args[0] == "bridge")
     var bw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[1]), "tenet-zfc bridge lemmas for recursive types (docs/milestone3.md)", CompressAgainst(bdb));
     bw.Theorem("lean-rankfr", "Smaller rank is a well-founded relation on any class.", stmt, proof, distinct);
     File.WriteAllText(args[2], bw.ToString());
+    return 0;
+}
+if (args.Length >= 4 && args[0] == "nat-bridge")
+{
+    // Milestone 3: bridge theorems from the model's Nat to set.mm's NN0 (docs/bridges.md).
+    try
+    {
+        var numerals = args[4..].Select(System.Numerics.BigInteger.Parse).ToList();
+        var (text, proved) = NatBridge.Emit(args[1], args[2], numerals, compress: !uncompressed);
+        foreach (var th in proved)
+        {
+            Console.WriteLine($"{th.Label}: {th.Statement} ({th.Proof.Count} proof steps)");
+        }
+        File.WriteAllText(args[3], text);
+    }
+    catch (Model.Refused e)
+    {
+        Console.Error.WriteLine($"refused: {e.Message}");
+        return 1;
+    }
     return 0;
 }
 if (args.Length == 2 && args[0] == "model-survey")
