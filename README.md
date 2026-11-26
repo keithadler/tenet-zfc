@@ -51,7 +51,7 @@ About 40% of the way to the goal. The parts done so far:
 | `Nat` literals | decimal numerals, through `_om` | |
 | more than 26 bound variables | set variables the output declares itself (`$v`, `$f setvar`), which add no axiom | definitional equations |
 
-On Lean 4.36's `Init`, **13,953 of 17,590 definitions** translate together with everything they use. Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
+On Lean 4.36's `Init`, **13,958 of 17,590 definitions** translate together with everything they use. Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
 
 **Bridge theorems** prove that the model's `Nat` is `set.mm`'s `NN0`, from the model's definitions:
 - a bijection `F` takes zero to `0`, `succ` to `+ 1` and each literal to its numeral;
