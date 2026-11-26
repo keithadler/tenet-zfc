@@ -485,6 +485,12 @@ Not yet handled: an inductive type, or a packed helper (a recursive type's step 
 
 Names with `'` or `?` were hidden behind string literals before. They need an escaping scheme for tokens, a small change to `Model.Token`.
 
+## Bridge theorems: the model's `Nat` is `NN0` (built)
+
+`tenet-zfc nat-bridge` proves that `F = ( `' lean.Nat.-ofnum o. `' lean.Nat.-lit )` is a bijection from the model's `Nat` onto `NN0`. It takes zero to `0`, `succ` to `+ 1` and each literal to its numeral. Any function with `Nat.add`'s computation rules is `+` through `F`. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. Milestone 2's table entries for `Nat` become these theorems. All three checkers accept the output, and CI runs them.
+
+**A limit found on the way.** In the one-universe model, `⟦Nat.below⟧` is `(/)` everywhere. Its motive returns `U`, and `U e. U` is impossible. So `⟦Nat.add⟧`, compiled through `brecOn`, doesn't satisfy its own computation rules, and neither does any other structurally recursive definition. Both the motive lemma and the collapse of `Nat.below` are proved, and the bridge for `Nat.add` takes the rules as hypotheses until milestone 4 separates universe levels. See [bridges.md](bridges.md).
+
 ## Theorems through the model (built for `Nat.add_zero` and `Nat.zero_add`)
 
 Until now no Lean theorem was proved through the generic model; milestone 2's `2 + 2 = 4` and `List.length_append` went through a hand-written table. `tenet-zfc theorem <export> <set.mm> <out.mm> <name>…` (`TheoremTranslator.cs`) now proves Lean theorems from their proof terms, in the model's own terms.

@@ -247,9 +247,8 @@ public sealed partial class Model
         // ( LitMap ` o' ) is ⟦n-1⟧, back the same way.
         Expr prevLit = t.Nat(value - 1);
         string prevText = TrIn(c, prevLit);
-        (Proof pv, _) = OfnumValue(n - 1);
         Proof q1 = pr.Apply("fveq1i", S(("F", "lean.Nat.-lit"), ("G", LitMap), ("A", $"( lean.Nat.-ofnum ` {Decimal(n - 1)} )")), Cite("df-lean.Nat.-lit"));
-        Proof q2 = pr.Apply("fveq2i", S(("F", LitMap), ("A", $"( lean.Nat.-ofnum ` {Decimal(n - 1)} )"), ("B", o1)), pr.Apply("eqtri", S(("A", $"( lean.Nat.-ofnum ` {Decimal(n - 1)} )"), ("B", $"( `' {OfnumMap} ` {Decimal(n - 1)} )"), ("C", o1)), OfnumIs(Decimal(n - 1)), pv));
+        Proof q2 = pr.Apply("fveq2i", S(("F", LitMap), ("A", $"( lean.Nat.-ofnum ` {Decimal(n - 1)} )"), ("B", o1)), OfnumIs(Decimal(n - 1)));
         Proof prevIs = pr.Apply("eqtri", S(("A", prevText), ("B", $"( {LitMap} ` ( lean.Nat.-ofnum ` {Decimal(n - 1)} ) )"), ("C", inner)), q1, q2);
         Proof tagIn = pr.Apply("eqtri", S(("A", $"( {LitMap} ` suc {o1} )"), ("B", $"( {fmap} ` {inner} )"), ("C", Rhs(beta))), frs, pr.Apply("mptru", S(("ph", $"( {fmap} ` {inner} ) = {Rhs(beta)}")), BetaT(fmap, inner)));
         Proof toTag = _d.Trans(lifted, _d.Lift(c.Ph, tagIn));
