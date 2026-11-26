@@ -412,6 +412,103 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    public void MutualAndNestedBlocksAreSlicesOfOneFixedPoint()
+    {
+        // Tm and Args are defined together; Rose holds a List (Rose α), whose auxiliary type is List_1 in its block.
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("mutual.ndjson"));
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        foreach (string n in new[] { "Tm.rec", "Args.rec", "Rose.rec", "Rose.rec_1" })
+        {
+            m.Define(t.Of(n));
+        }
+        string d = m.Declarations;
+        // Each type is its slice of the block's fixed point, tagged (/) for the first type and 1o for the second.
+        Assert.Contains("df-lean.Tm $a |- lean.Tm = ( u e. Univ |-> ( x e. u |-> ( U_ y e. _om ( rec ( ( r e. _V |-> ( lean.Tm.-mstep ` <. <. u , <. x , (/) >. >. , r >. ) ) , (/) ) ` y ) \" { (/) } ) ) ) $.", d);
+        Assert.Contains("\" { 1o } ) ) ) $.", d);
+        // The step adds <. 1o , tag >. for Args.cons, its fields ranging over the last stage's slices.
+        Assert.Contains("{ <. 1o , <. 1o , <. (/) , <. ", d);
+        // A recursor reads its type's component of one recursion over every set.
+        Assert.Contains("|-> ( 1st ` ( 2nd ` ( frecs ( {", d);
+        Assert.Contains(", _V , ( ", d);
+        // Rose's auxiliary type is List (Rose α): Rose.rec_1's major premise ranges over the real List type.
+        Assert.Contains("df-lean.Rose.rec_1 $a", d);
+        Assert.Contains("( ( lean.List ` u ) ` ( ( lean.Rose ` u ) ` x ) )", d);
+    }
+
+    [Fact]
+    public void LeanSyntaxIsDefinedThroughItsAuxiliaryBlock()
+    {
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("syntax.ndjson"));
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        foreach (string n in new[] { "Lean.Syntax.rec", "Lean.Syntax.rec_1", "Lean.Syntax.rec_2", "Lean.Syntax.node" })
+        {
+            m.Define(t.Of(n));
+        }
+        // Syntax, Array Syntax and List Syntax: three slices, the last tagged 2o.
+        Assert.Contains("df-lean.Lean.Syntax.-mstep $a", m.Declarations);
+        Assert.Contains("<. 2o , ", m.Declarations);
+        Assert.Contains("df-lean.Lean.Syntax.rec_2 $a", m.Declarations);
+    }
+
+    [Fact]
+    public void MutualAndNestedRecursionComputesAndVerifies()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("mutual.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        var m = new Model(t, env, pr);
+        // Tm.app's recursive fields are a Tm and an Args: each gets its own type's recursor.
+        var (app, appP, appD) = m.Iota(t.Of("Tm.app"));
+        // Rose.node's field is a List (Rose α): it is in the auxiliary type's slice by induction over List's stages.
+        var (node, nodeP, nodeD) = m.Iota(t.Of("Rose.node"));
+        // Rose.rec_1 on List.cons: the head recurses through Rose.rec, the tail through Rose.rec_1.
+        var aux = m.RecursorIotas(t.Of("Rose.rec_1"));
+        output.WriteLine($"{app} ({appP.Count} steps)\n{node} ({nodeP.Count} steps)");
+        const string tmRec = "( ( ( ( ( ( ( ( lean.Tm.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` E ) ` F ) ` G )";
+        const string argsRec = "( ( ( ( ( ( ( ( lean.Args.rec ` U ) ` A ) ` B ) ` C ) ` D ) ` E ) ` F ) ` G )";
+        Assert.EndsWith($"` ( ( ( ( lean.Tm.app ` U ) ` A ) ` H ) ` I ) ) = ( ( ( ( E ` H ) ` I ) ` ( {tmRec} ` H ) ) ` ( {argsRec} ` I ) ) )", app.ToString());
+        const string roseRec1 = "( ( ( ( ( ( ( lean.Rose.rec_1 ` U ) ` A ) ` B ) ` C ) ` D ) ` E ) ` F )";
+        Assert.EndsWith($"` ( ( ( ( lean.Rose.node ` U ) ` A ) ` G ) ` H ) ) = ( ( ( D ` G ) ` H ) ` ( {roseRec1} ` H ) ) )", node.ToString());
+        Assert.Equal(["List.nil", "List.cons"], aux.Select(a => a.Ctor.ToString()));
+        Assert.Contains(Recursion.RankSeLabel, m.Declarations);
+
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc mutual and nested test", pr.Database);
+        w.Raw(m.Declarations);
+        w.Theorem("lean-test-Tm.app-iota", "test", app, appP, appD);
+        w.Theorem("lean-test-Rose.node-iota", "test", node, nodeP, nodeD);
+        foreach (var (ctor, s, p, d) in aux)
+        {
+            w.Theorem($"lean-test-Rose.rec_1-{ctor}-iota", "test", s, p, d);
+        }
+        string file = Path.Combine(SetMm, $"tenet-zfc-mutual-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mm);
+            Assert.Contains("All proofs in the database were verified", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
     public void NatLeIsALeastSetOfIndicesAndLiteralsAreShort()
     {
         var t = new Terms();

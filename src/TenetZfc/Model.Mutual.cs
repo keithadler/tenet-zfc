@@ -230,7 +230,7 @@ public sealed partial class Model
             string pack = Tuple(new[] { UniverseVar }.Concat(ps.Select(q => q.Var)).ToList());
             string x = FirstVar(v => !sc.Bound.Contains(v) && !stepBound.Contains(v) && !avoid.Contains(v));
             sc.Bound.Add(x);
-            string k = FirstVar(v => !sc.Bound.Contains(v) && !avoid.Contains(v));
+            string k = FirstVar(v => !sc.Bound.Contains(v) && !stepBound.Contains(v) && !avoid.Contains(v));   // a slice may sit in a context the step's parts are simplified under
             sc.Bound.Add(k);
             string stepf = $"( {x} e. _V |-> ( {steptok} ` <. {pack} , {x} >. ) )";
             _defined.Add(originals[tt].Name);

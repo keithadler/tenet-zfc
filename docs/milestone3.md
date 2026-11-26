@@ -510,3 +510,55 @@ Not yet handled: an inductive type, or a packed helper (a recursive type's step 
 | a name a `set.mm` token can't hold (`'`, `?`, `₂`), over the 25 most common reasons | at least 786 |
 
 Names with `'` or `?` were hidden behind string literals before. They need an escaping scheme for tokens, a small change to `Model.Token`.
+
+## Step 3, sixth part: mutual and nested inductive types (built)
+
+Before this part, 1,483 definitions in `Init` stopped at "`Lean.Syntax` is a mutual or nested inductive type". `Lean.Syntax` holds an `Array Syntax`, so it is nested.
+
+**A block is one least fixed point over a tagged sum.** The types of a mutual block, `I_0 … I_n-1`, are built together. A nested block first goes through the kernel's reduction to a mutual block, the one the replayer already checks (`Nested.cs`, now exposed as `Replayer.AuxiliaryBlock`). For `Rose α`, which holds a `List (Rose α)`, that block is `Rose` and an auxiliary type standing for `List (Rose α)`. `Lean.Syntax`'s block has three types: `Syntax`, `Array Syntax` and `List Syntax`.
+
+- **Elements** of the fixed point are pairs `<. ix , v >.`. Here `ix` is the type's index (`(/)`, `1o`, `2o`, `suc 2o`, …), and `v` is a tagged tuple, as for any inductive type.
+- **The step**, `lean.I_0.-mstep`, adds `<. ix , tag(fields) >.` for every constructor of every type. A recursive field of type `t` ranges over `( X " { ix_t } )`, the values of type `t` in the last stage.
+- **Each original type is its slice.** The fixed point is the union of its ω-chain of stages, as before:
+
+  ```
+  df-lean.Tm $a |- lean.Tm = ( u e. Univ |-> ( x e. u |->
+      ( U_ y e. _om ( rec ( ( r e. _V |-> ( lean.Tm.-mstep ` <. <. u , <. x , (/) >. >. , r >. ) ) , (/) ) ` y ) " { (/) } ) ) ) $.
+  ```
+
+- **Constructors** build tagged tuples. An auxiliary type's constructors are the nested type's own (`List.nil`, `List.cons`), so a value of `List (Rose α)` is the same set whichever way it is read.
+- **The recursors are one recursion.** `frecs ( RankLt , _V , H )` runs over every set. Its value at `a` is the tuple of every type's case analysis on `a`, `<. case_0 , <. case_1 , … (/) >. >.`, computed by `lean.I_0.-mcase`. `I_t.rec`, and a nested block's `I.rec_k`, read component `t` at the major premise. A recursive field `r` of type `t'` gets component `t'` of the recursion at `r`.
+- **Why every set.** The recursion runs over `_V` rather than the block, so its computation rules need no membership in it: `frr2` only needs `X e. _V`. That takes one new lemma, besides `lean-rankfr`:
+
+  `lean-rankse $p |- { <. x , y >. | ( rank ` x ) e. ( rank ` y ) } Se _V`, in 550 steps. The sets of smaller rank than `z` all lie in `( R1 ` ( rank ` z ) )` (`rankr1ag`), which is a set.
+
+**The computation rules** follow the recursive types' four steps:
+1. **The value is in the major premise's type.**
+   - For an original type, `<. ix , tag >.` is in a stage after every recursive field's (`eliun`, `lean-stagess`, the step, `rdgsuc`), and `elimasng` reads it back as a member of the slice.
+   - For an auxiliary type, the value is the nested type's own constructor, in the nested type itself (`List.cons s l` in `List (Rose α)`), as for any recursive or non-recursive type.
+2. **`frr2`** unfolds the recursion once, with `lean-rankfr` and `lean-rankse` on `_V`.
+3. **The case analysis** is evaluated on the tag, and component `t` of the tuple is read off by the simplifier.
+4. **The recursion at each recursive field** is component `t'` of the recursion there, which is `I_t'.rec` at it, since it has smaller rank (`elpredg`, `fvres`).
+
+**Nested fields need a bridge.** `Rose.node a l` takes `l` in the real `List (Rose α)`, but the fixed point's step takes it from the auxiliary type's slice. So step 1 proves that every value of the nested type is a value of its auxiliary type: `⟦List (Rose α)⟧ C_ ( Fix " { 1o } )`.
+- For a recursive nested type like `List`, this is induction over its stages (`finds`). Stage `(/)` is empty (`rdg0`). If stage `y` is in the slice, so is stage `suc y`: it is the step at stage `y` (`rdgsuc`), each constructor's part is in the slice (`iunssd`, `snssd`), and its recursive fields range over stage `y`.
+- For a non-recursive one like `Array`, the constructors' parts are in the slice directly, and `Array Syntax`'s field of type `List Syntax` uses that type's bridge.
+- The nested type's parameter (`Rose α`) is in `U`, because the field's type is the nested type applied to it (`elfvdm`, `dmmptss`). So these rules need no hypothesis beyond Lean's own.
+- The block's bound variables are chosen apart from the nested types' definitions, so substituting their fields into the block's step never captures a variable.
+
+**Checked** (`tests/fixtures/Mutual.lean`, exported to `mutual.ndjson`), in a test and in CI:
+- the mutual block `Tm`/`Args`: the computation rules of `Tm.var`, `Tm.app`, `Args.nil` and `Args.cons`. `Tm.app`'s fields recurse into both types, through `Tm.rec` and `Args.rec`.
+- the nested type `Rose`: `Rose.node` (through the bridge for `List (Rose α)`), and `Rose.rec_1` on `List.nil` and `List.cons`. `List.cons`'s head recurses through `Rose.rec` and its tail through `Rose.rec_1`.
+
+Both verifiers accept them, and every definition passes the definition check. `Lean.Syntax`'s types, constructors and recursors are defined the same way (a test checks them, from `syntax.ndjson`).
+
+**A fix on the way.** The recursors' definitional equations exposed a `$d` bug in the sethood prover. When two minor premises both bind `w` (`X_ w e. …`), a hypothesis mentioning `w` was carried under `ralrimivw` over `w`. It now drops hypotheses the term doesn't use before going under a binder.
+
+**Not yet handled:** mutual or nested inductive propositions and indexed families, nested occurrences inside a nested type that is itself mutual, nested types with more than one parameter in computation rules (the bridge needs each parameter in `U`), and nested types that contain each other. Each is refused with the reason.
+
+**The effect on `Init`:** 13,953 of 17,590 definitions now translate with everything they use, up from 13,192 on the same code without this part (all of PRs #1–#4 merged). No inductive type stops any definition any more. Of the 1,513 definitions `Lean.Syntax` stopped, 761 now translate; most of the others stop next at a name a token can't hold, such as `Lean.Syntax.getPos?`.
+
+| What stops a definition next | Definitions |
+|---|---|
+| a name a `set.mm` token can't hold (`'`, `?`, `₂`) | at least 1,494, over the 25 most common reasons (the largest: `BitVec.extractLsb'` 373, `Lean.Syntax.getPos?` 296) |
+| `Acc` (a premise that is a function into `Acc`) | 334 |
