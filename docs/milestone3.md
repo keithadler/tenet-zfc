@@ -491,7 +491,7 @@ Names with `'` or `?` were hidden behind string literals before. They need an es
 
 **A limit found on the way.** In the one-universe model, `⟦Nat.below⟧` is `(/)` everywhere. Its motive returns `U`, and `U e. U` is impossible. So `⟦Nat.add⟧`, compiled through `brecOn`, doesn't satisfy its own computation rules, and neither does any other structurally recursive definition. Both the motive lemma and the collapse of `Nat.below` are proved, and the bridge for `Nat.add` takes the rules as hypotheses until milestone 4 separates universe levels. See [bridges.md](bridges.md).
 
-## Theorems through the model (built for `Nat.add_zero` and `Nat.zero_add`)
+## Theorems through the model (built: `Nat.add_zero` and `Nat.zero_add`)
 
 Until now no Lean theorem was proved through the generic model; milestone 2's `2 + 2 = 4` and `List.length_append` went through a hand-written table. `tenet-zfc theorem <export> <set.mm> <out.mm> <name>…` (`TheoremTranslator.cs`) now proves Lean theorems from their proof terms, in the model's own terms.
 
@@ -575,10 +575,16 @@ Three small lemmas are proved once per output: `lean-tw` (what the tower hypothe
 
 | Theorem | Proof term | Lemmas (flat steps) | Theorem (flat steps) | Output (compressed) | Time |
 |---|---|---|---|---|---|
-| `Nat.add_zero` | `rfl`, so `n + 0` is unfolded to `n` through `Nat.add`, `Nat.brecOn`, `Nat.rec` and the literal `0` | 45 (1,147,634) | 1,617,070 | 383 KB | 6 min |
+| `Nat.add_zero` | `rfl`, so `n + 0` is unfolded to `n` through `Nat.add`, `Nat.brecOn`, `Nat.rec` and the literal `0` | 45 (1,147,634) | 1,665,317 | 383 KB | 6 min |
 | `Nat.zero_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg`, `rfl` | 61 (22,854,344) | 69,124 | 678 KB | 15 min |
 
-Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`.
+Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its own and together. CI proves both into one output (863 KB, 13 minutes here; the second reuses the first's lemmas) and runs all three checks on it.
+
+**`Nat.succ_add` and `List.length_append` aren't proved yet.** Both get past every construct they use: induction on `Nat` and on `List α`, `Eq.rec`, `congrArg`, `congrFun'`, `propext`, `eq_self`, the literal `1`. Both then run out of `set.mm`'s 26 set variables, in the typing of `Nat.succ_add._f` and `List.append._f`, whose matchers nest binders deeper than that. PR #2 (extra set variables) lifts that limit; the translator already takes its quantified variables from set.mm's letters, so it merges with #2 as it is.
+
+`propext` holds in the model and is typed by a lemma (`Propext.cs`): a proposition is `(/)` or `1o` (`lean-2oif`, `|- ( A e. 2o -> A = if ( (/) e. A , 1o , (/) ) )`), so two that hold together are equal.
+
+**Refused, with the reason:** a constant that isn't a theorem; universe levels above 4; Nat literals above 10; recursors with indices or several motives (other than one-constructor propositions like `Eq`, by substitution); axioms other than `propext`; nested and mutual types (left to the model).
 
 `Nat.add_zero`'s statement, as proved:
 
