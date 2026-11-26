@@ -13,6 +13,9 @@ namespace TenetZfc;
 /// </summary>
 public sealed partial class Model
 {
+    /// <summary>set.mm's own set variables, which every output has declared.</summary>
+    private static readonly string[] QuantLetters = "x y z w v t s r q p o n m k j i h g f e d c b a".Split(' ');
+
     /// <summary>lean-iota-c: the computation rule of a constructor, written into the output once.</summary>
     private string IotaLemma(Name ctor)
     {
@@ -53,7 +56,7 @@ public sealed partial class Model
         string iapp = Lhs(eqT), set = Rhs(eqT);
         // The quantified variables are taken from the end of the alphabet, away from the definitions' own.
         var taken = new HashSet<string>((ph + " " + set + " " + r).Split(' '));
-        string Pick() { string v = Enumerable.Reverse(SetVars).First(x => !taken.Contains(x)); taken.Add(v); return v; }
+        string Pick() { string v = Enumerable.Reverse(QuantLetters).First(x => !taken.Contains(x)); taken.Add(v); return v; }
         string tv = Pick();
         string P(string at) => $"( {r} ` {at} ) e. ( {motive} ` {at} )";
         string q = $"{{ {tv} | {P(tv)} }}";

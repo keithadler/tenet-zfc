@@ -492,7 +492,7 @@ public sealed partial class Model
     }
 
     /// <summary>A set variable in none of the given texts.</summary>
-    private static string FreshFor(params string[] texts)
+    private string FreshFor(params string[] texts)
     {
         var taken = texts.SelectMany(x => x.Split(' ')).ToHashSet();
         return FirstVar(v => !taken.Contains(v));
