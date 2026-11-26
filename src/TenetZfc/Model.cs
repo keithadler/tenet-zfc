@@ -214,18 +214,34 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
                 return;
             case ConstKind.Constructor when c.Induct is Name ind:
                 Define(ind);
+                RefuseIfPartial(n, ind);
                 return;
             case ConstKind.Recursor when $"{n}".EndsWith(".rec", StringComparison.Ordinal):
                 Define(t.Of($"{n}"[..^4]));
+                RefuseIfPartial(n, t.Of($"{n}"[..^4]));
                 return;
             case ConstKind.Recursor when IsAuxRecursorName(n):
                 Define(t.Of($"{n}"[..$"{n}".LastIndexOf(".rec_", StringComparison.Ordinal)]));   // a nested block's auxiliary recursor
+                RefuseIfPartial(n, t.Of($"{n}"[..$"{n}".LastIndexOf(".rec_", StringComparison.Ordinal)]));
                 return;
             case ConstKind.Axiom or ConstKind.Quot:
                 DefineBuiltin(c);   // ModelBuiltins.cs
                 return;
         }
         throw new Refused($"{n} is not a definition but {(c.Kind == ConstKind.Inductive ? "an inductive type" : "a " + c.Kind.ToString().ToLowerInvariant())}; not in the model yet");
+    }
+
+    /// <summary>
+    /// A type is written before its constructors and recursor, so when one of those was refused (Empty.rec: the empty
+    /// type isn't in the model yet) the type counts as defined and they don't. Refuse them again here, rather than fail
+    /// later on a definition that was never written (found by the Init-wide run).
+    /// </summary>
+    private void RefuseIfPartial(Name n, Name ind)
+    {
+        if (!_defined.Contains(n))
+        {
+            throw new Refused($"{n} is part of {ind}, which was only partly translated: an earlier refusal stopped it");
+        }
     }
 
     /// <summary>
