@@ -427,3 +427,87 @@ vxx1 $f setvar xx1 $.
 | `Acc` (a premise that is a function into `Acc`) | 325 |
 | axioms and quotients | 112 |
 
+## Step 5, first part: strings, axioms, quotients and choice (built)
+
+**String literals.** The kernel expands a literal to `String.ofList` applied to the list of its characters, each `Char.ofNat` of its code point (`StringToCtor` in the replayer). The model translates it to exactly that, with one helper so it stays short:
+
+```
+df-lean.String.-cons $a |- lean.String.-cons = ( u e. Univ |-> ( x e. NN0 |-> ( y e. ( ( lean.List ` u ) ` ( lean.Char ` u ) ) |->
+    ( ( ( ( lean.List.cons ` u ) ` ( lean.Char ` u ) ) ` ( ( lean.Char.ofNat ` u ) ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` x ) ) ) ) ` y ) ) ) ) $.
+```
+
+A literal is then `( ( lean.String.ofList ` u ) ` … )` over one `-cons` per character, each code point a decimal numeral as for `Nat` literals: `"leanprover/lean4"` begins `( ( ( lean.String.-cons ` u ) ` ; ; 1 0 8 ) ` …` and ends in `( ( lean.List.nil ` u ) ` ( lean.Char ` u ) )`. In Lean 4.36 `String` is a structure over UTF-8 bytes, so `String.ofList` brings in `List.utf8Encode` and `ByteArray`; all of it translates.
+
+**Axioms.** `Define` handles `ConstKind.Axiom` and the quotient's built-in constants:
+- An axiom whose type is a proposition is a proof, so its value is `(/)`: `lean.propext = ( u e. Univ |-> (/) )`. So is `Quot.ind`, and `Quot.sound` when an export has it.
+- `Classical.choice` is defined relative to a well-ordering of the universe (see below).
+
+**Quotients.** `Quot α r` is the set of classes of the least equivalence relation on `⟦α⟧` containing `r`. That relation is a helper constant: the intersection of every equivalence relation on `x` containing the pairs `r` relates, cut down to `x X. x`.
+
+```
+df-lean.Quot.-eqv $a |- lean.Quot.-eqv = ( u e. Univ |-> ( x e. u |-> ( y e. ( ( 2o ^m x ) ^m x ) |->
+    ( ( x X. x ) i^i |^| { a e. ~P ( x X. x ) | ( { <. b , c >. | ( ( b e. x /\ c e. x ) /\ (/) e. ( ( y ` b ) ` c ) ) } C_ a /\ a Er x ) } ) ) ) ) $.
+```
+
+| Lean | `set.mm` |
+|---|---|
+| `Quot r` | `( x /. E )`, the classes |
+| `Quot.mk r a` | `[ a ] E`, the class of `a` |
+| `Quot.lift f h` | `ran ( p e. x |-> <. [ p ] E , ( f ` p ) >. )`, set.mm's function lift (`qliftval`): `f` on a representative |
+
+None of it uses choice. `Quot.lift f h` is a function on the classes only when `f` respects `E`, which `h` ensures.
+
+**The computation rule** `Quot.lift f h (Quot.mk r a) = f a` is a theorem, in 100,610 steps:
+
+```
+lean-Quot.lift-iota |- ( ( … /\ D e. ( C ^m A ) ) /\ E e. X_ v e. A X_ t e. A ( ( ( ( ( lean.Eq ` U ) ` C ) ` ( D ` v ) ) ` ( D ` t ) ) ^m ( ( B ` v ) ` t ) ) ) /\ F e. A )
+    -> ( ( ( ( ( ( ( lean.Quot.lift ` U ) ` A ) ` B ) ` C ) ` D ) ` E ) ` ( ( ( ( lean.Quot.mk ` U ) ` A ) ` B ) ` F ) ) = ( D ` F ) )
+```
+
+1. Unfold `Quot.lift` and `Quot.mk`, then apply `qliftval`. It needs two facts.
+2. **`E` is an equivalence relation.** It is an intersection of them, inside `x X. x` (`riiner`, with `intiin`).
+3. **The lift is a function** (`qliftfund`), because `f` is constant on `E`'s classes. The kernel of `f`, `( `' f o. f )`, is an equivalence relation (`fcoinver`). It contains `r`, so it is one of those intersected, and `E` is inside it (`intss1`, `fcoinvbr`).
+4. **The kernel contains `r` because of `h`.** For `r b c`, `h` at `b` and `c` (`fvixp`) maps `(/)` into `Eq β (f b) (f c)`, which is therefore nonempty. That `Eq` unfolds to `if ( ( f ` c ) = ( f ` b ) , 1o , (/) )` (`n0i`, `iffalse`).
+
+The congruence prover learned the forms these definitions use: `/.`, `[ A ] R`, `ran`, `|^|`, `~P`, `i^i`, `X.`, `{ x e. A | }`, `{ <. x , y >. | }`, `C_`, `Er` and `-.`. Sethood learned `i^i`, `X.`, `ran`, `/.` and `[ A ] R`.
+
+**Checked:** `Lean.origin`, `String.instInhabited` and `instToStringBool`; `propext`, `Quot`, `Quot.mk`, `Quot.ind` and `Quot.lift`; `Classical.choice`, `Classical.choose` and `Classical.propDecidable`; the quotient's computation rule; and the theorem that choice picks an element. Their definitions pass the definition check, and both verifiers accept the equations and the rule, in a test and in CI.
+
+**`Classical.choice` takes a well-ordering of the universe.** The plan above said choice "becomes a fixed global choice function from `set.mm`'s axiom of choice". That can't be a `set.mm` definition:
+- ZFC proves that choice functions exist, but no class term defines one. It is consistent with ZFC that no definable well-ordering of `V`, or even of `~P om`, exists.
+- `set.mm` says as much at `gblacfnacd`, and its emulation of Hilbert's ε (`hta`) is relative to a well-ordering `R`.
+
+So the well-ordering is a parameter, the way `hta` says to translate HOL's ε. A constant whose value uses choice, directly or through another constant, gets a second layer after the universe's:
+
+```
+df-lean.Classical.choice $a |- lean.Classical.choice = ( u e. Univ |-> ( v e. ~P ( u X. u ) |->
+    ( x e. u |-> ( y e. ( ( lean.Nonempty ` u ) ` x ) |-> ( iota_ z e. x A. w e. x -. w v z ) ) ) ) ) $.
+df-lean.Classical.propDecidable $a |- lean.Classical.propDecidable = ( u e. Univ |-> ( y e. ~P ( u X. u ) |->
+    ( x e. 2o |-> ( ( ( ( lean.Classical.choice ` u ) ` y ) ` ( ( lean.Decidable ` u ) ` x ) ) ` (/) ) ) ) ) $.
+```
+
+- **`choice α h`** is `α`'s least element in the well-ordering `v`, Hilbert's ε as `hta` emulates it.
+- **Using it.** A constant that depends on choice translates to `( ( lean.c ` u ) ` v )`, passing its own well-ordering on. One that doesn't is `( lean.c ` u )` as before, so nothing that avoids choice changes.
+- **Equations** take the well-ordering as `W`, with the hypothesis `W e. ~P ( U X. U )`.
+- **Choice picks an element.** This is a theorem, `lean-Classical.choice-spec`, in 7,179 steps:
+
+  ```
+  |- ( ( … /\ B e. ( ( lean.Nonempty ` U ) ` A ) ) /\ W We U ) -> ( ( ( ( lean.Classical.choice ` U ) ` W ) ` A ) ` B ) e. A )
+  ```
+
+  `α` is in the universe, so inside it (`grutr`, `trss`). It is nonempty, since `Nonempty α`'s condition holds (`n0i`, `iffalse`, `rexn0`). So `W` has a unique least element on it (`wereu`), and the definition picks that element (`riotacl`).
+
+The trust story doesn't change: no new axiom, and the definitions pass the definition check. A theorem that uses choice holds for every well-ordering of the universe. ZFC proves that one exists (`weth`), so a closed statement can discharge `W We U` the way `hta`'s comment describes.
+
+Not yet handled: an inductive type, or a packed helper (a recursive type's step or case analysis), whose definition depends on choice. Each is refused with the reason.
+
+**The effect on `Init`:** 12,145 of 17,590 definitions now translate with everything they use, up from 11,780. String literals, axioms, quotients and choice no longer stop any definition.
+
+| What stops a definition next | Definitions |
+|---|---|
+| the nested type `Lean.Syntax` | 1,513 |
+| running out of set variables (set.mm has 26) | 1,059 |
+| `Acc` (a premise that is a function into `Acc`) | 328 |
+| a name a `set.mm` token can't hold (`'`, `?`, `₂`), over the 25 most common reasons | at least 786 |
+
+Names with `'` or `?` were hidden behind string literals before. They need an escaping scheme for tokens, a small change to `Model.Token`.
