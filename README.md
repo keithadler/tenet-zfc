@@ -176,10 +176,10 @@ tenet-zfc run tests/fixtures/Example.lean --out example-out
 tenet-zfc run: tests/fixtures/Example.lean -> example-out
   compile    lean: tests/fixtures/Example.lean -> build/Example.olean (3.9s)
   export     leanout: Example -> export.ndjson (1.8s)
-  select     8 declarations: 1 theorems, 7 others
-  trace      tenet: 1 theorems re-checked -> trace.ndjson (0.3s)
-  replay     1 declarations, 271 steps re-derived without Tenet, 0 failures
-  translate  from traces: 1 of 1 theorems -> trace-theorems.mm
+  select     8 declarations: 1 theorem, 7 others
+  trace      tenet: 1 theorem re-checked -> trace.ndjson (0.3s)
+  replay     1 declaration, 271 steps re-derived without Tenet, 0 failures
+  translate  from traces: 1 of 1 theorem -> trace-theorems.mm
   translate  define: 7 of 7 -> definitions.mm
   verify     trace-theorems.mm: metamath-exe ok (36s), mmverify.py ok (111s), mmj2 definitionCheck ok (0s)
   verify     definitions.mm: metamath-exe ok (32s), mmverify.py ok (100s), mmj2 definitionCheck ok (152s)
@@ -193,6 +193,9 @@ tenet-zfc run: tests/fixtures/Example.lean -> example-out
   Color.red    constructor  proved      definitions.mm (through the model)
   twice        definition   proved      definitions.mm (through the model)
   two_add_two  theorem      proved      trace-theorems.mm (from its trace)  |- ( 2 + 2 ) = 4
+
+  8 proved, 0 refused, 0 failed. Outputs, logs and report.json are in example-out.
+  proved: translated, and its output passed metamath-exe, mmverify.py and mmj2's definitionCheck against ~/mm/setmm/set.mm.
 ```
 
 What each step does:
