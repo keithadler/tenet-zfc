@@ -747,10 +747,16 @@ public sealed partial class Model
     /// </summary>
     private string VariantLemma(string label, HashSet<string> clash, string avoidText)
     {
+        string key = label + "|" + string.Join(' ', clash.OrderBy(v => v, StringComparer.Ordinal));
+        if (_variantOf.TryGetValue(key, out string? known) && !pr.Database[known].Expr.Symbols.Any(avoidText.Split(' ').Where(v => SetVars.Contains(v)).Contains))
+        {
+            return known;
+        }
         Statement st = pr.Database[label];
         (string ante, string concl) = _d.Split(st.Expr);
         string ante2 = RenameApart(ante, clash, avoidText, concl), concl2 = RenameApart(concl, clash, avoidText, ante, ante2);
         string vlabel = $"{label}-a{_variants++}";
+        _variantOf[key] = vlabel;
         Proof orig = ApplyId(label, new Dictionary<string, string>());
         Proof toAnte = ante2 == ante ? pr.Apply("id", S(("ph", ante)))
             : Bi1(pr.Apply("mptru", S(("ph", $"( {ante2} <-> {ante} )")), Alpha("wff", ante2, ante)!.Value));
@@ -764,6 +770,7 @@ public sealed partial class Model
     }
 
     private int _variants;
+    private readonly Dictionary<string, string> _variantOf = new();
 
     /// <summary>
     /// lean-proj-S-i: field i of a member of the structure S is in its field's type,
