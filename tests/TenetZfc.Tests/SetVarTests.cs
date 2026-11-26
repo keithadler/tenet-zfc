@@ -48,11 +48,33 @@ public class SetVarTests(Xunit.Abstractions.ITestOutputHelper output)
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
         var m = new Model(t, env, pr);
         var eqs = new List<(string, Metamath.Expr, List<string>, string[])>();
-        foreach (string n in new[] { "Lean.Grind.Config.casesOn", "Lean.Meta.Simp.Config.zeta" })
+        // casesOn's terms nest 27 binders deep, and the congruence prover recurses once per level: more stack than a
+        // test host's thread has (the CLI's main thread has enough), so the proofs are built on a thread with more.
+        Exception? failed = null;
+        var worker = new Thread(() =>
         {
-            var (stmt, proof, distinct) = m.Equation(t.Of(n));
-            output.WriteLine($"{n}: {proof.Count} steps");
-            eqs.Add(($"lean-test-{n}-eq", stmt, proof, distinct));
+            try
+            {
+                foreach (string n in new[] { "Lean.Grind.Config.casesOn", "Lean.Meta.Simp.Config.zeta" })
+                {
+                    var (stmt, proof, distinct) = m.Equation(t.Of(n));
+                    eqs.Add(($"lean-test-{n}-eq", stmt, proof, distinct));
+                }
+            }
+            catch (Exception e)
+            {
+                failed = e;
+            }
+        }, 256 * 1024 * 1024);
+        worker.Start();
+        worker.Join();
+        if (failed is not null)
+        {
+            throw new InvalidOperationException("building the equations failed", failed);
+        }
+        foreach (var (label, _, proof, _) in eqs)
+        {
+            output.WriteLine($"{label}: {proof.Count} steps");
         }
         // casesOn's statement itself binds declared variables: its minor premise ranges over a Π-type of 27 fields.
         Assert.Contains(" xx1 ", eqs[0].Item2.ToString());

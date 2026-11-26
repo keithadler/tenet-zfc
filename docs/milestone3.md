@@ -512,6 +512,14 @@ Not yet handled: an inductive type, or a packed helper (a recursive type's step 
 
 Names with `'` or `?` were hidden behind string literals before. They need an escaping scheme for tokens, a small change to `Model.Token`.
 
+**With the extra set variables too** (step 3, fifth part, merged after this part): 13,192 of 17,590 definitions translate with everything they use. No definition stops for lack of set variables or at a string literal.
+
+| What stops a definition next | Definitions |
+|---|---|
+| the nested type `Lean.Syntax` | 1,513 |
+| a name a `set.mm` token can't hold (`'`, `?`, `₂`), over the 25 most common reasons | at least 804 |
+| `Acc` (a premise that is a function into `Acc`) | 328 |
+
 ## Step 3, sixth part: mutual and nested inductive types (built)
 
 Before this part, 1,483 definitions in `Init` stopped at "`Lean.Syntax` is a mutual or nested inductive type". `Lean.Syntax` holds an `Array Syntax`, so it is nested.
