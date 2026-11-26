@@ -578,7 +578,7 @@ Both verifiers accept them, and every definition passes the definition check. Th
 
 **A limit found on the way.** In the one-universe model, `⟦Nat.below⟧` is `(/)` everywhere. Its motive returns `U`, and `U e. U` is impossible. So `⟦Nat.add⟧`, compiled through `brecOn`, doesn't satisfy its own computation rules, and neither does any other structurally recursive definition. Both the motive lemma and the collapse of `Nat.below` are proved, and the bridge for `Nat.add` takes the rules as hypotheses until milestone 4 separates universe levels. See [bridges.md](bridges.md).
 
-## Theorems through the model (built: `Nat.add_zero` and `Nat.zero_add`)
+## Theorems through the model (built: a starter library of 28 `Nat` and `List` theorems)
 
 Until now no Lean theorem was proved through the generic model; milestone 2's `2 + 2 = 4` and `List.length_append` went through a hand-written table. `tenet-zfc theorem <export> <set.mm> <out.mm> <name>…` (`TheoremTranslator.cs`) now proves Lean theorems from their proof terms, in the model's own terms.
 
@@ -713,22 +713,57 @@ Three small lemmas are proved once per output: `lean-tw` (what the tower hypothe
 
 **Distinct variables.** Each lemma carries exactly the `$d` conditions its proof needs, computed by replaying the proof (`Distinct.cs`). A blanket `$d` over all its variables would stop the lemma being used with a term that binds one of them. Where a lemma needs a bound variable distinct from a class variable, the term is renamed apart first and brought back by alpha-equivalence. The replay also checks every step's hypotheses, so a broken proof fails where it is made, not in a verifier.
 
-### Results
+### Results: a starter library
 
-`tests/fixtures/theorems.ndjson` is `leanout Init -- Nat.add_zero Nat.zero_add Nat.succ_add List.length_append` (Lean 4.36.0).
+`tests/fixtures/library.ndjson` is `leanout Init -- <the 30 names below>` (Lean 4.36.0): 30 theorems of `Init` about `Nat` and `List` with their dependencies. (`tests/fixtures/theorems.ndjson`, the first four, is kept for the older tests.) Universe-polymorphic theorems are proved at level 0, as `List.{0}`.
 
-| Theorem | Proof term | Lemmas (flat steps) | Theorem (flat steps) | Output (compressed) | Time |
-|---|---|---|---|---|---|
-| `Nat.add_zero` | `rfl`, so `n + 0` is unfolded to `n` through `Nat.add`, `Nat.brecOn`, `Nat.rec` and the literal `0` | 45 (1,147,634) | 1,665,317 | 383 KB | 6 min |
-| `Nat.zero_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg`, `rfl` | 61 (22,854,344) | 69,124 | 678 KB | 15 min |
+**28 of the 30 are proved, and all 28 pass metamath-exe, mmverify.py and mmj2's `definitionCheck`.** They were proved in one run, in the order below, so that each reuses the lemmas the ones before it wrote: 472 s of CPU (628 s on a shared, loaded machine), 3.6 GB at most, a 17.6 MB output. A theorem's time includes the lemmas it was the first to need.
 
-Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its own and together. CI proves both into one output with the Nat bridge, which also restates them in `NN0` (`nat-bridge … Nat.add_zero Nat.zero_add`; see [bridges.md](bridges.md#leans-theorems-restated-in-setmms-arithmetic)), and runs all three checks on it. On their own, `theorem` proves both into one output of 863 KB in 13 minutes; the second reuses the first's lemmas.
+| Theorem | Proof term | New lemmas (flat steps) | Theorem (flat steps) | Time |
+|---|---|---|---|---|
+| `Nat.add_zero` | `rfl`: `Nat.add` through `Nat.brecOn` and `Nat.rec`, the literal `0` | 45 (1,173,115) | 1,665,317 | 4.6 s |
+| `Nat.zero_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg` | 16 (21,681,229) | 69,124 | 5.7 s |
+| `Nat.succ_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg` | 2 (192,723,944) | 105,589 | 19.0 s |
+| `Nat.add_succ` | `rfl` | 0 | 4,614,022 | 1.4 s |
+| `Nat.add_one` | `rfl`, the literal `1` | 0 | 5,775,076 | 1.4 s |
+| `Nat.succ_eq_add_one` | `rfl` | 0 | 5,786,035 | 0.9 s |
+| `Nat.add_comm` | `Nat.brecOn` into `Prop`, a matcher, `Eq.mpr` rewrites by `Nat.succ_add`, `Nat.zero_add` | 7 (209,789,453) | 95,697 | 11.4 s |
+| `Nat.add_assoc` | `Nat.brecOn` into `Prop`, a matcher, `congrArg` | 2 (259,306,760) | 216,635 | 13.1 s |
+| `Nat.add_left_comm` | `Eq.mpr`, `Eq.symm` and `congrArg` rewrites by `Nat.add_assoc`, `Nat.add_comm` | 2 (380,338) | 765,024 | 0.4 s |
+| `Nat.add_right_comm` | the same | 0 | 765,830 | 0.2 s |
+| `Nat.pred_succ` | `rfl` | 2 (96,960) | 174,005 | 0.2 s |
+| `Nat.pred_zero` | `rfl` | 0 | 159,380 | 0.1 s |
+| `Nat.sub_zero` | `rfl`: `Nat.sub` | 13 (485,795) | 1,740,137 | 1.0 s |
+| `Nat.succ_sub_succ` | `Nat.succ_sub_succ_eq_sub`: `Nat.rec` into `Prop`, `Nat.pred`, `congrArg` | 3 (62,648,804) | 4,224 | 173.5 s |
+| `Nat.mul_zero` | `rfl`: `Nat.mul` | 12 (380,947) | 1,785,153 | 4.0 s |
+| `Nat.mul_succ` | `rfl` | 0 | 5,328,171 | 7.1 s |
+| `Nat.zero_mul` | `Nat.brecOn` into `Prop`, a matcher | 4 (22,957,321) | 86,827 | 21.7 s |
+| `List.length_nil` | `rfl`: `List.length` through `List.rec` | 18 (2,124,991) | 2,602,126 | 16.3 s |
+| `List.length_cons` | `rfl` | 4 (5,336) | 7,944,536 | 4.7 s |
+| `List.length_append` | `List.rec` into `Prop`, `congr`, `of_eq_true`, `eq_self`, `Nat.succ_add`, `Nat.zero_add` | 35 (1,510,975) | 664,087,295 | 117.7 s |
+| `List.nil_append` | `rfl`: `List.append` | 3 (4,002) | 3,780,365 | 2.5 s |
+| `List.cons_append` | `rfl` | 4 (5,336) | 11,362,647 | 5.2 s |
+| `List.append_nil` | `List.rec` into `Prop`, `congrArg`, `of_eq_true`, `eq_self` | 6 (8,004) | 21,490,119 | 6.5 s |
+| `List.append_assoc` | `List.rec` into `Prop`, `congrArg`, `of_eq_true`, `eq_self` | 89 (118,726) | 217,608,137 | 78.3 s |
+| `List.map_nil` | `id`, `rfl`: `List.map` | 5 (554,774) | 3,046,744 | 3.1 s |
+| `List.map_cons` | `id`, `rfl` | 4 (5,336) | 9,764,298 | 2.7 s |
+| `List.length_map` | `List.rec` into `Prop`, `congrArg`, `of_eq_true`, `eq_self` | 22 (29,348) | 476,337,219 | 90.4 s |
+| `List.reverse_nil` | `rfl`: `List.reverse` | 7 (879,714) | 3,487,318 | 6.9 s |
 
-**`Nat.succ_add` and `List.length_append` aren't proved yet.** Both get past every construct they use: induction on `Nat` and on `List α`, `Eq.rec`, `congrArg`, `congrFun'`, `propext`, `eq_self`, the literal `1`. Both then run out of `set.mm`'s 26 set variables, in the typing of `Nat.succ_add._f` and `List.append._f`, whose matchers nest binders deeper than that. PR #2 (extra set variables) lifts that limit; the translator already takes its quantified variables from set.mm's letters, so it merges with #2 as it is.
 
-`propext` holds in the model and is typed by a lemma (`Propext.cs`): a proposition is `(/)` or `1o` (`lean-2oif`, `|- ( A e. 2o -> A = if ( (/) e. A , 1o , (/) ) )`), so two that hold together are equal.
+"Flat steps" is the length a proof would have written out flat; the output is compressed, and shares far more (see below). `List.length_append` now goes through the model too, replacing milestone 2's hand table for it; the old path (`emit` on `lenapp.ndjson`) still works and is still checked in CI.
 
-**Refused, with the reason:** a constant that isn't a theorem; universe levels above 4; Nat literals above 10; recursors with indices or several motives (other than one-constructor propositions like `Eq`, by substitution); axioms other than `propext`; nested and mutual types (left to the model).
+CI also proves `Nat.add_zero` and `Nat.zero_add` with the Nat bridge, which restates them in `NN0` (`nat-bridge … Nat.add_zero Nat.zero_add`; see [bridges.md](bridges.md#leans-theorems-restated-in-setmms-arithmetic)).
+
+**Refused, with the reason:**
+- `Nat.succ_ne_zero`: its proof (`of_eq_true`, `Nat.beq`, `False.rec`) reaches a membership whose type text is a motive applied to an argument, `( ( y e. ( lean.Bool ` U ) |-> 2o ) ` … )`, where the Lean type is already reduced to `Prop`. Conversions compare a membership's text with its Lean type up to the names of bound variables only; this one needs a beta step on the text side, with the argument's typing.
+- `Nat.le_refl`: `Nat.le` is an inductive proposition with an index, translated as a least fixed point; showing a constructor's case of it (here `Nat.le.refl`) is not built yet (the cases are a union over stages, not a disjunction).
+
+Beyond these: constants that aren't theorems; universe levels above 4; Nat literals above 10; recursors with indices or several motives (other than one-constructor propositions like `Eq`, by substitution); axioms other than `propext`; nested and mutual types (left to the model).
+
+`propext` holds in the model and is typed by a lemma (`Propext.cs`): a proposition is `(/)` or `1o` (`lean-2oif`, `|- ( A e. 2o -> A = if ( (/) e. A , 1o , (/) ) )`), so two that hold together are equal. A member of a proposition is `(/)` (`lean-pf0`), which induction on a proposition needs (`False.rec`); a type with no constructors is empty, so its recursor's typing is `(/) C_ …` (`0ss`).
+
+CI proves the quick 18 (everything but the induction-heavy theorems: 46 s here) into one output on every pull request and checks it with all three checkers. A separate job, `theorem-library`, proves all 28 and checks them; it runs by hand (`workflow_dispatch`) and weekly.
 
 `Nat.add_zero`'s statement, as proved:
 
@@ -742,7 +777,27 @@ Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its ow
 
 That is, `A + 0 = A` in the model, with `+` as Lean defines it. `nat-bridge … Nat.add_zero` restates it as `( ( U e. lean.-tower /\ A e. NN0 ) -> ( A + 0 ) = A )` in `set.mm`'s arithmetic, through the bridge theorem `⟦Nat.add⟧ = +`, which tower mode made provable ([bridges.md](bridges.md#leans-theorems-restated-in-setmms-arithmetic)).
 
-**Where the size goes.** Most of the steps are typing lemmas for the constants structural recursion goes through: `Nat.brecOn.go` (361,529 steps), `Nat.add._f` (289,688), the computation rules. `Nat.zero_add._f` alone is 20.9 million flat steps: its matcher's motive carries the whole statement, and each typing step repeats it. Compression shares the repeats (678 KB), but proving takes 15 minutes. Sharing types between steps, as Lean's kernel does, is the obvious next optimization.
+### Speed: the parser, then sharing
+
+The first two theorems took 6 and 15 minutes. Profiling (`TENET_PROFILE=1` prints the time spent in each part, `Prof.cs`) showed that the size of the proofs was not the cost: **parsing** was, 218 of `Nat.add_zero`'s 223 seconds, in 113,607 calls. `set.mm`'s parser tried every syntax rule at every position of a term thousands of symbols long. Three changes in `Metamath.cs`:
+
+- **The parser tries only the rules that can start where it is**: those whose first symbol is the next symbol, and those that start with a variable.
+- **Every rendered subtree is a cached parse of its text.** Proofs take terms apart and put them back together all the time, and the pieces they parse again are subtrees of terms already parsed.
+- **A class term that starts with `(` ends at its `)`**: a known parse of that span is looked up before parsing it.
+
+Then, to share types between steps as Lean's kernel does:
+
+- **Shared subproofs** (`SharedProofs.cs`, `Prover.Sharing`): each proof longer than 48 steps, and each syntax proof longer than 12, becomes one shared step `@n`, made once (equal ones are the same step). A proof is then a DAG: building one costs its distinct steps, not its flat length, and the compressor, the distinct-variable replay and the renaming of a lemma's variables all work on the DAG without expanding it. `List.length_append`'s theorem is 664 million flat steps; it is never written out flat.
+- **Memberships are remembered per context**: a term typed twice under the same hypotheses (terms are hash-consed) is proved once, as Lean caches inferred types.
+
+| | before | after |
+|---|---|---|
+| `Nat.add_zero` alone | 209 s (161 s CPU), 0.96 GB | 6.1 s (6.7 s CPU), 0.43 GB |
+| `Nat.zero_add` alone | 304 s (311 s CPU), 3.8 GB (15 min when first measured) | 11.1 s (11.8 s CPU), 0.72 GB |
+| `Nat.succ_add` | didn't finish (its `Nat.succ_add._f` typing lemma: 192.5 million flat steps) | 19 s in the library run |
+| `List.length_append` | stopped after more than an hour | 118 s in the library run |
+
+Same proofs, same outputs (both checked); measured on an Apple-silicon Mac shared with other jobs. Lemmas are shared across the theorems of one run, so a library is best proved in one command. The remaining time goes mostly to conversions (`ConvText`) and to the parses they still miss.
 
 ## The Init-wide run (built)
 

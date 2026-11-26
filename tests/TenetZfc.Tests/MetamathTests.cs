@@ -138,6 +138,34 @@ public class MetamathTests
     }
 
     [Fact]
+    public void ASharedProofCompressesAsItsExpansionDoes()
+    {
+        // With sharing on, the prover makes long syntax proofs and long proofs into shared steps (@n); compressing the
+        // DAG must give exactly what compressing the flat proof gives, and expanding it must give the flat proof.
+        Database db = TinyDb();
+        var flatPr = new Prover(db);
+        var sharedPr = new Prover(db) { Sharing = true };
+        string x = "( p -> ( q -> r ) )", y = $"( {x} -> ( {x} -> {x} ) )";
+        (List<string>, MmExpr) Build(Prover pr) =>
+            pr.Apply("ax-1", new Dictionary<string, string> { ["p"] = y, ["q"] = $"( {y} -> {x} )" });
+        var (flat, fe) = Build(flatPr);
+        var (dag, de) = Build(sharedPr);
+        Assert.Equal(fe, de);
+        Assert.Contains(dag, SharedProofs.IsRef);
+        Assert.True(dag.Count < flat.Count);
+        Assert.Equal(flat, db.Shared.Expand(dag));
+        Assert.Equal(flat.Count, db.Shared.Size(dag));
+        var mandatory = db.MandatoryHyps(fe).Select(h => h.Label).ToList();
+        var (fl, fz) = CompressedProof.Compress(flat, mandatory, ArityIn(db));
+        var (dl, dz) = CompressedProof.Compress(dag, mandatory, ArityIn(db), db.Shared);
+        Assert.Equal(fl, dl);
+        Assert.Equal(fz, dz);
+        Assert.Equal(DistinctVars.Required(db, flat), DistinctVars.Required(db, dag));
+        // The same syntax twice is one shared step.
+        Assert.Equal(dag, Build(sharedPr).Item1);
+    }
+
+    [Fact]
     public void AProofThatDoesNotLeaveOneExpressionIsRefused()
     {
         Database db = TinyDb();

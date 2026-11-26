@@ -161,15 +161,30 @@ if (args.Length >= 5 && args[0] == "theorem")
     foreach (string name in args[4..])
     {
         var sw1 = Stopwatch.StartNew();
+        int lemmasBefore = translator.LemmaSteps.Count;
+        long stepsBefore = translator.LemmaSteps.Values.Sum();
         try
         {
             var (stmt, proof) = translator.Prove(tt.Of(name));
+            // Replayed here (every step's hypotheses, and the $d conditions), so a broken proof fails on its own.
+            _ = TenetZfc.Metamath.DistinctVars.Required(tpr.Database, proof);
             done.Add(($"lean-thm-{Model.LabelPart(name)}", stmt, proof, name));
-            Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
+            Console.WriteLine($"{name}: {stmt} ({tpr.Database.Shared.Size(proof)} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
+            Console.WriteLine($"{name}: {translator.LemmaSteps.Count - lemmasBefore} new lemmas ({translator.LemmaSteps.Values.Sum() - stepsBefore} flat steps)");
         }
         catch (Model.Refused e)
         {
             Console.WriteLine($"{name}: refused: {e.Message}");
+            if (System.Environment.GetEnvironmentVariable("TENET_DEBUG") is not null)
+            {
+                Console.Error.WriteLine(e.StackTrace);
+            }
+            tstatus = 1;
+        }
+        catch (InvalidOperationException e)
+        {
+            // A proof step that doesn't check: a bug in the translator, reported, and the other theorems go on.
+            Console.WriteLine($"{name}: failed: {e.Message}");
             tstatus = 1;
         }
     }
@@ -178,7 +193,8 @@ if (args.Length >= 5 && args[0] == "theorem")
     foreach (var d in done)
     {
         var dv = TenetZfc.Metamath.DistinctVars.Required(tpr.Database, d.Proof);
-        tw.Theorem(d.Label, $"The Lean theorem {d.Name}, proved through the model from its proof term.", d.Statement, d.Proof, dv.Select(p => $"{p.Item1} {p.Item2}"));
+        var proofOut = tw.Compressed ? d.Proof : tpr.Database.Shared.Expand(d.Proof);
+        tw.Theorem(d.Label, $"The Lean theorem {d.Name}, proved through the model from its proof term.", d.Statement, proofOut, dv.Select(p => $"{p.Item1} {p.Item2}"));
     }
     File.WriteAllText(args[3], tw.ToString());
     return tstatus;

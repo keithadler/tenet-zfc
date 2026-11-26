@@ -28,7 +28,29 @@ public sealed partial class Model
     private string UHyp => $"U e. {UniverseDomain}";
 
     /// <summary>A name as part of a label: labels allow only letters, digits and - _ . (c.{0,1} becomes c.u0_1).</summary>
-    public static string LabelPart(string name) => name.Replace("{", "u").Replace(",", "_").Replace("}", "");
+    public static string LabelPart(string name)
+    {
+        string r = name.Replace("{", "u").Replace(",", "_").Replace("}", "");
+        // Labels allow only letters, digits, '_', '-' and '.': any other character (congrFun' has a quote) is written
+        // as its code, between hyphens, which no Lean identifier contains.
+        if (r.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.'))
+        {
+            return r;
+        }
+        var sb = new System.Text.StringBuilder();
+        foreach (char ch in r)
+        {
+            if (char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.')
+            {
+                sb.Append(ch);
+            }
+            else
+            {
+                sb.Append('-').Append(((int)ch).ToString("x", System.Globalization.CultureInfo.InvariantCulture)).Append('-');
+            }
+        }
+        return sb.ToString();
+    }
 
     /// <summary>A closed level's value, or null when it mentions a parameter.</summary>
     public static int? LevelValue(Level l) => l switch

@@ -52,6 +52,7 @@ public sealed partial class Model
     /// <summary>Weak head normal form by the conversion steps, with ( ph -> ⟦e⟧ = ⟦e'⟧ ).</summary>
     private (Expr, Proof) WhnfFull(PCtx c, Expr e)
     {
+        using var prof = Prof.Time("WhnfFull");
         Proof cur = _d.Refl(c.Ph, TrIn(c, e));
         for (int i = 0; i < 2000; i++)
         {
