@@ -789,10 +789,12 @@ public sealed class NatBridge
 
         // Eq is =: lean.Eq.{1} at ( N , L , R ) is if ( R = L , 1o , (/) ).
         Name eqInst = t.Of("Eq.{1}");
-        var (es, ep, ed) = tt.Model.Equation(eqInst);
         if (!Db.Statements.ContainsKey("lean-Eq.u1-eq"))
         {
-            Add("lean-Eq.u1-eq", "The definitional equation of Eq.{1}.", es, ep, ed);
+            // With exactly the $d conditions its proof needs: the model's blanket list would keep the class variables
+            // apart, and the restatement substitutes terms that share U.
+            var (es, ep, _) = tt.Model.Equation(eqInst);
+            Add("lean-Eq.u1-eq", "The definitional equation of Eq.{1}.", es, ep, Required(ep));
         }
         Proof lm = Use("eqeltrd", dl, Mem(ph, nfl, hu));
         Proof rm = Use("eqeltrd", dr, Mem(ph, nfr, hu));

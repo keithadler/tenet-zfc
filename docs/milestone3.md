@@ -595,7 +595,7 @@ The cause is the one universe for every level: large elimination into `Sort (u+1
 
 ### Tower mode (`Universes.cs`, `Monomorph.cs`)
 
-The fix is opt-in (`new Model(…, tower: true)`, `define --tower`), so default outputs don't change:
+The fix is the tower, now the model's default (`new Model(…)`, `define`, `nat-bridge`, `model-survey`); `--single-universe` (`tower: false`) keeps the old model for what still needs it:
 
 - **A tower of universes.** The universe argument ranges over `lean.-tower`, a new definition:
 
@@ -610,6 +610,43 @@ The fix is opt-in (`new Model(…, tower: true)`, `define --tower`), so default 
 `Nat.below.{1}`'s motive is now `( z e. ( lean.Nat ` u ) |-> ( u ` (/) ) )`, in `( U. ran u ^m ( lean.Nat ` u ) )`. The definitions pass the definition check, and the definitional equations and computation rules verify as before.
 
 **What a theorem assumes.** `U e. lean.-tower`. ZFC doesn't prove that such a tower exists (it needs inaccessible cardinals), so, as before, a theorem holds in every model of the hypotheses. It adds no axiom.
+
+### Tower mode as the default
+
+Since tower mode makes structurally recursive definitions mean what Lean means, it is the default everywhere:
+
+- **`define`** monomorphizes, then translates. A constant's universe parameters are set to 0, as the spec's universe analysis says, unless its name gives levels: `Eq.{1}` is `Eq` at `Type`. Level 0 makes a `Sort u` parameter `Prop`, so `id.{0}` is `id` on proofs and translates to `(/)`; CI asks for `id.{1}`, `Function.comp.{1,1,1}`, `Eq.{1}` and `Nonempty.{1}`. A recursor's motive level may be left out: `Eq.rec.{1}` is the recursor of `Eq.{1}`.
+- **Nested blocks.** `Monomorph` now also instantiates a nested block's auxiliary recursors: `Rose.rec_1` becomes `Rose.{0}.rec_1`, beside `Rose.{0}.rec`.
+- **`nat-bridge`** runs in the tower and proves `Nat.add`'s computation rules, so `⟦Nat.add⟧ = +` has no hypotheses left ([bridges.md](bridges.md#natadds-computation-rules-proved)).
+- **`model-survey`** monomorphizes each definition at level 0 before translating it (below).
+- **`--single-universe`** (anywhere on the command line) gives the old model. Quotients and `Classical.choice` still need it: `QuotLiftIota` and `ChoiceSpec` are written for one universe (a well-ordering of `U`, `Quot`'s relation over `U`), so in the tower they are refused with that reason. CI translates `axioms.ndjson` with `--single-universe`. `--tower` is still accepted, and does nothing.
+
+Every fixture CI translates (`model`, `ind`, `props`, `rec`, `tree`, `natle`, `setvars`, `strings`, `mutual`; `axioms` in the one-universe model) passes metamath-exe, mmverify.py and mmj2's `definitionCheck` in tower mode. One instance is refused that the one-universe model translated: the computation rule of `Eq.refl.{0}` and `HEq.refl.{0}`, equality of proofs, whose field is a proof (`no hypothesis (/) e. A`). At `Eq.{1}` both translate.
+
+### Each output states its assumptions
+
+The spec's universe-analysis stage asks every output to say which universes it uses, and which declarations need them. Each output of `define`, `theorem` and `nat-bridge` now starts with that, after its title (`Model.Assumptions`, `Writer.Assumptions`). The `nat-bridge` output's:
+
+```
+$(
+Assumptions (the universe analysis of docs/spec.md).
+Universes: a tower U of Grothendieck universes. Each theorem has the hypothesis U e. lean.-tower: U is
+an increasing omega-sequence of Grothendieck universes, the first containing omega, and Lean's Sort (k+1)
+is ( U ` k ). ZFC does not prove that such a tower exists (that needs inaccessible cardinals), so each
+theorem holds in every model of ZFC that has one. No axiom is added.
+Levels used: 1 universe, ( U ` (/) ) (Lean's Type 0).
+( U ` (/) ) (Type 0) is used directly by: PProd.{1,1}, PProd.mk.{1,1}, PProd.{1,1}.rec, Nat.below.{1},
+  Nat.brecOn.go.{1}, Nat.brecOn.{1}, Nat.casesOn.{1}, Nat.add.match_1.{1}.
+U. ran U, the whole tower, is the codomain of the motives of: Nat.rec, PUnit.{1}.rec, PProd.{1,1}.rec, PProd.rec.
+  (a recursor's motive level is left open, so one recursor serves every elimination level)
+U. ran U also stands for a universe parameter left open, in: PProd, PProd.mk.
+  (a projection names its structure without universe levels, so the structure is defined with them open)
+$)
+```
+
+- **Levels used** counts the tower's levels that some definition names, `( U ` k )` for Lean's `Type k`. One level means one universe, the first, which contains ω. A definition counts when it uses the level directly; one that only uses other constants needs what they need.
+- **The whole tower** appears where a level is left open: a recursor's motive level (one recursor serves every elimination level), and a structure that a projection names. A projection carries no universe levels, so its structure isn't monomorphized; that structure is translated with its parameters ranging over the whole tower.
+- A one-universe output says instead that it has the hypothesis `U e. Univ`, and that structurally recursive definitions collapse in it.
 
 ### How a theorem is proved
 
@@ -665,7 +702,7 @@ Three small lemmas are proved once per output: `lean-tw` (what the tower hypothe
 | `Nat.add_zero` | `rfl`, so `n + 0` is unfolded to `n` through `Nat.add`, `Nat.brecOn`, `Nat.rec` and the literal `0` | 45 (1,147,634) | 1,665,317 | 383 KB | 6 min |
 | `Nat.zero_add` | `Nat.brecOn` into `Prop`, a matcher, `congrArg`, `rfl` | 61 (22,854,344) | 69,124 | 678 KB | 15 min |
 
-Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its own and together. CI proves both into one output (863 KB, 13 minutes here; the second reuses the first's lemmas) and runs all three checks on it.
+Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its own and together. CI proves both into one output with the Nat bridge, which also restates them in `NN0` (`nat-bridge … Nat.add_zero Nat.zero_add`; see [bridges.md](bridges.md#leans-theorems-restated-in-setmms-arithmetic)), and runs all three checks on it. On their own, `theorem` proves both into one output of 863 KB in 13 minutes; the second reuses the first's lemmas.
 
 **`Nat.succ_add` and `List.length_append` aren't proved yet.** Both get past every construct they use: induction on `Nat` and on `List α`, `Eq.rec`, `congrArg`, `congrFun'`, `propext`, `eq_self`, the literal `1`. Both then run out of `set.mm`'s 26 set variables, in the typing of `Nat.succ_add._f` and `List.append._f`, whose matchers nest binders deeper than that. PR #2 (extra set variables) lifts that limit; the translator already takes its quantified variables from set.mm's letters, so it merges with #2 as it is.
 
@@ -683,6 +720,6 @@ Both pass metamath-exe, mmverify.py and mmj2's `definitionCheck`, each on its ow
          ( ( lean.instOfNatNat ` U ) ` ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` 0 ) ) ) ) ) ) ` A ) )
 ```
 
-That is, `A + 0 = A` in the model, with `+` as Lean defines it. Restating it as `( A + 0 ) = A` in `set.mm`'s arithmetic needs the bridge theorem `⟦Nat.add⟧ = +`, now possible in tower mode.
+That is, `A + 0 = A` in the model, with `+` as Lean defines it. `nat-bridge … Nat.add_zero` restates it as `( ( U e. lean.-tower /\ A e. NN0 ) -> ( A + 0 ) = A )` in `set.mm`'s arithmetic, through the bridge theorem `⟦Nat.add⟧ = +`, which tower mode made provable ([bridges.md](bridges.md#leans-theorems-restated-in-setmms-arithmetic)).
 
 **Where the size goes.** Most of the steps are typing lemmas for the constants structural recursion goes through: `Nat.brecOn.go` (361,529 steps), `Nat.add._f` (289,688), the computation rules. `Nat.zero_add._f` alone is 20.9 million flat steps: its matcher's motive carries the whole statement, and each typing step repeats it. Compression shares the repeats (678 KB), but proving takes 15 minutes. Sharing types between steps, as Lean's kernel does, is the obvious next optimization.
