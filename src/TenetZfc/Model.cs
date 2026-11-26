@@ -1744,7 +1744,9 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             string y = FirstVar(v => !taken.Contains(v));
             string bodyY = Subst(body, x, y);
             Proof ren = pr.Apply("cbvmptv", S(("x", x), ("y", y), ("A", dom), ("B", body), ("C", bodyY)),
-                _d.Congruence("class", Subst(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}")))));
+                body.Split(' ').Contains(x)
+                    ? _d.Congruence("class", Subst(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}"))))
+                    : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", $"{x} = {y}")), pr.Apply("eqid", S(("A", body)))));
             string mapX = $"( {x} e. {dom} |-> {body} )", mapY = $"( {y} e. {dom} |-> {bodyY} )";
             fIsMap = pr.Apply("eqtri", S(("A", f), ("B", mapX), ("C", mapY)), fIsMap, ren);
             (x, body) = (y, bodyY);
