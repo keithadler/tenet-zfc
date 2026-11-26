@@ -94,8 +94,9 @@ v0.1 is the first version someone else can install and use to get independently 
 **Release engineering**
 - [x] CI on Linux, macOS and Windows; every fixture checked by metamath-exe, mmverify.py and mmj2
 - [x] The full test suite passing on macOS: one test overflowed the stack there, fixed by [#2](https://github.com/keithadler/tenet-zfc/pull/2)
-- [ ] One command from a Lean module to checked output: export, trace, translate, verify
-- [ ] A packaged CLI (a `dotnet tool` or prebuilt binaries) and a tagged release with the verified outputs attached
+- [x] One command from a Lean module to checked output: `tenet-zfc run` exports, traces, translates and verifies, and reports on each declaration
+- [x] A packaged CLI (a `dotnet tool` and prebuilt binaries for Linux, macOS and Windows), and a release workflow that attaches the verified outputs; [CHANGELOG.md](CHANGELOG.md) and [CONTRIBUTING.md](CONTRIBUTING.md)
+- [ ] Tag v0.1.0, once the items above are done
 
 **After v0.1:** universe lowering, so that results come out in plain ZFC (milestone 4); then a headline theorem end to end (milestone 5).
 
@@ -133,23 +134,93 @@ The translator unfolds Lean's own definitions of ℕ, ℝ, ζ and the rest into 
 
 ## Quick start
 
-Requirements: [.NET](https://dotnet.microsoft.com) 8 or 10, plus [`set.mm`](https://github.com/metamath/set.mm), [metamath-exe](https://github.com/metamath/metamath-exe) and [mmverify.py](https://github.com/david-a-wheeler/mmverify.py) to check outputs. Java 11 and [mmj2](https://github.com/digama0/mmj2) are needed for the definition check. CI pins exact versions of all of them; see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+### Install
+
+Requirements: [.NET](https://dotnet.microsoft.com) 8 or 10 for the `dotnet tool` (the prebuilt binaries need nothing), plus the checkers: [`set.mm`](https://github.com/metamath/set.mm), [metamath-exe](https://github.com/metamath/metamath-exe), [mmverify.py](https://github.com/david-a-wheeler/mmverify.py) with Python 3, and [mmj2](https://github.com/digama0/mmj2) with Java 11. To start from Lean code you also need Lean through [elan](https://github.com/leanprover/elan), and [leanout](https://github.com/keithadler/leanout); [Tenet](https://github.com/keithadler/tenet) is optional. [CONTRIBUTING.md](CONTRIBUTING.md#set-up-the-checkers) sets them up at the versions CI pins.
+
+```bash
+# From a release: the .nupkg (or a binary for linux-x64, osx-arm64 or win-x64) is attached to each GitHub Release
+dotnet tool install -g tenet-zfc --add-source <directory holding tenet-zfc.<version>.nupkg> --version <version>
+
+# Or from source
+dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- --version
+```
+
+### One command: a Lean file to checked ZFC proofs
+
+[`tests/fixtures/Example.lean`](tests/fixtures/Example.lean) declares an enumeration, a function on it, a polymorphic definition and a theorem:
+
+```lean
+inductive Color where
+  | red | green | blue
+
+def Color.next : Color → Color
+  | .red => .green
+  | .green => .blue
+  | .blue => .red
+
+def twice (f : α → α) (x : α) : α := f (f x)
+
+theorem two_add_two : 2 + 2 = 4 := rfl
+```
+
+Tell `tenet-zfc` where the tools are, with flags or environment variables (`tenet-zfc run --help` lists them; programs on the PATH are found by themselves), and run it:
+
+```bash
+export TENET_ZFC_SETMM=~/mm/setmm TENET_ZFC_METAMATH=~/mm/metamath TENET_ZFC_MMVERIFY=~/mm/mmverify/mmverify.py \
+       TENET_ZFC_MMJ2=~/mm/mmj2 TENET_ZFC_LEANOUT=~/leanout/.lake/build/bin/leanout TENET_ZFC_TENET=~/tenet/tenet
+tenet-zfc run tests/fixtures/Example.lean --out example-out
+```
+
+```
+tenet-zfc run: tests/fixtures/Example.lean -> example-out
+  compile    lean: tests/fixtures/Example.lean -> build/Example.olean (3.9s)
+  export     leanout: Example -> export.ndjson (1.8s)
+  select     8 declarations: 1 theorems, 7 others
+  trace      tenet: 1 theorems re-checked -> trace.ndjson (0.3s)
+  replay     1 declarations, 271 steps re-derived without Tenet, 0 failures
+  translate  from traces: 1 of 1 theorems -> trace-theorems.mm
+  translate  define: 7 of 7 -> definitions.mm
+  verify     trace-theorems.mm: metamath-exe ok (36s), mmverify.py ok (111s), mmj2 definitionCheck ok (0s)
+  verify     definitions.mm: metamath-exe ok (32s), mmverify.py ok (100s), mmj2 definitionCheck ok (152s)
+
+  declaration  kind         result      output / reason
+  Color        inductive    proved      definitions.mm (through the model)
+  Color.blue   constructor  proved      definitions.mm (through the model)
+  Color.green  constructor  proved      definitions.mm (through the model)
+  Color.next   definition   proved      definitions.mm (through the model)
+  Color.rec    recursor     proved      definitions.mm (through the model)
+  Color.red    constructor  proved      definitions.mm (through the model)
+  twice        definition   proved      definitions.mm (through the model)
+  two_add_two  theorem      proved      trace-theorems.mm (from its trace)  |- ( 2 + 2 ) = 4
+```
+
+What each step does:
+
+1. **Compile and export.** `lean` compiles the file; leanout exports the module and everything it uses. `run` lists the declarations the module itself declares, leaving out what Lean generates around them (`casesOn`, `noConfusion`, …; `--all` keeps them, `--decl a,b` picks).
+2. **Trace.** When Tenet is found, it re-checks the theorems and records its derivations; `tenet-zfc` replays them without Tenet.
+3. **Translate.** Theorems the milestone 2 translator covers are proved from their traces, as statements in `set.mm`'s own vocabulary. Other theorems go through the model (`tenet-zfc theorem`), each under a time limit (`--timeout`, 30 minutes by default). Everything else goes through `define`: for a definition, its definitional equation is proved; for an inductive type, its constructors' computation rules.
+4. **Verify.** Every output must pass metamath-exe, mmverify.py and mmj2's definitionCheck. Most of the minutes go to re-checking `set.mm` itself, which each output includes.
+5. **Report.** Each declaration is **proved** (translated, and the output passed all three checks), **refused** (outside what the translator covers, with the reason), or **failed** (a checker rejected the output, or the translator crashed: a bug to report). `report.json`, the outputs and every tool's log are in the `--out` directory. The exit status is 0 only when every declaration was proved.
+
+For a module in a Lake project, run it under `lake env` so that `LEAN_PATH` reaches the project's `.olean` files: `lake env tenet-zfc run MyProject.Basic`. An existing export works too: `tenet-zfc run export.ndjson --decl Nat.add`.
+
+### The commands underneath
 
 ```bash
 # The milestone 2 gate: 2 + 2 = 4 from its trace
-dotnet run --project src/TenetZfc.Cli -- emit tests/fixtures/gate.ndjson tests/fixtures/gate.trace.ndjson set.mm gate.mm
-metamath "read gate.mm" "verify proof *" exit      # fail on any ?Error line
-python3 mmverify.py gate.mm
-```
+tenet-zfc emit tests/fixtures/gate.ndjson tests/fixtures/gate.trace.ndjson set.mm gate.mm
+tenet-zfc verify gate.mm        # or: metamath "read gate.mm" "verify proof *" exit; python3 mmverify.py gate.mm
 
-```bash
 # The generic model: Nat, its constructors and recursor, and their computation rules
-dotnet run --project src/TenetZfc.Cli -- define tests/fixtures/recursive.ndjson set.mm rec.mm Nat Nat.zero Nat.succ Nat.rec
+tenet-zfc define tests/fixtures/recursive.ndjson set.mm rec.mm Nat Nat.zero Nat.succ Nat.rec
 scripts/check-definitions java path/to/mmj2 rec.mm
 ```
 
 | Command | What it does |
 |---|---|
+| `run <Module \| File.lean \| export>` | Export, trace, translate and verify in one command, with a report on each declaration |
+| `verify <out.mm>…` | Checks outputs with metamath-exe, mmverify.py and mmj2's definitionCheck |
 | `replay <export> <trace>` | Re-derives every step of a Tenet trace, without Tenet |
 | `emit <export> <trace> <set.mm> <out.mm>` | Writes `set.mm` theorems for the theorems the milestone 2 translator covers |
 | `define <export> <set.mm> <out.mm> <name>…` | Translates constants through the generic model, with their equations and computation rules |
@@ -158,7 +229,7 @@ scripts/check-definitions java path/to/mmj2 rec.mm
 | `nat-bridge <export> <set.mm> <out.mm> [n…]` | Proves that the model's `Nat` is `NN0` (zero, successor, literals, `Nat.add`), with `F ( n ) = n` for each numeral given |
 | `survey <export>`, `model-survey <export>` | Measure how much of an export translates, and what blocks the rest |
 
-To make a trace, run `tenet check <export.ndjson> --trace <trace.ndjson>` with [Tenet](https://github.com/keithadler/tenet). To make an export, run `leanout <Module> -o <out.ndjson>` with [leanout](https://github.com/keithadler/leanout).
+The lower-level commands take an export and, for `emit` and `replay`, a trace. To make an export, run `leanout <Module> -o <out.ndjson>` with [leanout](https://github.com/keithadler/leanout); to make a trace, run `tenet check <export.ndjson> --trace <trace.ndjson>` with [Tenet](https://github.com/keithadler/tenet).
 
 ## Repository
 
@@ -171,9 +242,10 @@ src/TenetZfc/          the replayer, the generic model, the Metamath prover and 
   ProofKit.cs          a small tactic layer for writing set.mm proofs in C#
   Typing.cs            type inference, for proof irrelevance
   Metamath.cs          reads set.mm, parses its syntax, assembles and compresses proofs
-src/TenetZfc.Cli/      the tenet-zfc command
+src/TenetZfc.Cli/      the tenet-zfc command; Run.cs is `tenet-zfc run`, Checkers.cs the three checkers
 tests/                 unit tests and fixtures exported from Lean 4.36.0
 scripts/               check-definitions (mmj2's definitionCheck)
+.github/workflows/     ci.yml (every push), release.yml (on a v* tag)
 docs/                  spec, design and status
 ```
 

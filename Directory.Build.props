@@ -8,6 +8,10 @@
     <Authors>Keith Adler</Authors>
     <Copyright>Copyright 2026 Keith Adler</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <!-- The version: 0.1.0-dev until a release; the release workflow sets Version from the v* tag. -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>dev</VersionSuffix>
+    <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/keithadler/tenet-zfc</RepositoryUrl>
   </PropertyGroup>
 </Project>

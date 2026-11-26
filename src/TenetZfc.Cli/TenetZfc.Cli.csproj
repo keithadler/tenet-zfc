@@ -3,8 +3,21 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>tenet-zfc</AssemblyName>
     <RootNamespace>TenetZfc.Cli</RootNamespace>
+    <!-- A dotnet tool: `dotnet tool install -g tenet-zfc`, or with add-source for a downloaded .nupkg. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>tenet-zfc</ToolCommandName>
+    <PackageId>tenet-zfc</PackageId>
+    <Title>tenet-zfc</Title>
+    <Description>Translates Lean 4 proofs into ZFC proofs in Metamath's set.mm, checked by metamath-exe, mmverify.py and mmj2. One command, tenet-zfc run, goes from a Lean module to checked output.</Description>
+    <PackageTags>lean;lean4;metamath;zfc;set-theory;proof-translation;formal-verification</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/keithadler/tenet-zfc</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../TenetZfc/TenetZfc.csproj" />
+    <EmbeddedResource Include="ModuleDecls.lean" LogicalName="ModuleDecls.lean" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
+    <None Include="../../NOTICE" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>
