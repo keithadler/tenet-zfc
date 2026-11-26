@@ -108,7 +108,7 @@ jobs:
           done
       - name: Prove Lean theorems through the generic model and verify (milestone 3, theorems through the model)
         run: |
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem tests/fixtures/theorems.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/thm.mm" THEOREMS_PLACEHOLDER
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem tests/fixtures/theorems.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/thm.mm" Nat.add_zero Nat.zero_add
           out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read thm.mm" "verify proof *" "exit")
           echo "$out" | tail -2
           if echo "$out" | grep -q '?Error'; then exit 1; fi

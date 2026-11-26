@@ -666,7 +666,8 @@ public sealed partial class Model
         }
         args.Add((ClassVars[ps.Count], p.Struct, sTy));
         Proof r = InstLemma(c, label, args);
-        return new Typed(r, _d.Split(r.Proves).X is var x ? x[(x.IndexOf(" e. ", StringComparison.Ordinal) + 4)..] : "", InferIn(c, p));
+        string ty = pr.Render(pr.Parse("wff", _d.Split(r.Proves).X.Split(' '))!.Children[1]);
+        return new Typed(r, ty, InferIn(c, p));
     }
 
     /// <summary>
