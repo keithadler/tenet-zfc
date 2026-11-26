@@ -20,7 +20,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("model.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()));
+        var m = new Model(t, env, new Prover(new Database()), tower: false);
         // id := fun {α : Sort u} (a : α) => a
         Assert.Equal("( x e. u |-> ( y e. x |-> y ) )", m.Class(env.Find(t.Of("id"))!.Value!, "u", new Dictionary<ulong, string>()));
         // Function.comp's type: a non-dependent arrow is a set of functions, ( B ^m A ).
@@ -33,7 +33,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("natle.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()));
+        var m = new Model(t, env, new Prover(new Database()), tower: false);
         // Acc's premise is a function into Acc (not finitary): not in the model yet.
         Assert.Throws<Model.Refused>(() => m.Define(t.Of("No.such.constant")));
         var e = Assert.Throws<Model.Refused>(() => m.Define(t.Of("No.such.constant.either")));
@@ -53,7 +53,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("model.ndjson"));
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
-        var m = new Model(t, env, pr);
+        var m = new Model(t, env, pr, tower: false);
         var w = new Writer("set.mm", "tenet-zfc model test", pr.Database);
         var eqs = new List<(string, Metamath.Expr, List<string>, string[])>();
         foreach (string n in new[] { "id", "Function.comp", "Function.const" })
@@ -105,7 +105,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("model.ndjson"));
-        var m = new Model(t, env, new Prover(Database.Read(Path.Combine(SetMm, "set.mm"))));
+        var m = new Model(t, env, new Prover(Database.Read(Path.Combine(SetMm, "set.mm"))), tower: false);
         foreach (string n in new[] { "id", "Function.comp", "Function.const" })
         {
             m.Define(t.Of(n));
@@ -139,7 +139,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("inductives.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         m.Define(t.Of("Option.rec"));
         string decls = m.Declarations;
         output.WriteLine(decls);
@@ -159,7 +159,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("inductives.ndjson"));
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
-        var m = new Model(t, env, pr);
+        var m = new Model(t, env, pr, tower: false);
         var rules = new List<(string, Metamath.Expr, List<string>, string[])>();
         foreach (string c in new[] { "Bool.false", "Bool.true", "Prod.mk", "Option.none", "Option.some" })
         {
@@ -207,7 +207,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("props.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         foreach (string n in new[] { "Eq.rec", "And.rec", "False.rec", "Or.rec" })
         {
             m.Define(t.Of(n));
@@ -245,7 +245,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("props.ndjson"));
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
-        var m = new Model(t, env, pr);
+        var m = new Model(t, env, pr, tower: false);
         var rules = new List<(string, Metamath.Expr, List<string>, string[])>();
         foreach (string c in new[] { "Eq.refl", "And.intro", "True.intro" })
         {
@@ -331,7 +331,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("recursive.ndjson"));
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
-        var m = new Model(t, env, pr);
+        var m = new Model(t, env, pr, tower: false);
         var (zs, zp, zd) = m.Iota(t.Of("Nat.zero"));
         var (ss, sp, sd) = m.Iota(t.Of("Nat.succ"));
         output.WriteLine($"{zs} ({zp.Count} steps)\n{ss} ({sp.Count} steps)");
@@ -375,7 +375,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("tree.ndjson"));
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
-        var m = new Model(t, env, pr);
+        var m = new Model(t, env, pr, tower: false);
         var (ls, lp, ld) = m.Iota(t.Of("Tree.leaf"));
         var (ns, np, nd) = m.Iota(t.Of("Tree.node"));
         output.WriteLine($"{ls} ({lp.Count} steps)\n{ns} ({np.Count} steps)");
@@ -417,7 +417,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         // Tm and Args are defined together; Rose holds a List (Rose α), whose auxiliary type is List_1 in its block.
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("mutual.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         foreach (string n in new[] { "Tm.rec", "Args.rec", "Rose.rec", "Rose.rec_1" })
         {
             m.Define(t.Of(n));
@@ -441,7 +441,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("syntax.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         foreach (string n in new[] { "Lean.Syntax.rec", "Lean.Syntax.rec_1", "Lean.Syntax.rec_2", "Lean.Syntax.node" })
         {
             m.Define(t.Of(n));
@@ -485,7 +485,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("mutual.ndjson"));
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
-        var m = new Model(t, env, pr);
+        var m = new Model(t, env, pr, tower: false);
         // Tm.app's recursive fields are a Tm and an Args: each gets its own type's recursor.
         var (app, appP, appD) = m.Iota(t.Of("Tm.app"));
         // Rose.node's field is a List (Rose α): it is in the auxiliary type's slice by induction over List's stages.
@@ -536,7 +536,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("natle.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         m.Define(t.Of("Nat.le.rec"));
         m.Define(t.Of("UInt8.size"));
         string d = m.Declarations;

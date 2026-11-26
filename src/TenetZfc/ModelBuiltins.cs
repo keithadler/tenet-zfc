@@ -123,6 +123,13 @@ public sealed partial class Model
             Emit(n, tok, "(/)", NewScope(), c.Kind == ConstKind.Axiom ? "axiom (a proof, so (/))" : "quotient axiom (a proof, so (/))");
             return;
         }
+        string baseName = n is StrName { Value: ['{', ..] } inst ? $"{inst.Prefix}" : $"{n}";   // an instance, c.{0,1}
+        if (tower && baseName is "Quot" or "Quot.mk" or "Quot.lift" or "Classical.choice")
+        {
+            // Their lemmas (QuotLiftIota, ChoiceSpec) are written for one universe: a well-ordering of U, Quot's
+            // relation over U. Use --single-universe for these until they are ported to the tower.
+            throw new Refused($"{n}: quotients and choice are not in the tower model yet; use --single-universe");
+        }
         switch ($"{n}")
         {
             case "Quot" or "Quot.mk" or "Quot.lift" when c.Kind == ConstKind.Quot:
