@@ -127,6 +127,35 @@ public sealed class Recursion(Prover pr)
         return (all.Proves, all.Proof, ["x y z", "x y z ph", "x y z F", "x y z A", "x y M", "x y N"]);
     }
 
+    /// <summary>The label of <see cref="RankSe"/>'s theorem.</summary>
+    public const string RankSeLabel = "lean-rankse";
+
+    /// <summary>
+    /// |- RankLt Se _V: the sets of smaller rank than z are a set, since they are all in ( R1 ` ( rank ` z ) )
+    /// (rankr1ag). The recursors of mutual and nested blocks recurse over every set, so they need it on _V.
+    /// </summary>
+    public (TenetZfc.Metamath.Expr Statement, List<string> Proof, string[] Distinct) RankSe()
+    {
+        const string r = RankLt, r1 = "( R1 ` ( rank ` z ) )", below = "{ w e. _V | w " + r + " z }";
+        Proof wf = pr.Apply("eleqtrri", S(("A", "w"), ("B", "_V"), ("C", "U. ( R1 \" On )")), pr.Apply("vex", S(("x", "w"))), pr.Apply("unir1", S()));
+        Proof dom = pr.Apply("eleqtrri", S(("A", "( rank ` z )"), ("B", "On"), ("C", "dom R1")), pr.Apply("rankon", S(("A", "z"))),
+            pr.Apply("ax-mp", S(("ph", "R1 Fn On"), ("ps", "dom R1 = On")), pr.Apply("r1fnon", S()), pr.Apply("fndm", S(("F", "R1"), ("A", "On")))));
+        Proof inR1 = pr.Apply("mp2an", S(("ph", "w e. U. ( R1 \" On )"), ("ps", "( rank ` z ) e. dom R1"), ("ch", $"( w e. {r1} <-> ( rank ` w ) e. ( rank ` z ) )")),
+            wf, dom, pr.Apply("rankr1ag", S(("A", "w"), ("B", "( rank ` z )"))));
+        Proof imp = pr.Apply("sylbi", S(("ph", $"w {r} z"), ("ps", "( rank ` w ) e. ( rank ` z )"), ("ch", $"w e. {r1}")),
+            Brab("w", "z"), pr.Apply("biimpri", S(("ph", $"w e. {r1}"), ("ps", "( rank ` w ) e. ( rank ` z )")), inR1));
+        Proof all = pr.Apply("rgen", S(("x", "w"), ("A", "_V"), ("ph", $"( w {r} z -> w e. {r1} )")),
+            pr.Apply("a1i", S(("ph", $"( w {r} z -> w e. {r1} )"), ("ps", "w e. _V")), imp));
+        Proof ss = pr.Apply("mpbir", S(("ph", $"{below} C_ {r1}"), ("ps", $"A. w e. _V ( w {r} z -> w e. {r1} )")), all,
+            pr.Apply("rabss", S(("x", "w"), ("A", "_V"), ("ph", $"w {r} z"), ("B", r1))));
+        Proof set = pr.Apply("ssexi", S(("A", below), ("B", r1)), pr.Apply("fvex", S(("F", "R1"), ("A", "( rank ` z )"))), ss);
+        Proof every = pr.Apply("rgen", S(("x", "z"), ("A", "_V"), ("ph", $"{below} e. _V")),
+            pr.Apply("a1i", S(("ph", $"{below} e. _V"), ("ps", "z e. _V")), set));
+        Proof se = pr.Apply("mpbir", S(("ph", $"{r} Se _V"), ("ps", $"A. z e. _V {below} e. _V")), every,
+            pr.Apply("df-se", S(("R", r), ("A", "_V"), ("x", "z"), ("y", "w"))));
+        return (se.Proves, se.Proof, ["x y z w"]);
+    }
+
     /// <summary>|- ( a RankLt b <-> ( rank ` a ) e. ( rank ` b ) ), for set variables a and b, by brab.</summary>
     public Proof Brab(string a, string b)
     {

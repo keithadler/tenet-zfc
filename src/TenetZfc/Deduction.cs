@@ -204,6 +204,9 @@ public sealed class Deduction(Prover pr)
                 return Syl(pr.Apply("3jca", S(("ph", h), ("ps", $"{L("R")} = {R("R")}"), ("ch", $"{L("A")} = {R("A")}"), ("th", $"{L("X")} = {R("X")}")),
                         Sub("R") ?? Refl(h, L("R")), Sub("A") ?? Refl(h, L("A")), Sub("X") ?? Refl(h, L("X"))),
                     pr.Apply("predeq123", S(("R", L("R")), ("S", R("R")), ("A", L("A")), ("B", R("A")), ("X", L("X")), ("Y", R("X")))));
+            case "cima": // ( A " B )
+                return pr.Apply("imaeq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
+                    Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
             case "cres": // ( A |` B )
                 return pr.Apply("reseq12d", S(("ph", h), ("A", L("A")), ("B", R("A")), ("C", L("B")), ("D", R("B"))),
                     Sub("A") ?? Refl(h, L("A")), Sub("B") ?? Refl(h, L("B")));
