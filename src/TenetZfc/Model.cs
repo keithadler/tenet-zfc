@@ -216,13 +216,15 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
                 Define(ind);
                 RefuseIfPartial(n, ind);
                 return;
-            case ConstKind.Recursor when $"{n}".EndsWith(".rec", StringComparison.Ordinal):
-                Define(t.Of($"{n}"[..^4]));
-                RefuseIfPartial(n, t.Of($"{n}"[..^4]));
+            // The inductive type is the recursor's name without its last part. Taken from the name itself, not by
+            // reparsing its text, which loses numeric parts (_private.….0.…; found by the Init-wide run).
+            case ConstKind.Recursor when n is StrName { Value: "rec" } r:
+                Define(r.Prefix);
+                RefuseIfPartial(n, r.Prefix);
                 return;
-            case ConstKind.Recursor when IsAuxRecursorName(n):
-                Define(t.Of($"{n}"[..$"{n}".LastIndexOf(".rec_", StringComparison.Ordinal)]));   // a nested block's auxiliary recursor
-                RefuseIfPartial(n, t.Of($"{n}"[..$"{n}".LastIndexOf(".rec_", StringComparison.Ordinal)]));
+            case ConstKind.Recursor when IsAuxRecursorName(n) && n is StrName aux:
+                Define(aux.Prefix);   // a nested block's auxiliary recursor, I.rec_k
+                RefuseIfPartial(n, aux.Prefix);
                 return;
             case ConstKind.Axiom or ConstKind.Quot:
                 DefineBuiltin(c);   // ModelBuiltins.cs
@@ -407,7 +409,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             throw new Refused($"{n} is an indexed inductive type (not a proposition); not in the model yet");
         }
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
-        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        ConstInfo rec = env.Find(t.Str(n, "rec")) ?? throw new Refused($"{n}.rec is not in the export");
         foreach (ConstInfo c in ctors.Append(rec))
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
@@ -475,7 +477,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     {
         Name n = ind.Name;
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
-        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        ConstInfo rec = env.Find(t.Str(n, "rec")) ?? throw new Refused($"{n}.rec is not in the export");
         foreach (ConstInfo c in ctors.Append(rec))
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
@@ -572,7 +574,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     {
         Name n = ind.Name;
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
-        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        ConstInfo rec = env.Find(t.Str(n, "rec")) ?? throw new Refused($"{n}.rec is not in the export");
         foreach (ConstInfo c in ctors.Append(rec))
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
@@ -742,7 +744,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     {
         Name n = ind.Name;
         List<ConstInfo> ctors = ind.Ctors.Select(c => env.Find(c) ?? throw new Refused($"{c} is not in the export")).ToList();
-        ConstInfo rec = env.Find(t.Of($"{n}.rec")) ?? throw new Refused($"{n}.rec is not in the export");
+        ConstInfo rec = env.Find(t.Str(n, "rec")) ?? throw new Refused($"{n}.rec is not in the export");
         foreach (ConstInfo c in ctors.Append(rec))
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
@@ -1079,7 +1081,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         {
             return BlockIota(ind.Name, ctorName);   // Model.Mutual.cs
         }
-        ConstInfo rec = env.Find(t.Of($"{ind.Name}.rec"))!;
+        ConstInfo rec = env.Find(t.Str(ind.Name, "rec"))!;
         if (_choiceDependent.Contains(Token(ind.Name)!) || _choiceDependent.Contains(Token(ctorName)!) || _choiceDependent.Contains(Token(rec.Name)!))
         {
             throw new Refused($"{ind.Name} depends on Classical.choice; its computation rules aren't in the model yet");
