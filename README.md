@@ -34,7 +34,7 @@ lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
 | 1 | **Trace** | Replaying Tenet's trace re-derives every check it made, on all of Lean core | ✅ 64,045 declarations, 86 million steps, 0 failures |
 | 2 | **Bridge library** | `2 + 2 = 4` and `List.length_append` translate, and both verifiers accept them | ✅ verified in CI |
 | 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 definitions mostly done; 28 `Init` theorems proved through the model |
-| 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 started: a universe tower (opt-in) |
+| 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 started: a universe tower (the default), and each output states the universes it uses |
 | 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | not started |
 
 ### What works today
@@ -55,7 +55,7 @@ lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
 | quotients, `propext`, `Classical.choice` | equivalence classes; `set.mm`'s choice | `Quot.lift`'s computation rule |
 | more than 26 bound variables | set variables the output declares itself (`$v`, `$f setvar`), which add no axiom | definitional equations |
 
-On Lean 4.36's `Init`, **13,958 of 17,590 definitions (79%)** translate together with everything they use, up from 48 when milestone 3 began.
+On Lean 4.36's `Init`, **14,105 of 17,590 definitions (80%)** translate together with everything they use, in the tower model, up from 48 when milestone 3 began (13,958 in the one-universe model).
 
 **Theorems.** `tenet-zfc theorem` proves Lean theorems from their own proof terms, through the model. A proof's typing becomes membership, `(/) e. ⟦P⟧`, and each conversion becomes an equation.
 
@@ -68,11 +68,11 @@ A starter library of **28 `Init` theorems about `Nat` and `List`** is proved thi
 
 Two are refused, each with its reason: `Nat.succ_ne_zero` and `Nat.le_refl`. Sizes, times and reasons are in [docs/milestone3.md](docs/milestone3.md#results-a-starter-library).
 
-**Bridges.** The model's `Nat` is proved to be `set.mm`'s `NN0`: zero to `0`, `succ` to `+ 1`, literals to numerals. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. See [docs/bridges.md](docs/bridges.md).
+**Bridges.** The model's `Nat` is proved to be `set.mm`'s `NN0`: zero to `0`, `succ` to `+ 1`, literals to numerals, and `⟦Nat.add⟧` to `+`, with no hypotheses but the universe tower's. Lean's `Nat.add_zero` and `Nat.zero_add`, proved through the model, come out as `( A + 0 ) = A` and `( 0 + A ) = A` in `set.mm`'s arithmetic. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. See [docs/bridges.md](docs/bridges.md).
 
 **Proof size.** Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
 
-**A gap found, and fixed opt-in.** With a single universe, `Nat.below` is empty, so `Nat.add` and every other function defined by structural recursion collapse in the model. Tower mode fixes this with an increasing sequence of Grothendieck universes, one per level. `theorem` uses it; `define` takes `--tower`. It isn't the default yet. See [docs/milestone3.md](docs/milestone3.md#theorems-through-the-model-built-a-starter-library-of-28-nat-and-list-theorems).
+**Universes.** With a single universe, `Nat.below` is empty, so `Nat.add` and every other function defined by structural recursion collapse in the model. The model's default is therefore a tower: an increasing sequence of Grothendieck universes, one per level, under the hypothesis `U e. lean.-tower`. ZFC doesn't prove such a tower exists, so every result holds in the models of ZFC that have one; no axiom is added. Each output's header states this, how many levels it uses and which declarations use each. `--single-universe` keeps the old model, which quotients and choice still need. See [docs/milestone3.md](docs/milestone3.md#tower-mode-as-the-default).
 
 ## Road to the first release (v0.1)
 
@@ -91,9 +91,11 @@ v0.1 is the first version someone else can install and use to get independently 
 - [x] Share types between proof steps, as Lean's kernel does, so that proofs take minutes, not hours: shared subproofs, memoized typing and a faster parser (`Nat.add_zero` 209 s → 6 s)
 
 **Soundness and trust**
-- [ ] Tower mode as the default, so that structurally recursive definitions mean what Lean means
-- [ ] The bridge `⟦Nat.add⟧ = +` proved without hypotheses (possible in tower mode), and the same for `List`/`Word`, `length`/`#` and `++`
-- [ ] Each output's header states its assumptions: which universes it uses, and which declarations need them
+- [x] Tower mode as the default, so that structurally recursive definitions mean what Lean means. Quotients and choice still need `--single-universe`.
+- [x] The bridge `⟦Nat.add⟧ = +` proved without hypotheses, and `Nat.add_zero`/`Nat.zero_add` restated as `( A + 0 ) = A` and `( 0 + A ) = A`
+- [ ] The same for `List`/`Word`, `length`/`#` and `++`, with `List.length_append` restated as `ccatlen`
+- [x] Each output's header states its assumptions: which universes it uses, and which declarations need them
+- [ ] Quotients and choice in the tower model
 
 **Release engineering**
 - [x] CI on Linux, macOS and Windows; every fixture checked by metamath-exe, mmverify.py and mmj2
@@ -156,11 +158,13 @@ scripts/check-definitions java path/to/mmj2 rec.mm
 |---|---|
 | `replay <export> <trace>` | Re-derives every step of a Tenet trace, without Tenet |
 | `emit <export> <trace> <set.mm> <out.mm>` | Writes `set.mm` theorems for the theorems the milestone 2 translator covers |
-| `define <export> <set.mm> <out.mm> <name>…` | Translates constants through the generic model, with their equations and computation rules |
+| `define <export> <set.mm> <out.mm> <name>…` | Translates constants through the generic model, with their equations and computation rules; universe parameters at 0 unless the name gives levels (`Eq.{1}`) |
 | `bridge <set.mm> <out.mm>` | Writes the one-time lemmas recursive types rest on |
 | `theorem <export> <set.mm> <out.mm> <name>…` | Proves Lean theorems from their proof terms, through the model, in tower mode |
-| `nat-bridge <export> <set.mm> <out.mm> [n…]` | Proves that the model's `Nat` is `NN0` (zero, successor, literals, `Nat.add`), with `F ( n ) = n` for each numeral given |
+| `nat-bridge <export> <set.mm> <out.mm> [n…] [theorem…]` | Proves that the model's `Nat` is `NN0` (zero, successor, literals, `Nat.add`), with `F ( n ) = n` for each numeral given; proves each theorem given through the model and restates it in `NN0` |
 | `survey <export>`, `model-survey <export>` | Measure how much of an export translates, and what blocks the rest |
+
+The model uses a tower of universes, one per level; add `--single-universe` anywhere for the old one-universe model. Proofs are compressed; add `--uncompressed` for flat ones.
 
 To make a trace, run `tenet check <export.ndjson> --trace <trace.ndjson>` with [Tenet](https://github.com/keithadler/tenet). To make an export, run `leanout <Module> -o <out.ndjson>` with [leanout](https://github.com/keithadler/leanout).
 
@@ -171,6 +175,8 @@ src/TenetZfc/          the replayer, the generic model, the Metamath prover and 
   Replay.cs …          re-derives Tenet's traces (milestone 1)
   Model.cs             the generic set-theoretic model of Lean's kernel (milestone 3)
   Recursion.cs         one-time lemmas for recursive types
+  Universes.cs …       the universe tower, monomorphization (Monomorph.cs), and each output's stated assumptions
+  TheoremTranslator.cs theorems through the model; DefEq.cs: definitional equations as theorems
   NatBridge.cs         bridge theorems: the model's Nat is NN0
   ProofKit.cs          a small tactic layer for writing set.mm proofs in C#
   Typing.cs            type inference, for proof irrelevance

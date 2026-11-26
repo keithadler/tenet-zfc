@@ -16,7 +16,7 @@ namespace TenetZfc;
 ///
 /// It runs on the model's tower mode, after monomorphization (Universes.cs, Monomorph.cs).
 /// </summary>
-public sealed class TheoremTranslator
+public sealed partial class TheoremTranslator
 {
     private readonly Terms _t;
     private readonly Monomorph _mono;

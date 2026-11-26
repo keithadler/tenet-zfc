@@ -21,7 +21,7 @@ public class SetVarTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("setvars.ndjson"));
-        var m = new Model(t, env, new Prover(new Database()), dryRun: true);
+        var m = new Model(t, env, new Prover(new Database()), dryRun: true, tower: false);
         m.Define(t.Of("Lean.Grind.Config.casesOn"));
         string d = m.Declarations;
         // Declared once each, before the first definition that binds it, and listed in that definition's $d.
@@ -46,7 +46,7 @@ public class SetVarTests(Xunit.Abstractions.ITestOutputHelper output)
         var t = new Terms();
         Env env = Reader.ReadExport(t, Fixture("setvars.ndjson"));
         var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
-        var m = new Model(t, env, pr);
+        var m = new Model(t, env, pr, tower: false);
         var eqs = new List<(string, Metamath.Expr, List<string>, string[])>();
         // casesOn's terms nest 27 binders deep, and the congruence prover recurses once per level: more stack than a
         // test host's thread has (the CLI's main thread has enough), so the proofs are built on a thread with more.

@@ -26,6 +26,12 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
     private string? _setmm;
     private readonly object _read = new();
 
+    /// <summary>
+    /// The model's universes: a tower (the default), each constant monomorphized with its universe parameters at 0, as
+    /// define does; or false for one universe for every level (--single-universe).
+    /// </summary>
+    public bool Tower { get; init; } = true;
+
     /// <summary>The time budget for one constant: its equation and computation rule together.</summary>
     public double BudgetSeconds { get; init; } = 600;
 
@@ -45,7 +51,9 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
         var db = new Database();
         db.Extend(_setmm);
         var pr = new Prover(db);
-        var model = new Model(t, env, pr);
+        // In tower mode a fresh monomorphization per chunk, like the model: chunks share nothing but the export.
+        Monomorph? mono = Tower ? new Monomorph(t, env) : null;
+        var model = new Model(t, mono?.Env ?? env, pr, tower: Tower);
         string name = $"chunk-{index:D4}";
         var theorems = new Writer(Path.GetFileName(setmmPath),
             $"tenet-zfc define-all, {name}: {constants.Count} Lean constants translated by the model of docs/milestone3.md, with their equations and computation rules",
@@ -61,16 +69,17 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
             File.WriteAllText(Path.Combine(outDir, name + ".progress"), $"{outcomes.Count + 1}/{constants.Count} {c.Name}\n");
             try
             {
-                var (stmt, proof, distinct) = model.Equation(c.Name);
-                proved.Add(($"lean-{Model.LabelPart($"{c.Name}")}-eq", stmt, proof, distinct, $"The definitional equation of {c.Name}."));
+                Name n = mono is null ? c.Name : mono.Instance(c.Name, c.LevelParams.Select(_ => t.Zero).ToArray());
+                var (stmt, proof, distinct) = model.Equation(n);
+                proved.Add(($"lean-{Model.LabelPart($"{n}")}-eq", stmt, proof, distinct, $"The definitional equation of {n}."));
                 string iota = "-", reason = "";
                 int iotaSteps = 0;
                 if (c.Kind == ConstKind.Constructor)
                 {
                     try
                     {
-                        var (istmt, iproof, idistinct) = model.Iota(c.Name);
-                        proved.Add(($"lean-{Model.LabelPart($"{c.Name}")}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {c.Name}."));
+                        var (istmt, iproof, idistinct) = model.Iota(n);
+                        proved.Add(($"lean-{Model.LabelPart($"{n}")}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {n}."));
                         iota = "ok";
                         iotaSteps = iproof.Count;
                     }
@@ -96,6 +105,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
         {
             Console.WriteLine($"  {name} slow: {o.Name} {o.Seconds:F0}s ({o.EqSteps} + {o.IotaSteps} steps, {o.Status})");
         }
+        theorems.Assumptions(model.Assumptions());
         theorems.Raw(model.Declarations);
         foreach (var p in proved)
         {

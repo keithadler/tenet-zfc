@@ -890,11 +890,20 @@ public sealed class Writer
     {
         _db = compressAgainst;
         _sb.AppendLine($"$( {header} $)");
+        _assumptionsAt = _sb.Length;
         _sb.AppendLine($"$[ {include} $]");
         _sb.AppendLine();
     }
 
     public bool Compressed => _db is not null;
+
+    private readonly int _assumptionsAt;
+
+    /// <summary>State the output's assumptions (Model.Assumptions) in a comment after the header.</summary>
+    public void Assumptions(string text)
+    {
+        _sb.Insert(_assumptionsAt, $"$(\n{text.TrimEnd()}\n$)\n");
+    }
 
     public void Theorem(string label, string comment, Expr statement, IEnumerable<string> proof)
     {

@@ -92,11 +92,15 @@ jobs:
           echo "$out" | tail -2
           if echo "$out" | grep -q '?Error'; then exit 1; fi
           (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" lenapp-flat.mm)
+      # The model's default is a tower of universes, one per level (docs/milestone3.md, "Tower mode"). Universe
+      # parameters are instantiated at 0 unless a name gives levels: id.{1} is id at Type, where id.{0} is id at Prop. Quote such
+      # names: bash expands Function.comp.{1,1,1} into three words.
+      # Quotients and choice still need the one-universe model (--single-universe).
       - name: Translate definitions and inductive types by the generic model and verify (milestone 3)
         run: |
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/model.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/model.mm" id Function.comp Function.const
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/model.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/model.mm" 'id.{1}' 'Function.comp.{1,1,1}' 'Function.const.{1,1}'
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/inductives.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/ind.mm" Bool Bool.false Bool.true Prod Prod.mk Option Option.none Option.some Bool.rec Prod.rec Option.rec
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/props.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/props.mm" Eq Eq.refl Eq.rec HEq HEq.refl HEq.rec False False.rec True True.intro And And.intro And.rec Or Or.inl Or.inr Or.rec Nonempty Nonempty.intro Nonempty.rec
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/props.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/props.mm" 'Eq.{1}' 'Eq.refl.{1}' 'Eq.rec.{1}' 'HEq.{1}' 'HEq.refl.{1}' 'HEq.rec.{1}' False False.rec True True.intro And And.intro And.rec Or Or.inl Or.inr Or.rec 'Nonempty.{1}' 'Nonempty.intro.{1}' 'Nonempty.rec.{1}'
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- bridge "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/bridge.mm"
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/recursive.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/rec.mm" Nat Nat.zero Nat.succ List List.nil List.cons Nat.rec List.rec
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/tree.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/tree.mm" Tree Tree.leaf Tree.node Tree.rec
@@ -104,15 +108,27 @@ jobs:
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/setvars.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/setvars.mm" Lean.Grind.Config.casesOn Lean.Meta.Simp.Config.zeta
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/mutual.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/mutual.mm" Tm Args Tm.var Tm.app Args.nil Args.cons Tm.rec Args.rec Rose Rose.node Rose.rec Rose.rec_1
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/strings.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/strings.mm" Lean.origin String.instInhabited instToStringBool
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/axioms.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/axioms.mm" propext Quot Quot.mk Quot.ind Quot.lift Classical.choice Classical.choose Classical.propDecidable
-          # The bridge theorems: the model's Nat is NN0 (docs/bridges.md), with literals 2, 4 and 256.
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- nat-bridge tests/fixtures/natadd.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natbridge.mm" 2 4 256
-          for g in model ind props bridge rec tree natle setvars strings axioms mutual natbridge; do
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define --single-universe tests/fixtures/axioms.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/axioms.mm" propext Quot Quot.mk Quot.ind Quot.lift Classical.choice Classical.choose Classical.propDecidable
+          # The one-universe model stays available, and in it structurally recursive definitions collapse: the old
+          # bridge output proves Nat.below empty, and takes Nat.add's computation rules as hypotheses.
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- nat-bridge --single-universe tests/fixtures/natadd.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natbridge1.mm" 2
+          for g in model ind props bridge rec tree natle setvars strings axioms mutual natbridge1; do
             out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read $g.mm" "verify proof *" "exit")
             echo "$out" | tail -2
             if echo "$out" | grep -q '?Error'; then exit 1; fi
             (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" $g.mm)
           done
+      # The bridge theorems (docs/bridges.md): the model's Nat is NN0, Nat.add's computation rules are proved, so
+      # ⟦Nat.add⟧ is + with no hypotheses but the tower's; literals 2, 4 and 256. Nat.add_zero and Nat.zero_add are
+      # proved through the model from their proof terms (as `theorem` does) and restated in NN0: ( A + 0 ) = A.
+      - name: Prove the Nat bridge and Lean theorems through the generic model, restate them in NN0, and verify
+        run: |
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- nat-bridge tests/fixtures/theorems.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natbridge.mm" 2 4 256 Nat.add_zero Nat.zero_add
+          grep -q 'lean-nn0-Nat.add_zero \$p |- ( ( U e. lean.-tower /\\ A e. NN0 ) -> ( A + 0 ) = A )' "$RUNNER_TEMP/mm/setmm/natbridge.mm"
+          out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read natbridge.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" natbridge.mm)
       # The quick part of the starter library (docs/milestone3.md, "Theorems through the model"); the rest runs in
       # the theorem-library job.
       - name: Prove Lean theorems through the generic model and verify (milestone 3, theorems through the model)
@@ -130,7 +146,7 @@ jobs:
           raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
           curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
           for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
-          for g in model ind props rec tree natle setvars strings axioms mutual natbridge thm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+          for g in model ind props rec tree natle setvars strings axioms mutual natbridge1 natbridge thm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
       # The Init-wide run (docs/milestone3.md) in miniature: define-all on a small export, in two chunks, and
       # scripts/verify-all with all three checkers. The full run on Init is too big for CI.
       - name: define-all and verify-all on a small export (milestone 3 at scale)
