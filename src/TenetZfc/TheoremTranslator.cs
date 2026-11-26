@@ -376,7 +376,7 @@ public sealed partial class Model
                             string y = FreshFor(aText, fText, body, dom, c.Ph);
                             string bodyY = SubstFree(body, x, y);
                             Proof ren = pr.Apply("cbvixpv", S(("x", x), ("y", y), ("A", dom), ("B", body), ("C", bodyY)),
-                                _d.Congruence("class", SubstFree(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}")))));
+                                SubstEq("class", body, x, $"{x} = {y}"));
                             string ty2 = $"X_ {y} e. {dom} {bodyY}";
                             m = m with { P = pr.Apply("eleqtrd", S(("ph", c.Ph), ("A", fText), ("B", m.Ty), ("C", ty2)), m.P, _d.Lift(c.Ph, ren)), Ty = ty2 };
                             (x, body) = (y, bodyY);
@@ -394,7 +394,7 @@ public sealed partial class Model
                         Proof aIn = Check(c, a, pi.Domain, dom);
                         string inst = SubstFree(body, x, aText);
                         Proof sub = body.Split(' ').Contains(x)
-                            ? _d.Congruence("class", SubstFree(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {aText}"))))
+                            ? SubstEq("class", body, x, $"{x} = {aText}")
                             : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", $"{x} = {aText}")), pr.Apply("eqid", S(("A", body))));
                         Proof r = _d.Syl(_d.Jca(m.P, aIn), pr.Apply("fvixp", S(("F", fText), ("x", x), ("A", dom), ("B", body), ("C", aText), ("D", inst)), sub));
                         return new Typed(r, inst, _ops.Instantiate(pi.Body, [a]));
@@ -415,13 +415,13 @@ public sealed partial class Model
                         string x = pr.Render(all.Children[1]), dom = pr.Render(all.Children[2]), psi = pr.Render(all.Children[0]);
                         EnsureTowerLemmas();
                         Proof holds = _d.Syl(m.P, Bi1(ApplyId("lean-prop", S(("ph", allText)))));
-                        if (aText.Split(' ').Contains(x))
+                        if (aText.Split(' ').Contains(x) || c.Ph.Split(' ').Contains(x))
                         {
-                            // rspcdv needs x distinct from the argument: rename the quantifier's variable (cbvralvw).
+                            // rspcdv needs x distinct from the argument and the hypotheses: rename the quantifier's variable (cbvralvw).
                             string y = FreshFor(aText, psi, dom, c.Ph);
                             string psiY = SubstFree(psi, x, y);
                             Proof ren = pr.Apply("cbvralvw", S(("x", x), ("y", y), ("A", dom), ("ph", psi), ("ps", psiY)),
-                                _d.Congruence("wff", SubstFree(psi, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}")))));
+                                SubstEq("wff", psi, x, $"{x} = {y}"));
                             string all2 = $"A. {y} e. {dom} {psiY}";
                             holds = pr.Apply("sylib", S(("ph", c.Ph), ("ps", allText), ("ch", all2)), holds, ren);
                             (x, psi, allText) = (y, psiY, all2);
@@ -438,7 +438,7 @@ public sealed partial class Model
                         Proof aIn = Check(c, a, pi.Domain, dom);
                         string inst = SubstFree(psi, x, aText);
                         Proof sub0 = psi.Split(' ').Contains(x)
-                            ? _d.Congruence("wff", SubstFree(psi, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {aText}"))))
+                            ? SubstEq("wff", psi, x, $"{x} = {aText}")
                             : pr.Apply("a1i", S(("ph", $"( {psi} <-> {psi} )"), ("ps", $"{x} = {aText}")), pr.Apply("biid", S(("ph", psi))));
                         Proof sub = pr.Apply("adantl", S(("ph", $"{x} = {aText}"), ("ps", $"( {psi} <-> {inst} )"), ("ch", c.Ph)), sub0);
                         Proof imp = pr.Apply("rspcdv", S(("ph", c.Ph), ("x", x), ("A", aText), ("B", dom), ("ps", psi), ("ch", inst)), aIn, sub);
@@ -1197,7 +1197,7 @@ public sealed partial class Model
             string y = FreshFor(arg, body, dom, ph);
             string bodyY = SubstFree(body, x, y);
             Proof ren = pr.Apply("cbvmptv", S(("x", x), ("y", y), ("A", dom), ("B", body), ("C", bodyY)),
-                _d.Congruence("class", SubstFree(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}")))));
+                SubstEq("class", body, x, $"{x} = {y}"));
             fIsMap = pr.Apply("eqtri", S(("A", f), ("B", $"( {x} e. {dom} |-> {body} )"), ("C", $"( {y} e. {dom} |-> {bodyY} )")), fIsMap, ren);
             (x, body) = (y, bodyY);
         }
@@ -1211,7 +1211,7 @@ public sealed partial class Model
         string result = SubstFree(body, x, arg);
         string h = $"{x} = {arg}";
         Proof sub = result != body
-            ? _d.Congruence("class", SubstFree(body, x, "Z"), "Z", pr.Apply("id", S(("ph", h))))
+            ? SubstEq("class", body, x, h)
             : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", h)), pr.Apply("eqid", S(("A", body))));
         return pr.Apply("fvmptd3", S(("ph", ph), ("x", x), ("A", arg), ("B", body), ("C", result), ("D", dom), ("F", f), ("V", "_V")),
             fIsMap, sub, argIn, Exists(ph, result));

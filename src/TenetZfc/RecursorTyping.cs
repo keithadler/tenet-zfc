@@ -262,7 +262,7 @@ public sealed partial class Model
                 string y = FreshFor(a, f, body, dom, ph);
                 string bodyY = SubstFree(body, x, y);
                 Proof ren = pr.Apply("cbvixpv", S(("x", x), ("y", y), ("A", dom), ("B", body), ("C", bodyY)),
-                    _d.Congruence("class", SubstFree(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}")))));
+                    SubstEq("class", body, x, $"{x} = {y}"));
                 string ty2 = $"X_ {y} e. {dom} {bodyY}";
                 fIn = pr.Apply("eleqtrd", S(("ph", ph), ("A", f), ("B", ty), ("C", ty2)), fIn, _d.Lift(ph, ren));
                 (x, body, ty) = (y, bodyY, ty2);
@@ -276,7 +276,7 @@ public sealed partial class Model
             }
             string inst = SubstFree(body, x, a);
             Proof sub = body.Split(' ').Contains(x)
-                ? _d.Congruence("class", SubstFree(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {a}"))))
+                ? SubstEq("class", body, x, $"{x} = {a}")
                 : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", $"{x} = {a}")), pr.Apply("eqid", S(("A", body))));
             Proof r = _d.Syl(_d.Jca(fIn, aIn), pr.Apply("fvixp", S(("F", f), ("x", x), ("A", dom), ("B", body), ("C", a), ("D", inst)), sub));
             return (r, inst);

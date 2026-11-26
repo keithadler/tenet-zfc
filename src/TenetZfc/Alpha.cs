@@ -81,6 +81,24 @@ public sealed partial class Model
     /// <summary>The variables of a substitution's argument a body's binders must avoid: all of the argument's.</summary>
     private HashSet<string> ArgVars(string arg) => arg.Split(' ').Where(v => SetVars.Contains(v)).ToHashSet();
 
+    /// <summary>
+    /// |- ( x = v -> B = B[v] ) (or <-> for a formula), the substitution hypothesis of fvmptd3, cbvmptv and the like;
+    /// h is "x = v" (given as that text, or as v alone).
+    /// </summary>
+    private Proof SubstEq(string type, string body, string x, string h)
+    {
+        string v = h.StartsWith($"{x} = ", StringComparison.Ordinal) ? h[(x.Length + 3)..] : h;
+        string hyp = $"{x} = {v}";
+        string ctx = SubstFree(body, x, "Z");
+        if (!ctx.Split(' ').Contains("Z"))
+        {
+            return type == "class"
+                ? pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", hyp)), pr.Apply("eqid", S(("A", body))))
+                : pr.Apply("a1i", S(("ph", $"( {body} <-> {body} )"), ("ps", hyp)), pr.Apply("biid", S(("ph", body))));
+        }
+        return _d.Congruence(type, ctx, "Z", pr.Apply("id", S(("ph", hyp))));
+    }
+
     /// <summary>|- a = b for alpha-equivalent class texts.</summary>
     private Proof AlphaClosed(string a, string b) =>
         a == b ? pr.Apply("eqid", S(("A", a))) : pr.Apply("mptru", S(("ph", $"{a} = {b}")), Alpha("class", a, b)!.Value);
@@ -258,7 +276,7 @@ public sealed partial class Model
         {
             string dom = pr.Render(n.Children[1]), body = pr.Render(n.Children[2]);
             Proof sub = body.Split(' ').Contains(x)
-                ? _d.Congruence("class", SubstFree(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}"))))
+                ? SubstEq("class", body, x, $"{x} = {y}")
                 : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", $"{x} = {y}")), pr.Apply("eqid", S(("A", body))));
             string lemma = label switch { "cmpt" => "cbvmptv", "cixp" => "cbvixpv", _ => "cbviunv" };
             closed = pr.Apply(lemma, S(("x", x), ("y", y), ("A", dom), ("B", body), ("C", SubstFree(body, x, y))), sub);
@@ -267,7 +285,7 @@ public sealed partial class Model
         {
             string body = pr.Render(n.Children[0]), dom = pr.Render(n.Children[2]);
             Proof sub = body.Split(' ').Contains(x)
-                ? _d.Congruence("wff", SubstFree(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {y}"))))
+                ? SubstEq("wff", body, x, $"{x} = {y}")
                 : pr.Apply("a1i", S(("ph", $"( {body} <-> {body} )"), ("ps", $"{x} = {y}")), pr.Apply("biid", S(("ph", body))));
             closed = pr.Apply(label == "wral" ? "cbvralvw" : "cbvrexvw", S(("x", x), ("y", y), ("A", dom), ("ph", body), ("ps", SubstFree(body, x, y))), sub);
         }
