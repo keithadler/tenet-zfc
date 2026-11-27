@@ -80,12 +80,6 @@ public sealed partial class Model
                 string have = h[(fields[k].Length + 4)..], want = cdoms[np + k];
                 return have == want ? p : pr.Apply("eleqtrd", S(("ph", ctx), ("A", fields[k]), ("B", have), ("C", want)), p, AlphaIn(ctx, have, want));
             }
-            (Proof eqV, _, _) = Unfold(ctx, ctok, ctorArgs, (i, dom) => i < np ? Hyp(ctx, $"{ps[i]} e. {dom}")!.Value : FieldIn(i - np));
-            if (Rhs(eqV) != tag)
-            {
-                throw new Refused($"{ctor.Name}'s value came out as {Rhs(eqV)}, not {tag}");
-            }
-            string ctorApp = Lhs(eqV);
             // The computation rule, at these fields.
             string il = IotaLemma(ctor.Name);
             var sub = new Dictionary<string, string> { ["U"] = "U" };
@@ -98,6 +92,49 @@ public sealed partial class Model
                 sub[ClassVars[nrec + k]] = fields[k];
             }
             Proof iotaI = ApplyId(il, sub);
+            // A proof field (Decidable.intro's reflects_decide): the rule has (/) in its place (proof irrelevance), so
+            // it doesn't mention the stage's variable, and the stage has a member of the proposition, which makes it
+            // hold (lean-pf). The constructor and the minor premise are applied to (/) there.
+            var ruleToks = iotaI.Proves.Symbols.ToHashSet();
+            bool IsProofField(int k) => !rf.Contains(k) && !ruleToks.Contains(fields[k]);
+            string Arg(int k) => IsProofField(k) ? "(/)" : fields[k];
+            Proof ArgIn(int k)
+            {
+                Proof vIn = FieldIn(k);
+                if (!IsProofField(k))
+                {
+                    return vIn;
+                }
+                string prop = _d.Split(vIn.Proves).X[(fields[k].Length + 4)..];
+                EnsurePf();
+                return _d.Syl(_d.Jca(UnivMem(new PCtx { Ph = ctx }, prop, "2o"), vIn), ApplyId("lean-pf", S(("A", prop), ("B", fields[k]))));
+            }
+            var ctorArgs2 = ps.Concat(fields.Select((_, k) => Arg(k))).ToList();
+            (Proof eqV, _, _) = Unfold(ctx, ctok, ctorArgs2, (i, dom) => i < np ? Hyp(ctx, $"{ps[i]} e. {dom}")!.Value : ArgIn(i - np));
+            // The stage's tuple has the proof field's variable where the value has (/): equal, since a member of a
+            // proposition is (/) (lean-pf0).
+            for (int k = 0; k < fields.Count && Rhs(eqV) != tag; k++)
+            {
+                if (!IsProofField(k) || !tag.Split(' ').Contains(fields[k]))
+                {
+                    continue;
+                }
+                Proof vIn = FieldIn(k);
+                string prop = _d.Split(vIn.Proves).X[(fields[k].Length + 4)..];
+                EnsurePf0();
+                Proof isZero = _d.Syl(_d.Jca(UnivMem(new PCtx { Ph = ctx }, prop, "2o"), vIn), ApplyId("lean-pf0", S(("A", prop), ("B", fields[k]))));
+                string holed = string.Join(' ', tag.Split(' ').Select(tok => tok == fields[k] ? "Z" : tok));
+                Proof tagEq = _d.Congruence("class", holed, "Z", isZero);   // ( ctx -> tag = tag[ field := (/) ] )
+                if (Rhs(tagEq) == Rhs(eqV))
+                {
+                    eqV = _d.Trans(eqV, _d.Symm(tagEq));
+                }
+            }
+            if (Rhs(eqV) != tag)
+            {
+                throw new Refused($"{ctor.Name}'s value came out as {Rhs(eqV)}, not {tag}");
+            }
+            string ctorApp = Lhs(eqV);
             (string ante, string iotaEq) = _d.Split(iotaI.Proves);
             var hyps = Conjuncts(ante).Reverse().ToList();
             Proof all = hyps.Skip(1).Aggregate(Discharge(hyps[0]), (acc, h) => _d.Jca(acc, Discharge(h)));
@@ -108,7 +145,21 @@ public sealed partial class Model
                     return p;
                 }
                 int k = fields.FindIndex(f => h.StartsWith($"{f} e. ", StringComparison.Ordinal));
-                return k >= 0 ? FieldIn(k) : throw new Refused($"can't discharge {h}");
+                if (k >= 0)
+                {
+                    return FieldIn(k);
+                }
+                // A proof field (Decidable's reflects_decide): the rule wants it to hold, (/) e. P, where the stage
+                // has a member v e. P of it. A member makes a proposition hold (lean-pf).
+                if (h.StartsWith("(/) e. ", StringComparison.Ordinal)
+                    && Conjuncts(ctx).FirstOrDefault(c => c.EndsWith($" e. {h[7..]}", StringComparison.Ordinal) && c != h) is string vh)
+                {
+                    string prop = h[7..], v = vh[..^(prop.Length + 4)];
+                    EnsurePf();
+                    Proof in2o = UnivMem(new PCtx { Ph = ctx }, prop, "2o");
+                    return _d.Syl(_d.Jca(in2o, Hyp(ctx, vh)!.Value), ApplyId("lean-pf", S(("A", prop), ("B", v))));
+                }
+                throw new Refused($"can't discharge {h}");
             }
             Proof iota = _d.Syl(all, iotaI);
             string rhs = _d.Sides(iotaEq).R;
@@ -118,8 +169,8 @@ public sealed partial class Model
             string f0 = minor, ty = rdoms[np + rec.NumMotives + j];
             for (int k = 0; k < fields.Count; k++)
             {
-                (m, ty) = ApplyText(ctx, m, f0, ty, fields[k], FieldIn(k));
-                f0 = $"( {f0} ` {fields[k]} )";
+                (m, ty) = ApplyText(ctx, m, f0, ty, Arg(k), ArgIn(k));
+                f0 = $"( {f0} ` {Arg(k)} )";
             }
             foreach (int k in rf)
             {

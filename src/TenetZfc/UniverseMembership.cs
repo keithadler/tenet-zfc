@@ -474,6 +474,11 @@ public sealed partial class Model
             Proof df = pr.Apply("df2o3", S());
             return _d.Lift(d.Ph, pr.Apply("eleqtrri", S(("A", "(/)"), ("B", "{ (/) , 1o }"), ("C", "2o")), pr.Apply("prid1", S(("A", "(/)"), ("B", "1o")), pr.Apply("0ex", S())), df));
         }
+        if (ConstApp(x) is (Name head, List<string> cargs) && cargs.Count > 0)
+        {
+            // A proposition former applied (Bool.Reflects b p): through its typing lemma, argument by argument.
+            return ConstAppMem(d, head, cargs, "2o");
+        }
         throw new Refused($"no proof yet that {x} is a proposition");
     }
 
