@@ -51,11 +51,15 @@ public sealed class NatBridge
     /// <summary>The class the universe argument ranges over: lean.-tower (the default), or Univ in the one-universe model.</summary>
     private readonly string D;
 
-    public NatBridge(Prover pr, bool tower = true)
+    /// <summary>Whether the tower is lowered (docs/milestone4.md): restated theorems then also come out in plain ZFC.</summary>
+    private readonly bool _lowered;
+
+    public NatBridge(Prover pr, bool tower = true, bool lowered = false)
     {
         _pr = pr;
         _k = new ProofKit(pr);
-        D = tower ? Model.TowerToken : "Univ";
+        D = !tower ? "Univ" : lowered ? Model.LoweredTowerToken : Model.TowerToken;
+        _lowered = lowered;
     }
 
     /// <summary>
@@ -69,17 +73,17 @@ public sealed class NatBridge
     /// </summary>
     public static (string Text, List<(string Label, string Comment, MmExpr Statement, List<string> Proof, string[] Distinct)> Theorems) Emit(
         string export, string setmm, IEnumerable<System.Numerics.BigInteger> numerals, bool compress = true, bool tower = true,
-        IReadOnlyList<string>? restate = null)
+        IReadOnlyList<string>? restate = null, bool lowered = false)
     {
         var t = new Terms();
         Environment env = Reader.ReadExport(t, export);
         var pr = new Prover(Database.Read(setmm));
-        var bridge = new NatBridge(pr, tower);
+        var bridge = new NatBridge(pr, tower, lowered);
         Model model;
         TheoremTranslator? tt = null;
         if (tower)
         {
-            tt = new TheoremTranslator(t, env, pr);
+            tt = new TheoremTranslator(t, env, pr, lowered);
             model = tt.Model;
         }
         else
@@ -830,6 +834,15 @@ public sealed class NatBridge
             r = Rw(r, Imp(ph2, "f1ocnvfv2", [f1o, Hyp(ph2, $"{v} e. NN0")]));
         }
         Thm($"lean-nn0-{lp}", $"The Lean theorem {name}, restated in set.mm's arithmetic: derived from Lean's proof through the model and the bridge F.", r);
+        if (_lowered)
+        {
+            // Universe elimination (docs/milestone4.md): ZFC proves a lowered tower exists, and U is in neither side.
+            tt.Model.EnsureWitness();
+            var w = new TowerWitness(_pr, _k, (l, c, p) => Thm(l, c, p));
+            w.Ensure(tt.Model.TowerCondition("f"));
+            tt.Model.PlainZfc.Add($"lean-zfc-{lp} ({name})");
+            Thm($"lean-zfc-{lp}", $"The Lean theorem {name} in plain ZFC: lean-nn0-{lp} with the universe hypothesis discharged by lean-wit-tw. No universe axiom.", w.Discharge($"lean-nn0-{lp}"));
+        }
     }
 
     /// <summary>A side of an equation about Nat, as Nat.add, Nat.zero and Nat.succ over the free variables.</summary>

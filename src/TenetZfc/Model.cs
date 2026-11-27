@@ -19,7 +19,7 @@ namespace TenetZfc;
 /// Each translated definition comes with its definitional equation as a theorem: lean.c applied to arguments of the
 /// right types equals its body with them substituted, by one fvmptd step per argument.
 /// </summary>
-public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryRun = false, bool tower = true)
+public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryRun = false, bool tower = true, bool lowered = false)
 {
     private const string UniverseVar = "u";
     private static readonly string[] Letters = "x y z w v t s r q p o n m k j i h g f e d c b a".Split(' ');

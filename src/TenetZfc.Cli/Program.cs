@@ -34,7 +34,9 @@ const string Usage = """
                                                          Nat.add and literals, each numeral n given), from an export
                                                          with Nat.add (docs/bridges.md); each theorem named (such as
                                                          Nat.add_zero) is proved through the model and restated in
-                                                         set.mm's arithmetic
+                                                         set.mm's arithmetic; with --lowered, in a tower of weak
+                                                         universes that ZFC proves exists, so each restated theorem
+                                                         also comes out in plain ZFC (docs/milestone4.md)
       tenet-zfc list-bridge <export.ndjson> <set.mm> <out.mm> [<theorem>...] [--bridge-only]
                                                          prove that the model's List A is Word A (nil, cons, length,
                                                          append), with the Nat bridge; each theorem named (such as
@@ -88,7 +90,9 @@ if (args.Length == 5 && args[0] == "emit")
 // universe for every level, under which structurally recursive definitions collapse (docs/milestone3.md). --tower is
 // accepted for scripts written when the tower was opt-in.
 bool singleUniverse = args.Contains("--single-universe");
-args = args.Where(a => a is not "--single-universe" and not "--tower").ToArray();
+// Universe elimination (docs/milestone4.md): a tower of weak universes, which ZFC proves exists, instead of Grothendieck universes.
+bool lowered = args.Contains("--lowered");
+args = args.Where(a => a is not "--single-universe" and not "--tower" and not "--lowered").ToArray();
 if (args.Length >= 5 && args[0] == "define")
 {
     // Milestone 3: definitions through the generic model, each with its definitional equation. In tower mode the
@@ -264,7 +268,7 @@ if (args.Length >= 4 && args[0] == "nat-bridge")
             Console.Error.WriteLine("nat-bridge: restating theorems needs the tower model");
             return 2;
         }
-        var (text, proved) = NatBridge.Emit(args[1], args[2], numerals, compress: !uncompressed, tower: !singleUniverse, restate: restate);
+        var (text, proved) = NatBridge.Emit(args[1], args[2], numerals, compress: !uncompressed, tower: !singleUniverse, restate: restate, lowered: lowered);
         foreach (var th in proved)
         {
             Console.WriteLine($"{th.Label}: {th.Statement} ({th.Proof.Count} proof steps)");

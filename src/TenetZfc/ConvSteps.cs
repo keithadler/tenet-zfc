@@ -298,7 +298,7 @@ public sealed partial class Model
             // 2o e. ( U ` (/) ), so 2o C_ ( U ` (/) ) C_ U. ran U.
             var c0 = new PCtx { Ph = ph };
             Proof two = UnivMem(c0, "2o", "( U ` (/) )");
-            Proof ss = _d.Syl(LevelUniv(ph, "(/)"), pr.Apply("grutr", S(("U", "( U ` (/) )"))));
+            Proof ss = LevelTr(ph, "(/)");
             Proof twoSs = pr.Apply("mpd", S(("ph", ph), ("ps", "2o e. ( U ` (/) )"), ("ch", "2o C_ ( U ` (/) )")), two, _d.Syl(ss, pr.Apply("trss", S(("A", "( U ` (/) )"), ("B", "2o")))));
             return pr.Apply("sstrd", S(("ph", ph), ("A", "2o"), ("B", "( U ` (/) )"), ("C", "U. ran U")), twoSs, SubOmega(ph, "( U ` (/) )"));
         }
@@ -306,9 +306,9 @@ public sealed partial class Model
         string k = n.Rule.Label == "cfv" && pr.Render(n.Children[1]) == "U" ? pr.Render(n.Children[0]) : throw new Refused($"not a level of the tower: {g}");
         EnsureTowerLemmas();
         Proof tw = _d.Syl(Hyp(ph, UHyp)!.Value, ApplyId("lean-tw", S(("U", "U"))));
-        Proof fn = _d.Syl(pr.Apply("simpld", S(("ph", ph), ("ps", "U : _om --> Univ"), ("ch", "_om e. ( U ` (/) )")),
-            pr.Apply("simpld", S(("ph", ph), ("ps", "( U : _om --> Univ /\\ _om e. ( U ` (/) ) )"), ("ch", "A. n e. _om ( U ` n ) e. ( U ` suc n )")), tw)),
-            pr.Apply("ffn", S(("F", "U"), ("A", "_om"), ("B", "Univ"))));
+        Proof fn = _d.Syl(pr.Apply("simpld", S(("ph", ph), ("ps", $"U : _om --> {UClass}"), ("ch", "_om e. ( U ` (/) )")),
+            pr.Apply("simpld", S(("ph", ph), ("ps", $"( U : _om --> {UClass} /\\ _om e. ( U ` (/) ) )"), ("ch", "A. n e. _om ( U ` n ) e. ( U ` suc n )")), tw)),
+            pr.Apply("ffn", S(("F", "U"), ("A", "_om"), ("B", UClass))));
         Proof inRan = _d.Syl(_d.Jca(fn, OrdOm(ph, k)), pr.Apply("fnfvelrn", S(("F", "U"), ("A", "_om"), ("B", k))));
         return _d.Syl(inRan, pr.Apply("elssuni", S(("A", g), ("B", "ran U"))));
     }
