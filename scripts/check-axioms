@@ -20,7 +20,7 @@ dir="$(cd "$(dirname "$file")" && pwd)"; name="$(basename "$file")"
 cd "$dir"
 # set.mm's axioms of ZFC: logic (ax-mp, ax-gen, ax-1 to ax-13), ZF, choice (ax-cc and ax-dc follow from it), and the
 # complex-number axioms, which set.mm proves from its construction of the reals and restates as axioms.
-zfc='ax-(mp|gen|[0-9]+|ext|rep|sep|nul|pow|pr|un|reg|inf|inf2|ac|ac2|cc|dc|resscn|1cn|icn|addcl|addrcl|mulcl|mulrcl|mulcom|addass|mulass|distr|i2m1|1ne0|1rid|rnegex|rrecex|cnre|pre-lttri|pre-lttrn|pre-ltadd|pre-mulgt0|pre-sup|addf|mulf)'
+zfc='ax-(mp|gen|[0-9]+|ext|rep|sep|nul|pow|pr|un|reg|inf|inf2|ac|ac2|cc|dc|resscn|1cn|icn|addcl|addrcl|mulcl|mulrcl|mulcom|addass|mulass|distr|i2m1|1ne0|1rid|rnegex|rrecex|cnre|cnex|pre-lttri|pre-lttrn|pre-ltadd|pre-mulgt0|pre-sup|addf|mulf)'
 status=0
 for label in "$@"; do
   out=$("$mm" "read $name" "show statement $label" "show trace_back $label /axioms" "exit")
