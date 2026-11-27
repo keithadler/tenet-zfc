@@ -103,6 +103,113 @@ public sealed partial class Model
         return Close(d, pr.Apply("mpd", S(("ph", ph), ("ps", $"E. {z} e. {x} {eqz}"), ("ch", got)), ex, rex), goal);
     }
 
+    /// <summary>
+    /// ( d.Ph -> (/) e. ⟦Eq (Quot r) (Quot.mk r a) (Quot.mk r b)⟧ ) under Quot.sound's binders (IntroPiProp), from its
+    /// hypothesis r a b: Eq unfolds to if ( Y = X , 1o , (/) ), and the two classes are equal (lean-sound-k). At level
+    /// 0, where α is a proposition, both sides are proofs, (/), and equal outright.
+    /// </summary>
+    private Proof QuotSoundHolds(PCtx d, Expr body)
+    {
+        string goalTy = TrIn(d, body);
+        if (Ops.Spine(_typing.Whnf(body), out List<Expr> ea) is not Const eqc || ea.Count != 3)
+        {
+            throw new Refused($"Quot.sound's statement isn't an equation: {goalTy}");
+        }
+        var texts = ea.Select(e => TrIn(d, e)).ToList();
+        (Proof eqEq, _, _) = Unfold(d.Ph, Token(eqc.Name)!, texts, (i, dom) => Check(d, ea[i], InferIn(d, ea[i]), dom));
+        string ite = Rhs(eqEq);
+        SyntaxTree n = pr.Parse("class", ite.Split(' '))!;
+        if (n.Rule.Label != "cif")
+        {
+            throw new Refused($"{eqc.Name} doesn't unfold to a proposition: {ite}");
+        }
+        string phi = pr.Render(n.Children[0]);
+        string x = texts[1], y = texts[2];
+        Proof xy = x == y ? _d.Refl(d.Ph, x) : QuotMkEq(d, ea[1], ea[2]);
+        Proof phiP = phi == $"{x} = {y}" ? xy : phi == $"{y} = {x}" ? _d.Symm(xy) : throw new Refused($"{eqc.Name}'s condition is {phi}");
+        EnsureTowerLemmas();
+        Proof inIf = _d.Syl(phiP, Bi2(ApplyId("lean-prop", S(("ph", phi)))));
+        Proof r = pr.Apply("eleqtrrd", S(("ph", d.Ph), ("A", "(/)"), ("B", ite), ("C", Lhs(eqEq))), inIf, eqEq);
+        return Lhs(eqEq) == goalTy ? r : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", "(/)"), ("B", Lhs(eqEq)), ("C", goalTy)), r, AlphaIn(d.Ph, Lhs(eqEq), goalTy));
+    }
+
+    /// <summary>( d.Ph -> Quot.mk r a = Quot.mk r b ), by lean-sound-k at a, b and the hypothesis r a b.</summary>
+    private Proof QuotMkEq(PCtx d, Expr ma, Expr mb)
+    {
+        if (Ops.Spine(ma, out List<Expr> aa) is not Const mk || BaseName(mk.Name) != "Quot.mk" || aa.Count != 3
+            || Ops.Spine(mb, out List<Expr> ba) is not Const mk2 || mk2.Name != mk.Name || ba.Count != 3)
+        {
+            throw new Refused("Quot.sound's sides aren't Quot.mk");
+        }
+        string label = QuotSoundLemma(mk.Name);
+        List<Expr> doms = PiDomains(env.Find(mk.Name)!.Type, aa);
+        var args = new List<(string, Expr, Expr)> { ("A", aa[0], doms[0]), ("B", aa[1], doms[1]), ("C", aa[2], doms[2]), ("D", ba[2], doms[2]) };
+        return InstLemma(d, label, args);
+    }
+
+    /// <summary>
+    /// lean-sound-k: |- ( ( ( ( ( ( U e. lean.-tower /\ A e. D0 ) /\ B e. D1 ) /\ C e. A ) /\ D e. A ) /\ (/) e. ( ( B ` C ) ` D ) )
+    /// -> ( ( ( ( lean.Quot.mk.{k} ` U ) ` A ) ` B ) ` C ) = ( … ` D ) ). The pairs r relates are in the quotient's
+    /// relation R, which contains them by definition (opabssxp, ssintrab), so C R D, and R being an equivalence
+    /// relation (riiner, as for the computation rule) their classes are equal (erth).
+    /// </summary>
+    private string QuotSoundLemma(Name mkN)
+    {
+        string label = $"lean-sound-{LabelPart($"{mkN}")}";
+        if (Has(label))
+        {
+            return label;
+        }
+        Define(mkN);
+        string mk = Token(mkN)!;
+        List<string> md = Domains(mk, ["A", "B", "C"], 3);
+        if (md[2] != "A")
+        {
+            throw new Refused($"{mkN}'s third argument ranges over {md[2]}, not A");
+        }
+        string ph = Conj([UHyp, $"A e. {md[0]}", $"B e. {md[1]}", "C e. A", "D e. A", "(/) e. ( ( B ` C ) ` D )"]);
+        Proof H(string ctx, string h) => Hyp(ctx, h) ?? throw new Refused($"no hypothesis {h}");
+        (Proof eqC, _, _) = Unfold(ph, mk, ["A", "B", "C"], (i, dom) => H(ph, $"{"ABC"[i]} e. {dom}"));
+        (Proof eqD, _, _) = Unfold(ph, mk, ["A", "B", "D"], (i, dom) => H(ph, $"{"ABD"[i]} e. {dom}"));
+        string rel = $"( ( ( {QuotEqv} ` U ) ` A ) ` B )";
+        if (Rhs(eqC) != $"[ C ] {rel}")
+        {
+            throw new Refused($"{mkN} unfolds to {Rhs(eqC)}, not [ C ] {rel}");
+        }
+        var (eqE, ebody, sq, sx, pw, Phi, _, r0, _, erR) = Eqv(ph, md[0], "C D", H);
+        // r0 C_ R: r0 C_ ( A X. A ) (opabssxp), and r0 is inside every relation intersected (ssintrab).
+        string sv = Kid("class", sx, "x"), phi = Kid("class", sx, "ph");
+        Proof inSq = pr.Apply("opabssxp", S(("x", Kid("class", r0, "x")), ("y", Kid("class", r0, "y")), ("A", "A"), ("B", "A"),
+            ("ph", Kid("wff", Kid("class", r0, "ph"), "ps"))));
+        Proof each = pr.Apply("rgen", S(("x", sv), ("A", pw), ("ph", $"( {phi} -> {r0} C_ {sv} )")),
+            pr.Apply("simpl", S(("ph", $"{r0} C_ {sv}"), ("ps", $"{sv} Er A"))));
+        Proof inInt = pr.Apply("mpbir", S(("ph", $"{r0} C_ |^| {sx}"), ("ps", $"A. {sv} e. {pw} ( {phi} -> {r0} C_ {sv} )")), each,
+            pr.Apply("ssintrab", S(("A", r0), ("x", sv), ("B", pw), ("ph", phi))));
+        Proof inE = pr.Apply("mpbi", S(("ph", $"( {r0} C_ {sq} /\\ {r0} C_ |^| {sx} )"), ("ps", $"{r0} C_ {ebody}")),
+            pr.Apply("pm3.2i", S(("ph", $"{r0} C_ {sq}"), ("ps", $"{r0} C_ |^| {sx}")), inSq, inInt),
+            pr.Apply("ssin", S(("A", r0), ("B", sq), ("C", $"|^| {sx}"))));
+        Proof inR = pr.Apply("sseqtrrd", S(("ph", ph), ("A", r0), ("B", ebody), ("C", rel)), _d.Lift(ph, inE), eqE);
+        // C r0 D, from C e. A, D e. A and the hypothesis (opelopabg, df-br).
+        string b = Kid("class", r0, "x"), c = Kid("class", r0, "y"), body = Kid("class", r0, "ph");
+        string mid = Subst(body, b, "C");
+        Proof s1 = _d.Congruence("wff", Subst(body, b, "Z"), "Z", pr.Apply("id", S(("ph", $"{b} = C"))));
+        Proof s2 = _d.Congruence("wff", Subst(mid, c, "Z"), "Z", pr.Apply("id", S(("ph", $"{c} = D"))));
+        string fin = Subst(mid, c, "D");
+        Proof ope = pr.Apply("opelopabg", S(("x", b), ("y", c), ("A", "C"), ("B", "D"), ("V", "A"), ("W", "A"), ("ph", body), ("ps", mid), ("ch", fin)),
+            s1, s2);
+        Proof cd = _d.Jca(H(ph, "C e. A"), H(ph, "D e. A"));
+        Proof inR0 = pr.Apply("mpbird", S(("ph", ph), ("ps", $"<. C , D >. e. {r0}"), ("ch", fin)),
+            _d.Jca(cd, H(ph, "(/) e. ( ( B ` C ) ` D )")), _d.Syl(cd, ope));
+        Proof br0 = pr.Apply("sylibr", S(("ph", ph), ("ps", $"<. C , D >. e. {r0}"), ("ch", $"C {r0} D")), inR0, pr.Apply("df-br", S(("A", "C"), ("R", r0), ("B", "D"))));
+        Proof brR = pr.Apply("mpd", S(("ph", ph), ("ps", $"C {r0} D"), ("ch", $"C {rel} D")), br0,
+            pr.Apply("ssbrd", S(("ph", ph), ("A", r0), ("B", rel), ("C", "C"), ("D", "D")), inR));
+        Proof cls = pr.Apply("mpbid", S(("ph", ph), ("ps", $"C {rel} D"), ("ch", $"[ C ] {rel} = [ D ] {rel}")), brR,
+            pr.Apply("erth", S(("ph", ph), ("R", rel), ("X", "A"), ("A", "C"), ("B", "D")), erR, H(ph, "C e. A")));
+        Proof r = _d.Trans(_d.Trans(eqC, cls), _d.Symm(eqD));
+        EmitLemma(label, $"Quot.sound in the model: {mkN} r a = {mkN} r b when r a b.", r);
+        return label;
+    }
+
     /// <summary>The proof, if it proves the goal; else refused.</summary>
     private Proof Close(PCtx d, Proof p, string goal) =>
         _d.Split(p.Proves).X == goal ? p : throw new Refused($"the quotient's typing came out as {_d.Split(p.Proves).X}, not {goal}");

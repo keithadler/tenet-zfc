@@ -1482,6 +1482,10 @@ public sealed partial class Model
                     p = pr.Apply("eqeltrd", S(("ph", c.Ph), ("A", text), ("B", Rhs(unfold)), ("C", ty)), unfold, inMap);
                     break;
                 }
+            case ConstKind.Axiom when BaseName(n) == "Quot.sound":
+                // A proof: under its binders, the two classes are equal (QuotTyping.cs).
+                p = IntroPiProp(c, ci.Type, (d, body) => QuotSoundHolds(d, body));
+                break;
             case ConstKind.Axiom when $"{n}" == "propext":
                 p = PropextTyping(c, ci.Type);
                 break;
