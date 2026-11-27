@@ -720,8 +720,6 @@ Constants that take W: Classical.choice.{1}, Classical.propDecidable.
 
 **Not yet:** a theorem whose proof uses choice. The translator would need a well-ordering hypothesis in the theorem's statement.
 
-SURVEY_PLACEHOLDER
-
 ### How a theorem is proved
 
 The model is meant to be sound for Lean's typing: if `Γ ⊢ e : T` then `⟦e⟧ ∈ ⟦T⟧`. A proof `p : P` translates to `(/)`, so translating the typing of `p` proves `(/) e. ⟦P⟧`: the statement holds in the model. The output is
