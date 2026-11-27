@@ -182,9 +182,10 @@ def theorems(out):
         print(f"  not yet checked: {' '.join(unverified)}")
 
     def label(name):
-        # Model.LabelPart's spelling
+        # Model.LabelOf's spelling for plain names; an escaped name that a checker rejects still fails its chunk,
+        # which counts it out below.
         name = name.replace("{", "u").replace(",", "_").replace("}", "")
-        return "lean-thm-" + re.sub(r"[^A-Za-z0-9._-]", lambda m: f"-{ord(m.group(0)):x}-", name)
+        return "lean-thm-" + name
 
     proved = [r for r in rows if r["status"] == "proved"]
     failing = set().union(*[v["failing"] for v in verify.values()]) if verify else set()

@@ -863,7 +863,7 @@ Same proofs, same outputs (both checked); measured on an Apple-silicon Mac share
 
 Until now only small fixtures had been emitted and verified; `model-survey` only checks that definitions translate, in dry-run mode. This run emits and verifies everything the model handles in `Init`.
 
-**Universes.** The run below was made in the one-universe model, before the tower became the default. `define-all` now follows the default: each chunk monomorphizes the export afresh, defines each constant's instance with its universe parameters at 0 (`c.{0,…}`), and states its assumptions in its header. `--single-universe` reproduces the run as recorded. The counts below have not yet been remeasured in the tower; `model-survey` in the tower gives 14,105 definitions that translate, against 13,958 in one universe ([above](#model-survey-in-the-tower)).
+**Universes.** The run below was made in the one-universe model, before the tower became the default. `define-all` now follows the default: each chunk monomorphizes the export afresh, defines each constant's instance with its universe parameters at 0 (`c.{0,…}`), and states its assumptions in its header. `--single-universe` reproduces the run as recorded. The counts below have not been remeasured in the tower; [the run below](#the-init-wide-run-again-built) remeasures most of them, with names escaped and `Acc`; `model-survey` in the tower gives 14,105 definitions that translate, against 13,958 in one universe ([above](#model-survey-in-the-tower)).
 
 **The tools.**
 - `tenet-zfc define-all <export> <set.mm> <outdir> [--chunk-size N] [--chunks a,b-c] [--jobs N] [--budget s]` targets every definition, opaque constant, inductive type, constructor and recursor that isn't unsafe, in export order. Each constant gets its definitional equation; each constructor also gets its recursor's computation rule. The output is a chunk per N constants. Each chunk is a standalone `.mm` that includes set.mm and defines everything its constants use (a fresh model and database per chunk), so chunks verify independently. A refusal or failure is recorded per constant in `chunk-NNNN.tsv` with its reason, and the run goes on. `--budget` caps the time per constant; the prover and the type inferencer enforce it.
@@ -943,6 +943,111 @@ scripts/summarize-all out
 - **Names:** 3,397 constants, 17% of `Init`, have names a set.mm token can't hold. An escaping scheme in `Model.Token` would admit most of them.
 - **Model features still missing:** `Acc` and well-founded recursion (389), proof fields of ∀-statements in computation rules (71), fields whose types bind variables (60), empty types (24).
 - **Tool limits:** mmj2's 32,000 symbols (76 definitions), and set.mm's 20 class variables (54).
+
+## Names: every Lean name as a token and a label (built)
+
+The Init-wide run refused 3,397 constants, 17% of `Init`, only for their names. A set.mm math token may hold any printable ASCII character but `$`; a label only letters, digits, `-`, `_` and `.`. Lean names hold `'`, `?`, `!`, subscripts and other Unicode, the hygienic `_@`, numeric parts (`_private.Init.Data.0.…`, `_hyg.3`), and anything at all inside `«»` (parsers are named `«term_<|>_»`).
+
+`NameEscape.Escape` (`src/TenetZfc/NameEscape.cs`) writes a name as its components joined by `.`. A numeric component is its digits. A string component keeps ASCII letters, digits and `_`, and writes every other character as `-` and a code:
+
+| Character | Code | Example |
+|---|---|---|
+| `'` | `-q` | `List.map'` → `lean.List.map-q` |
+| `?` | `-Q` | `GetElem?` → `lean.GetElem-Q` |
+| `!` | `-B` | `Array.get!` → `lean.Array.get-B` |
+| `@` | `-a` | `foo._@.Init.Core._hyg.3` → `lean.foo._-a.Init.Core._hyg.3` |
+| `.` inside a component | `-d` | `«a.b»` → `lean.a-db` |
+| `-` | `-m` | |
+| any other UTF-16 unit | `-u` and 4 hex digits | `a₂` → `lean.a-u2082`, `«term_<|>_»` → `lean.term_-u003c-u007c-u003e_` |
+| beyond U+FFFF | `-U` and 6 hex digits | |
+
+Three kinds of string component are written whole, because something else prints the same way: the empty string is `-z`; a string that a numeric part or a level suffix would also print as (`0`, `u1`, `u0_1`) is `-n` and the string; and `Monomorph`'s level suffix stays `{0,1}` in tokens (`lean.Prod.{0,1}`, as before). Braces and commas occur in a token only there, so `Model.LabelPart` can turn the suffix into `u0_1` in labels (`df-lean.Prod.u0_1`, as before), and no real component prints as `u0_1`. A token is `lean.` and the escaped name; the labels are `c`, `df-` and the model's `lean-…-eq`, `lean-…-iota`, `lean-ind-…` and so on, around `Model.LabelOf(name)`.
+
+**Why nothing collides.**
+- Escaping is one-to-one: `NameEscape.Unescape` reads every output back to the name, and refuses anything `Escape` never writes. The tests check this on hand-picked hard names, on 20,000 random names over an alphabet of the special characters, and on every name in five fixture exports.
+- No code starts with `s`, `c`, `l`, `o` or `t`, so no escaped component is `-step`, `-case`, `-lit`, `-ofnum` or `-least`, nor `lean.-tower`, the model's own tokens.
+- No code starts with `e`, `i` or a digit, so an escaped name never ends in `-eq` or `-iota`, nor takes a projection's `-N`. The label families (`lean-X-eq`, `lean-ind-X`, …) therefore can't meet.
+- `--` never occurs, so `define`'s labels for a nested block's auxiliary recursor, `lean-R--C-iota`, can't meet a constructor's `lean-C-iota`.
+- The set variables `xxN` and their labels `vxxN` start differently from everything else.
+- A Lean constant could, in principle, be named like an instance (`c.«{0}»`). `Monomorph` refuses to make an instance whose name the export already has, so that case is refused rather than merged.
+
+**Comments.** metamath-exe accepts only printable ASCII, and a comment can't contain `$(` or `$)`. Comments now show a Lean name as Lean prints it, with any other character written `\u{…}` (`a\u{2082}`, `term_\u{24}__`).
+
+**The CLI** takes a name as Lean prints it or as its escaped form (`'lean.List.map-q'`, `hint._-a.Init.Hints.1215944719._hygCtx._hyg.3`). Names with numeric parts can't be typed the first way, since `Terms.Of` reads every part as a string.
+
+## `Acc` and other non-finitary propositions (built: types, constructors, recursors; not yet computation rules)
+
+`Acc` is the second-largest blocker in the table above: 379 constants, `WellFounded.fix` and everything defined by well-founded recursion.
+
+```lean
+inductive Acc {α : Sort u} (r : α → α → Prop) : α → Prop where
+  | intro (x : α) (h : (y : α) → r y x → Acc r y) : Acc r x
+```
+
+Its premise `h` is a function into `Acc`. With ω stages, `x` enters `Acc` one stage after all of its predecessors, so a relation of height ω + 1 or more, such as `<` on ω + 1, needs stages beyond ω. Iterating to a regular cardinal would work, but there is a shorter definition of the same set: the least fixed point is the intersection of every closed set (`Model.Least.cs`).
+
+- **The step** is the one ω stages use, except that a premise mentioning the type under binders is translated with each `I params e⃗` read as `if ( <. e⃗ >. e. s , 1o , (/) )`, through a hole `( i e. _V |-> if ( <. i , (/) >. e. s , 1o , (/) ) )` applied to the indices. For `Acc`, `s` grows by every `<. x , (/) >.` with `A. y e. α ( (/) e. ( ( r ` y ) ` x ) -> <. y , (/) >. e. s )`.
+- **The least set** is a constant of its own, so definitions substitute only into its application and never under its class abstraction:
+  `lean.Acc.{1}.-least = ( x e. _V |-> |^| { y | ( lean.Acc.{1}.-step ` <. x , y >. ) C_ y } )`.
+  Every occurrence of the type in the step is positive, so the step is monotone, and the set of all index tuples of the right types is closed. The intersection is therefore a set, and the least fixed point (Knaster–Tarski).
+- **The proposition** is `if ( <. x , (/) >. e. ( lean.Acc.{1}.-least ` <. u , <. α , <. r , (/) >. >. >. ) , 1o , (/) )`, and the constructor is `(/)`.
+- **The recursor.** Lean lets `Acc.rec` eliminate into any sort, because `Acc` has one constructor whose only data field, `x`, is its index. `Acc.rec` is `frecs` over the least set, along the relation from each recursive premise's indices to the constructor's:
+  `R = U_ x e. α U_ y e. α U_ h e. ( ( r ` y ) ` x ) { <. <. y , (/) >. , <. x , (/) >. >. }`.
+  The case analysis (`lean.Acc.{1}.-case`) reads `x` back from the index tuple, gives `(/)` for `h`, and gives the induction hypothesis `( y e. α |-> ( h e. ( ( r ` y ) ` x ) |-> ( f ` <. y , (/) >. ) ) )`. On the least set, every predecessor of a member is a member, so `R` is well-founded there and set-like (`R` is a set), and `frecs` computes `Acc.rec` on accessible elements, which are the only ones Lean can apply it to.
+
+This covers any recursive proposition with a premise under binders, and any recursive proposition whose recursor eliminates into any sort. Finitary propositions with recursors into `Prop` (`Nat.le`) keep their ω stages, which the theorem library's proofs use.
+
+**Verified.** The definitional equations of `Acc`, `Acc.intro`, `Acc.rec`, `WellFounded.fix`, `Nat.lt_wfRel` and `Nat.strongRecOn` (at `Type`) pass metamath-exe, mmverify.py and mmj2's definition check, and a test on the `acc436.ndjson` fixture checks them.
+
+**Not yet: `Acc.rec`'s computation rule.** `Acc.rec F (Acc.intro x h) = F x h (fun y hy => Acc.rec F (h y hy))` follows from `frr2` once `R Fr L` and `R Se L` are proved for the least set `L`. `R Se L` holds because `R` is a set. `R Fr L` is the real lemma: if `B ⊆ L` is nonempty with no `R`-minimal element, then `L \ B` is closed under the step, so `L ⊆ L \ B` and `B` is empty. Proving it means unfolding the step inside a `Deduction` proof, which is the next piece of work. Until then `Acc.intro`'s computation rule is refused with that reason. `Lean.Order.iterates`, the other non-finitary proposition in `Init`, takes the same path, but its `sup` constructor's index is `CCPO.csup c`, which uses `Classical.choice`, and the tower model doesn't cover choice yet.
+
+## The Init-wide run, again (built)
+
+The run above was made in the one-universe model, before names were escaped and before `Acc`. This one is in the tower, the default, with everything above and these fixes, each found by running the refused constants of the first run again:
+
+- **`outParam` in the tower.** The kernel strips `outParam` from recursors' binder types, so the model translates through it (fix 2 of the first run). In the tower its instance is `outParam.{2}`, which the check didn't recognise, so `HAdd.mk`'s computation rule and those of the other heterogeneous operators were refused again. The check now strips a level suffix first.
+- **More than 20 arguments.** set.mm has 20 class variables, `A` to `T`. Statements with more arguments (`IO.Error.rec` and the computation rules of `IO.Error`'s 18 constructors) now use class variables of the output's own, `AA1`, `AA2`, …, declared with `$v` and `$f class` the first time they are used, as the extra set variables are. A `$f` adds no axiom.
+- **Fields whose types bind variables** (`Bind.mk`, `Functor.mk`, `Pure.mk`). Their type is written once for the constructor and once inside the inductive type, with bound variables named independently, so the computation rule couldn't find a field's hypothesis by its text. It now finds it up to renaming of bound variables (`eleqtrd` with `Alpha`).
+- **Proof fields of ∀-statements** (`Iff.intro`, `WellFounded.intro`): the same, for a proposition's computation rule.
+- **Proofs at level 0.** `define-all` instantiates every universe parameter at 0, which puts `Prop` where Lean has `Sort u`: in `Eq.refl.{0}` and `CoeDep.mk.{0,0}` a parameter or field is then a proof, which the translation writes as `(/)` in some places but its class variable in others, so the computation rule failed (`fvmptd3`). A computation rule now takes `(/)` for such a parameter or field from the start.
+- **Empty types.** A type with no constructors is `(/)`, and its recursor is `(/)`: its major premise ranges over nothing. `Empty.rec`, `PEmpty.rec`, `Empty.elim` and `absurd` translate.
+
+Each of these is checked by a test on `tests/fixtures/rest.ndjson`, through metamath-exe and mmverify.py.
+
+**The result (partial).** `Init` from Lean 4.36.0, in the tower model, with names escaped, `Acc`, and the fixes above. The run was stopped after 34 of its 40 chunks, chunks 0–32 and 34, which hold 17,000 of `Init`'s 19,885 constants. Chunks 33 and 35–39 are a follow-up. 29 chunks come from commit 6af3f87. Chunks 2, 4, 10, 11 and 22 failed the checkers and were translated again after the fix below, at 724b9d4, which also merges quotients and choice in the tower (#12). The 196 refusals for choice in the table therefore come from the other 29 chunks, and translating those again is part of the follow-up.
+
+| | Constants | Translated, equation verified | Refused | Errors (time budget) |
+|---|---|---|---|---|
+| definitions | 14,769 | 14,366 | 391 | 12 |
+| constructors | 794 | 785 | 7 | 2 |
+| recursors | 594 | 590 | 4 | 0 |
+| inductive types | 592 | 588 | 4 | 0 |
+| opaque constants | 251 | 236 | 15 | 0 |
+| **all** | **17,000** | **16,565** | **421** | **14** |
+
+The same 34 chunks of the first run translated 13,553 constants (11,587 definitions). 3,074 more translate now: 2,780 of them were refused before only for their names, and 244 for `Acc`.
+
+- **Equations:** 16,565 emitted, 16,565 checked by metamath-exe and mmverify.py.
+- **Computation rules:** 653 emitted and checked (467 in the same chunks before); 105 need none; 13 refused, 14 over the time budget (`IO.Error`'s and `Lean.ParserDescr`'s).
+- **Checkers:** 33 chunks pass all three. Chunk 31 passes metamath-exe and mmverify.py, but mmj2's `definitionCheck` stops with an internal error ("A-PR-0016 Programmer Error", `convertRPNToFormula`: "proof incomplete" at step 2217 of a justification it builds itself). The chunk's largest definition has 10,079 symbols, well under the limit, so this is not mmj2's size limit; which definition triggers it is a follow-up. 13 computation rules (`Lean.ParserDescr`'s) are too long for mmj2's proof verifier and are checked by the other two, as before.
+- **The run found one more bug,** fixed: a proof field's hypothesis found up to renaming (above) can bind the variable of the ∃ that a proposition's computation rule witnesses with `(/)`, and `rspcedvd` needs them disjoint. All three checkers rejected 11 computation rules in chunks 2, 4, 10, 11 and 22 (`Std.TransCmp.mk`, `LawfulFunctor.mk`, `Equivalence.mk`, …). Those are refused now ("the witness's variable occurs in the hypotheses"); renaming the witness apart would admit them.
+
+**Why the rest don't translate** (in these 34 chunks; refusals, errors, and refused or failed computation rules, 462 in all):
+
+| Reason | Constants |
+|---|---|
+| the definition is too large for mmj2's definition check (over 15,000 symbols), now that their names translate: macro rules, parsers, `stdNext` | 218 |
+| uses `Classical.choice` or `Quot` in a chunk translated before #12 brought them into the tower | 200 |
+| over the time budget of 240 s | 28 |
+| a computation rule whose witness's variable occurs in the hypotheses (above) | 11 |
+| part of a type an earlier refusal stopped (`Std.Packages.PreorderOfLEArgs`) | 3 |
+| `Acc.rec`'s and `Acc.below.rec`'s computation rules (above) | 2 |
+
+**Cost.** 131.9 MiB of compressed output for the 34 chunks. Translation took 9.9 hours summed over constants, at 3 jobs on a machine shared with other sessions at loads up to 900. On a quiet machine the five chunks translated again took 4 minutes together. Checking took metamath-exe 70 s, mmverify.py 294 s and mmj2 48 minutes, summed over chunks.
+
+**To reproduce:** as for the first run, with the default tower model.
+
+**Follow-up:** chunks 33 and 35–39; the 29 chunks from 6af3f87 again, for choice and quotients; chunk 31's mmj2 error; `Acc.rec`'s computation rule.
 
 ## Theorems across Init (built: `theorem-all`; measured on a sample)
 

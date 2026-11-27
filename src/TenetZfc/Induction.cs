@@ -118,7 +118,7 @@ public sealed partial class Model
             }
             return r;
         });
-        string label = $"lean-ind-{LabelPart($"{iname}")}";
+        string label = $"lean-ind-{LabelOf(iname)}";
         EmitLemma(label, $"Induction on {iname}: its recursor at a motive into Prop.", p);
         _propRec[k.Name] = (label, tyText);
         return (label, tyText);
@@ -190,7 +190,7 @@ public sealed partial class Model
             Proof toMinor = _d.Trans(cur, AlphaIn(d.Ph, Rhs(cur), pMinor));
             return pr.Apply("eleqtrrd", S(("ph", d.Ph), ("A", "(/)"), ("B", pMinor), ("C", goal)), minor, toMinor);
         });
-        string label = $"lean-subst-{LabelPart($"{iname}")}";
+        string label = $"lean-subst-{LabelOf(iname)}";
         EmitLemma(label, $"Substitution along {iname}: its recursor at a motive into Prop.", p);
         return (label, tyText);
     }

@@ -752,7 +752,7 @@ public sealed class NatBridge
     {
         Terms t = tt.Terms;
         var ops = new Ops(t);
-        string lp = Model.LabelPart(name);
+        string lp = Model.LabelOf(t.Of(name));
         var (tstmt, tproof) = tt.Prove(t.Of(name));
         Add($"lean-thm-{lp}", $"The Lean theorem {name}, proved through the model from its proof term.", tstmt, tproof, Required(tproof));
 

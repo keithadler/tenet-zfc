@@ -515,7 +515,7 @@ public sealed partial class Model
     internal string QuotInLemma(ConstInfo ci, string ty)
     {
         Name n = ci.Name;
-        string label = $"lean-in-{LabelPart($"{n}")}";
+        string label = $"lean-in-{LabelOf(n)}";
         if (Has(label))
         {
             return label;

@@ -99,7 +99,7 @@ public sealed class TheoremAll(Terms t, Environment env, string setmmPath, bool 
                 // Replayed here (every step's hypotheses, and the $d conditions), so a broken proof is recorded as an
                 // error instead of failing the chunk in a checker.
                 var dv = DistinctVars.Required(db, proof);
-                proved.Add(($"lean-thm-{Model.LabelPart(n)}", n, stmt, proof, dv.Select(p => $"{p.Item1} {p.Item2}").ToList()));
+                proved.Add(($"lean-thm-{Model.LabelOf(c.Name)}", n, stmt, proof, dv.Select(p => $"{p.Item1} {p.Item2}").ToList()));
                 outcomes.Add(new(n, "proved", db.Shared.Size(proof), translator.LemmaSteps.Count - lemmasBefore,
                     translator.LemmaSteps.Values.Sum() - stepsBefore, "", sw.Elapsed.TotalSeconds, (ThreadCpu.Seconds() ?? 0) - cpuStart));
             }

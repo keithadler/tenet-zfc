@@ -238,7 +238,7 @@ public sealed partial class Model
         {
             return null;
         }
-        string label = $"lean-iota-{LabelPart($"{head.Name}")}";
+        string label = $"lean-iota-{LabelOf(head.Name)}";
         if (!Has(label))
         {
             try
