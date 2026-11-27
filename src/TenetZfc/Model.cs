@@ -40,7 +40,9 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
 
     private readonly Ops _ops = new(t);
     private readonly Typing _typing = new(t, env) { Deadline = () => pr.CurrentDeadline() };   // define-all's time budget
-    private readonly Deduction _d = new(pr);
+    private readonly Deduction _deduction = new(pr);
+    /// <summary>The deduction kit, with the model's alpha-renaming installed for Congruence (Deduction.RenameApart).</summary>
+    private Deduction _d => _deduction.RenameApart is null ? Hook(_deduction) : _deduction;
     private readonly HashSet<Name> _defined = new(ReferenceEqualityComparer.Instance);
     private readonly StringBuilder _out = new();
     private ulong _fresh = 1UL << 58;

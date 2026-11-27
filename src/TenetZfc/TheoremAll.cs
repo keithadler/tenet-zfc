@@ -134,13 +134,18 @@ public sealed class TheoremAll(Terms t, Environment env, string setmmPath, bool 
     private static string Why(Exception e)
     {
         string why = e is Model.Refused ? e.Message : $"{e.GetType().Name}: {e.Message}";
+        why = why.Replace('\t', ' ').Replace('\n', ' ');
+        // The message is cut, not where it happened: long statements used to push the frames past the cut.
+        if (why.Length > 1600)
+        {
+            why = why[..1600] + "…";
+        }
         if (e is not Model.Refused && e.StackTrace is string st)
         {
             // Where it happened: the innermost few methods, for finding what is slow or broken.
-            var at = st.Split('\n').Select(l => Regex.Match(l, @"at TenetZfc\.([\w.]+)\(").Groups[1].Value).Where(m => m != "").Distinct().Take(4);
+            var at = st.Split('\n').Select(l => Regex.Match(l, @"at TenetZfc\.([\w.]+)\(").Groups[1].Value).Where(m => m != "").Distinct().Take(6);
             why += " (in " + string.Join(" < ", at) + ")";
         }
-        why = why.Replace('\t', ' ').Replace('\n', ' ');
-        return why.Length > 2000 ? why[..2000] + "…" : why;
+        return why;
     }
 }

@@ -12,6 +12,13 @@ namespace TenetZfc;
 /// </summary>
 public sealed class Deduction(Prover pr)
 {
+    /// <summary>
+    /// An alpha-variant h' of a hypothesis whose binders avoid the given letters (and every letter of the extra text),
+    /// with |- ( h -> h' ) and |- ( h' -> h ); null when there is nothing to rename. The model supplies it (Alpha.cs):
+    /// Congruence needs it when a hypothesis binds a letter that a binder of the rewritten text binds as well.
+    /// </summary>
+    public Func<string, ISet<string>, string, (string Renamed, Proof There, Proof Back)?>? RenameApart { get; set; }
+
     private static Dictionary<string, string> S(params (string Var, string Value)[] xs) => xs.ToDictionary(x => x.Var, x => x.Value);
 
     /// <summary>The two sides of |- ( H -> X ).</summary>
@@ -106,6 +113,14 @@ public sealed class Deduction(Prover pr)
         {
             Proof inner = Go(c, hole, x, a, b, pr.Apply("id", S(("ph", x)))) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
             return Syl(ab, inner);
+        }
+        // The equation mentions the binder's letter too (the rewrite is under the binder), so it can't be split off. The
+        // hypothesis only binds that letter, so an alpha-variant of it avoids it: prove the congruence under that
+        // variant h', and go there and back by the alpha-equivalence ( h <-> h' ).
+        if (clash.Count > 0 && RenameApart?.Invoke(h, clash, $"{context} {x}") is var (h2, there, back))
+        {
+            Proof inner = Go(c, hole, h2, a, b, Syl(back, ab)) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
+            return Syl(there, inner);
         }
         return Go(c, hole, h, a, b, ab) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
     }

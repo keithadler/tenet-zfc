@@ -593,7 +593,9 @@ public sealed partial class Model
         string x = pr.Render(all.Children[1]), dom = pr.Render(all.Children[2]), psi = pr.Render(all.Children[0]);
         EnsureTowerLemmas();
         Proof holds = _d.Syl(m, Bi1(ApplyId("lean-prop", S(("ph", allText)))));
-        if (aText.Split(' ').Contains(x) || ph.Split(' ').Contains(x))
+        // rspcdv needs x out of ph, A and the instance: rename the binder when one has it, or when the body binds the
+        // same letter again inside (a shadowing binder survives into the instance).
+        if (aText.Split(' ').Contains(x) || ph.Split(' ').Contains(x) || BoundIn(psi).Contains(x))
         {
             string y = FreshFor(aText, psi, dom, ph);
             string psiY = SubstFree(psi, x, y);
@@ -606,7 +608,8 @@ public sealed partial class Model
         }
         if (BoundIn(psi).Overlaps(ArgVars(aText)))
         {
-            string psi2 = RenameApart(psi, ArgVars(aText), ph);
+            // Fresh names that avoid the binder's own letter too, or the renamed body binds it again.
+            string psi2 = RenameApart(psi, ArgVars(aText), ph, x, aText, dom);
             string all3 = $"A. {x} e. {dom} {psi2}";
             Proof ren = pr.Apply("mptru", S(("ph", $"( {allText} <-> {all3} )")), Alpha("wff", allText, all3)!.Value);
             holds = pr.Apply("sylib", S(("ph", ph), ("ps", allText), ("ch", all3)), holds, ren);

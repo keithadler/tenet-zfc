@@ -80,6 +80,21 @@ public sealed partial class Model
         return Go(n);
     }
 
+    private Deduction Hook(Deduction d)
+    {
+        d.RenameApart = (h, avoid, also) =>
+        {
+            string h2 = RenameApart(h, avoid, also);
+            if (h2 == h)
+            {
+                return null;
+            }
+            Proof bi = pr.Apply("mptru", S(("ph", $"( {h} <-> {h2} )")), Alpha("wff", h, h2) ?? throw new Refused($"not alpha-equivalent: {h}  vs  {h2}"));
+            return (h2, pr.Apply("biimpi", S(("ph", h), ("ps", h2)), bi), pr.Apply("biimpri", S(("ph", h), ("ps", h2)), bi));
+        };
+        return d;
+    }
+
     /// <summary>The variables of a substitution's argument a body's binders must avoid: all of the argument's.</summary>
     private HashSet<string> ArgVars(string arg) => arg.Split(' ').Where(v => SetVars.Contains(v)).ToHashSet();
 
@@ -161,7 +176,7 @@ public sealed partial class Model
                 Proof? p2 = Alpha(type, mid, b);
                 return p2 is Proof q ? TransT(type, p1, q) : p1;
             }
-            int di = na.Rule.Label is "wral" or "wrex" ? 2 : na.Rule.Label is "cmpt" or "cixp" or "ciun" ? 1 : -1;
+            int di = na.Rule.Label is "wral" or "wrex" or "crab" ? 2 : na.Rule.Label is "cmpt" or "cixp" or "ciun" ? 1 : -1;
             if (di >= 0 && KidA(di).Split(' ').Any(tok => tok == xa || tok == xb))
             {
                 // The renaming lemma needs both names out of the domain, where they can occur only bound: rename the
@@ -232,11 +247,12 @@ public sealed partial class Model
             case "wn":
                 return pr.Apply("notbid", S(("ph", "T."), ("ps", KidA(0)), ("ch", KidB(0))), Alpha("wff", KidA(0), KidB(0))!.Value);
         }
-        if (type != "class" || vars.Any(h => h.Expr.Type != "class"))
+        if (vars.Any(h => h.Expr.Type != "class"))
         {
             throw new Refused($"no alpha rule for {na.Rule.Label} ({a})");
         }
-        // A class node of class children: one child at a time, by the congruence prover.
+        // A node of class children (a class, or a formula such as A C_ B or A R B): one child at a time, by the
+        // congruence prover.
         var cur = na.Children.Select(k => pr.Render(k)).ToList();
         Proof? acc = null;
         for (int i = 0; i < vars.Count; i++)
@@ -248,8 +264,8 @@ public sealed partial class Model
             var holed = cur.ToList();
             holed[i] = "ZZH";
             string ctx = string.Join(' ', na.Rule.Expr.Symbols.Select(sym => Idx(sym) is int vi and >= 0 ? holed[vi] : sym));
-            Proof step = _d.Congruence("class", ctx.Replace("ZZH", "Z", StringComparison.Ordinal), "Z", pi);
-            acc = acc is Proof a1 ? _d.Trans(a1, step) : step;
+            Proof step = _d.Congruence(type, ctx.Replace("ZZH", "Z", StringComparison.Ordinal), "Z", pi);
+            acc = acc is Proof a1 ? TransT(type, a1, step) : step;
             cur[i] = KidB(i);
         }
         return acc;
@@ -281,11 +297,11 @@ public sealed partial class Model
     {
         ("cmpt" or "cixp" or "ciun", "B") => true,
         ("wral" or "wrex", "ph") => true,
-        ("cab", "ph") => true,
+        ("cab" or "crab", "ph") => true,
         _ => false,
     };
 
-    /// <summary>( T. -> n = n' ) (or <->), n' the node with its binder renamed to y: cbvmptv, cbvixpv, cbviunv, cbvralvw, cbvrexvw.</summary>
+    /// <summary>( T. -> n = n' ) (or <->), n' the node with its binder renamed to y: cbvmptv, cbvixpv, cbviunv, cbvralvw, cbvrexvw, cbvabv, cbvrabv.</summary>
     private Proof RenameProof(string type, SyntaxTree n, int sv, string y)
     {
         string x = pr.Render(n.Children[sv]);
@@ -307,6 +323,20 @@ public sealed partial class Model
                 ? SubstEq("wff", body, x, $"{x} = {y}")
                 : pr.Apply("a1i", S(("ph", $"( {body} <-> {body} )"), ("ps", $"{x} = {y}")), pr.Apply("biid", S(("ph", body))));
             closed = pr.Apply(label == "wral" ? "cbvralvw" : "cbvrexvw", S(("x", x), ("y", y), ("A", dom), ("ph", body), ("ps", SubstFree(body, x, y))), sub);
+        }
+        else if (label is "cab" or "crab")
+        {
+            // { x | ph } and { x e. A | ph }: cbvabv, cbvrabv (children ph, x and, for crab, A).
+            string body = pr.Render(n.Children[0]);
+            Proof sub = body.Split(' ').Contains(x)
+                ? SubstEq("wff", body, x, $"{x} = {y}")
+                : pr.Apply("a1i", S(("ph", $"( {body} <-> {body} )"), ("ps", $"{x} = {y}")), pr.Apply("biid", S(("ph", body))));
+            var s = S(("x", x), ("y", y), ("ph", body), ("ps", SubstFree(body, x, y)));
+            if (label == "crab")
+            {
+                s["A"] = pr.Render(n.Children[2]);
+            }
+            closed = pr.Apply(label == "cab" ? "cbvabv" : "cbvrabv", s, sub);
         }
         else
         {
