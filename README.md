@@ -51,9 +51,12 @@ lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
 | mutual and nested types (`Lean.Syntax`) | one least fixed point over a tagged sum | computation rules |
 | recursors | `set.mm`'s well-founded recursion (`frecs`) over smaller rank | via `frr2` and a one-time lemma that rank is well-founded |
 | recursive propositions (`Nat.le`) | least sets of index tuples | |
+| `Acc` and well-founded recursion | the intersection of every closed set (stages would need to go beyond ω); `Acc.rec` by `frecs` over it | definitional equations |
 | `Nat` and string literals | decimal numerals, through `_om`; lists of characters | |
 | quotients, `propext`, `Classical.choice` | equivalence classes; `set.mm`'s choice | `Quot.lift`'s computation rule |
 | more than 26 bound variables | set variables the output declares itself (`$v`, `$f setvar`), which add no axiom | definitional equations |
+| more than 20 arguments | class variables the output declares itself (`AA1`, …) | computation rules |
+| names with `'`, `?`, `₂`, `_@`, `«»` | escaped one-to-one into tokens and labels: `List.map'` is `lean.List.map-q` | |
 
 On Lean 4.36's `Init`, **14,105 of 17,590 definitions (80%)** translate together with everything they use, in the tower model, up from 48 when milestone 3 began (13,958 in the one-universe model).
 
