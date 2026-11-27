@@ -27,7 +27,29 @@ public sealed partial class Model
         Define(k.Name);
         if (IsProposition(ind) && !ind.IsRec && ind.Ctors.Length == 1)
         {
-            return _propRec[k.Name] = SubstRecLemma(k, rec, ind, iname);
+            try
+            {
+                return _propRec[k.Name] = SubstRecLemma(k, rec, ind, iname);
+            }
+            catch (Refused e) when (e.Message.Contains("condition isn't equalities") && ind.NumIndices == 0)
+            {
+                // Not an equality (Exists, Nonempty): its condition is the constructor's one case, E. z e. D … ψ, so
+                // eliminate it as a case analysis with one case (PropCasesRecLemma: rexlimdva over the fields).
+                return _propRec[k.Name] = PropCasesRecLemma(k, rec, ind, iname);
+            }
+        }
+        if (IsProposition(ind) && ind.Ctors.Length >= 2 && !ind.IsRec && ind.NumIndices == 0)
+        {
+            return PropCasesRecLemma(k, rec, ind, iname);
+        }
+        if (IsProposition(ind) && ind.IsRec && _recursiveProps.Contains(iname))
+        {
+            return RecPropRecLemma(k, rec, ind, iname);   // RecPropInduction.cs: Nat.le
+        }
+        if (IsProposition(ind) && ind.Ctors.Length >= 2)
+        {
+            // Its set is if ( cases , 1o , (/) ), not a union of constructors' parts: RecTyLemma doesn't apply.
+            throw new Refused($"induction on {iname}, a proposition with {ind.Ctors.Length} constructors{(ind.IsRec ? ", recursive" : "")}, isn't typed yet");
         }
         string rl = RecTyLemma(ind);
         EnsureTowerLemmas();
@@ -136,7 +158,10 @@ public sealed partial class Model
             string pMinor = Ty(minorVar), pMajor = Ty(majorVar);
             Proof minor = HypIn(d, $"(/) e. {pMinor}"), major = HypIn(d, $"(/) e. {pMajor}");
             // The major premise's proposition, unfolded: if ( φ , 1o , (/) ), so φ.
-            var iargs = vs.Take(np).Concat(vs.Skip(nb).Take(ni)).ToList();
+            // Each argument as the terms write it: a binder that is a proof is (/), not its variable (Eq.{0}, at a
+            // universe level 0 where the type is a proposition and its elements are proofs).
+            var texts = d.Vars.Values.ToHashSet();
+            var iargs = vs.Take(np).Concat(vs.Skip(nb).Take(ni)).Select(v => texts.Contains(v) ? v : "(/)").ToList();
             (Proof eqI, _, _) = Unfold(d.Ph, itok, iargs, (i, dom) => HypIn(d, $"{iargs[i]} e. {dom}"));
             Proof inIf = pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", "(/)"), ("B", pMajor), ("C", Rhs(eqI))), major,
                 AlphaIn(d.Ph, pMajor, Lhs(eqI)) is var a1 ? _d.Trans(a1, eqI) : eqI);

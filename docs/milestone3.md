@@ -1048,3 +1048,41 @@ The same 34 chunks of the first run translated 13,553 constants (11,587 definiti
 **To reproduce:** as for the first run, with the default tower model.
 
 **Follow-up:** chunks 33 and 35–39; the 29 chunks from 6af3f87 again, for choice and quotients; chunk 31's mmj2 error; `Acc.rec`'s computation rule.
+
+## Theorems across Init (built: `theorem-all`; measured on a sample)
+
+Until now 28 hand-picked theorems went through the model. This section measures how many of `Init`'s 45,588 theorems do, ranks what stops the others, and fixes the cheapest blockers.
+
+**The tools.**
+- `tenet-zfc theorem-all <export> <set.mm> <outdir> [--every N] [--chunk-size N] [--chunks a,b-c] [--jobs N] [--budget s] [--redo]` (`TheoremAll.cs`) proves every theorem of an export, or every Nth with `--every`, through the model, as `theorem` does. It works like `define-all`:
+  - **Chunks.** A chunk of N theorems is one standalone `.mm` that includes `set.mm` and writes every definition and lemma its theorems use. Within a chunk, theorems share lemmas and are proved in export order, so a theorem's dependencies come first. Chunks run in parallel (`--jobs`), each on its own thread with a 256 MB stack, sharing the export.
+  - **An outcome per theorem**, in `chunk-NNNN.tsv`: `proved` (with its flat size and the lemmas it was first to need), `refused` (with the reason), `timeout`, `error` (an exception other than a refusal, or a proof whose replay fails: a translator bug, caught before anything is written), or `crash`.
+  - **CPU-time budgets.** The budget counts the CPU time of the chunk's thread (`ThreadCpu.cs`: Mach's `thread_info` on macOS, `CLOCK_THREAD_CPUTIME_ID` on Linux), with wall time capped at ten times the budget. On this shared Mac, at loads of 100 to 270, a wall-clock budget of 120 s timed out `Nat.add_comm`, which takes 11 s on a quiet machine.
+  - **Incremental and resumable.** A chunk whose `.tsv` exists is done; a rerun proves only the others. A crash that ends the process (a stack overflow, running out of memory) leaves `chunk-NNNN.progress` naming the theorem in hand; the next run records that theorem as a `crash` and skips it. The folder remembers the run's shape (`theorem-all.shape`), so chunks of different shapes can't be mixed.
+- `scripts/verify-all` and `scripts/summarize-all` work on its folders unchanged; `summarize-all` reports theorems proved, refused, over budget and failed, ranks the blockers by construct, and gives the size and time distributions.
+- `scripts/subset-export <export> <out> <names>… [--theorems-every N]` cuts the named constants and everything they use out of an export, renumbered: what `leanout Init -- <names>` writes, without Lean. The fixtures below were cut from the `Init` export this way.
+- CI runs `theorem-all` and `verify-all` on `tests/fixtures/theoremall.ndjson` (23 theorems, two chunks, about a minute of proving): it fails on any `error`, `crash` or `timeout`, or unless all 23 are proved (18 before the fixes below).
+- CI also runs `theorem-all` on `tests/fixtures/blockers.ndjson` (39 theorems: the ones the first blockers below stopped, with the theorems they use) and fails unless every one proves and passes all three checkers.
+
+**Running it on a 16 GB machine.** One process with several chunk threads gets about one core: the proofs allocate heavily, and the workstation GC stops every thread while it collects. Server GC (`DOTNET_gcServer=1`) uses all the cores but lets the heap grow past physical memory (29 GB on a 16 GB Mac). What works is one process per chunk, a few at a time, each with the default GC and `DOTNET_GCConserveMemory=7`. Don't cap the heap (`DOTNET_GCHeapHardLimit`): a chunk's lemmas accumulate, so a capped chunk runs out at whichever theorem is in hand, and each resumed run records that theorem as a `crash` and fails at the next one.
+
+### The first blockers, and their fixes
+
+The first 150 theorems of the every-10th sample (chunks 0, 1, 3, 4, 6 and 7, from `Init.Prelude` to the `Nat` lemmas): 41 proved (27%), 104 refused and 5 errors. Five constructs stopped most of the rest, and each now has a fix:
+
+| Blocker | Theorems of the 150 | Fix |
+|---|---|---|
+| A Nat literal as an argument (`OfNat.ofNat Nat 2 _`), sent to the universe prover: "not a level of the tower: `( lean.Nat ` U )`" | 28 | `TextMem` reads a literal's text back to its value and types it as a literal |
+| A constructor of a recursive proposition (`Nat.le.refl`, `Nat.le.step`), tried as a disjunction of cases | 27 | The constructor's index tuple is in the least set. A recursive premise's tuple is in some stage `m`, so the constructor's is in stage `suc m`. |
+| `Decidable`'s proof field (`reflects_decide : Bool.Reflects decide p`) in `Decidable.rec`'s typing: "can't discharge" | 22 | A field the computation rule doesn't mention is a proof field: it is applied as `(/)`, which holds by `lean-pf`, and the stage's variable is `(/)` by `lean-pf0` |
+| Nat literals past 10, which were typed one `Nat.succ` at a time | (behind the first) | `lean-litnat`: every value of the literal map on ω is in Nat, by induction on ω; a numeral's position in ω comes from set.mm's isomorphism with `NN0` (`deccl`) |
+| Induction on a recursive proposition (`Nat.le.rec`, `Nat.le.below.rec` into Prop): "a proposition with 2 constructors, recursive, isn't typed yet" | 5 (and behind the 27) | `lean-ind-I` by induction over the stages (`RecPropInduction.cs`): `Phi(k) := A. q⃗ ( <. q⃗ >. e. stage k -> ψ(q⃗) )`. A tuple in a constructor's part is its result over some fields (`eliun`, `elsni`, `opthg`), where the minor premise applies, with the induction hypothesis from `Phi(y)`. Proof-valued indices are `(/)`. |
+| Eliminating `Exists` or `Nonempty` (`Exists.rec` into Prop): "condition isn't equalities" | 6 | A one-constructor proposition that isn't an equation is a case analysis with one case. Its witness is applied as itself, its proof as `(/)`, and `( p ` z )` is a proposition by `elmapi` and `ffvelcdm`. |
+| `$d` violations caught before writing (errors): a hypothesis that binds the binder's own letter (`raleqbidv`), and an instance that keeps it (`rspcdv`) | 4 | Congruence proves under an alpha-variant of the hypothesis and comes back by `( h <-> h' )` (`Deduction.RenameApart`). The instance's binders avoid the quantifier's letter. |
+
+After the fixes, `Nat.succ_mul`, `maxOn_eq_minOn`, `decide_false`, `eq_true_of_decide`, `dite_congr`, `Char.ext`, `Nat.le_refl` (refused in the starter library), `Nat.le_succ`, `Nat.lt_succ_self`, `Nat.zero_le`, `Exists.elim`, `not_exists._simp_1`, `Nat.succ_le_succ` and `Nat.le_of_lt_succ` prove, and pass all three checkers.
+
+One fix needed a fix of its own. The renamed hypothesis brings in a `cbvmptv` step, and the computation rules declared their `$d` conditions by hand, so metamath-exe rejected `Rose.node`'s rule in `mutual.ndjson`. `Iota`, `RecursorIotas` and `Equation` now add every pair their proof's steps need (`DistinctVars.Required`).
+
+The measured totals over the whole sample, the ranking and the forecast follow in the next section, once the run is done.
+
