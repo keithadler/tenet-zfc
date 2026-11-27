@@ -490,12 +490,10 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             string Case(int j, string x) => j == ctors.Count - 1
                 ? Minor(j, $"( 2nd ` {x} )")
                 : $"if ( ( 1st ` {x} ) = (/) , {Minor(j, $"( 2nd ` {x} )")} , {Case(j + 1, $"( 2nd ` {x} )")} )";
-            if (ctors.Count == 0)
-            {
-                throw new Refused($"{n} has no constructors; the empty type isn't in the model yet");
-            }
+            // No constructors (Empty, PEmpty): the type is (/), so the recursor's major premise ranges over nothing,
+            // and any value will do: (/).
             _defined.Add(rec.Name);
-            Emit(rec.Name, Token(rec.Name)!, Maps(bs, Case(0, major)), sc, "recursor");
+            Emit(rec.Name, Token(rec.Name)!, Maps(bs, ctors.Count == 0 ? "(/)" : Case(0, major)), sc, "recursor");
         }
     }
 
