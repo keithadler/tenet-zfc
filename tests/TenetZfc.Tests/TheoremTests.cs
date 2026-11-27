@@ -167,6 +167,56 @@ public class TheoremTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void QuotientTheoremsAreProvedInTheTowerAndVerify()
+    {
+        // Quot.ind's typing (every class is a class of some element), Quot.lift's (a function on the classes), and the
+        // quotient's computation rule as a conversion step: Quot.liftBeta is rfl in Lean. At level 1, and at level 0,
+        // where a quotient of a proposition is the proposition.
+        if (SetMm is null || System.Environment.GetEnvironmentVariable("TENET_ZFC_THEOREMS") is null)
+        {
+            return;
+        }
+        var t = new Terms();
+        Env env = Reader.ReadExport(t, Fixture("quotthm.ndjson"));
+        var pr = new Prover(Database.Read(Path.Combine(SetMm, "set.mm")));
+        var tr = new TheoremTranslator(t, env, pr);
+        var proved = new List<(string Name, TenetZfc.Metamath.Expr Stmt, List<string> Proof)>();
+        foreach (string name in new[] { "Quot.inductionOn.{1}", "Quot.liftBeta.{1,1}", "Quot.inductionOn", "Quot.liftBeta" })
+        {
+            var (stmt, proof) = tr.Prove(t.Of(name));
+            output.WriteLine($"{name}: {stmt}");
+            proved.Add((name, stmt, proof));
+        }
+        Assert.Contains("( ( ( ( ( ( ( lean.Quot.lift.{1,1} ` U ) ` A ) ` B ) ` C ) ` D ) ` (/) ) ` ( ( ( ( lean.Quot.mk.{1} ` U ) ` A ) ` B ) ` E ) )", proved[1].Stmt.ToString());
+        string? metamath = System.Environment.GetEnvironmentVariable("TENET_ZFC_METAMATH");
+        string? mmverify = System.Environment.GetEnvironmentVariable("TENET_ZFC_MMVERIFY");
+        if (metamath is null || mmverify is null)
+        {
+            return;
+        }
+        var w = new Writer("set.mm", "tenet-zfc quotient theorem test", pr.Database);
+        w.Raw(tr.Declarations);
+        foreach (var (name, stmt, proof) in proved)
+        {
+            w.Theorem($"lean-test-{Model.LabelPart(name)}", "test", stmt, proof, DistinctVars.Required(pr.Database, proof).Select(p => $"{p.Item1} {p.Item2}"));
+        }
+        string file = Path.Combine(SetMm, $"tenet-zfc-quot-{Guid.NewGuid():N}.mm");
+        File.WriteAllText(file, w.ToString());
+        try
+        {
+            string mm = Run(metamath, SetMm, $"\"read {Path.GetFileName(file)}\" \"verify proof *\" \"exit\"", out _);
+            Assert.DoesNotContain("?Error", mm);
+            Assert.Contains("All proofs in the database were verified", mm);
+            Run("python3", SetMm, $"-I \"{mmverify}\" \"{Path.GetFileName(file)}\"", out int code);
+            Assert.Equal(0, code);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
     private static string Run(string exe, string dir, string args, out int code)
     {
         var psi = new ProcessStartInfo(exe, args) { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true };

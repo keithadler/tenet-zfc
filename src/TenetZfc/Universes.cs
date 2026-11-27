@@ -168,18 +168,21 @@ public sealed partial class Model
             sb.AppendLine("U e. Univ. In this model Sort u is not a member of Sort (u+1), so a structurally recursive definition");
             sb.AppendLine("(through Nat.below and brecOn) collapses to (/): its equations verify, but it does not mean what");
             sb.AppendLine("Lean means (docs/milestone3.md). The default model is the tower; this output asked for one universe.");
+            ChoiceAssumption(sb);
             return Ascii(sb.ToString());
         }
         var byLevel = new SortedDictionary<int, List<string>>();
         var whole = new List<string>();
         var open = new List<string>();
+        var helpers = new List<string>();
         foreach (var (tok, body) in _values)
         {
             if (!_tokenNames.TryGetValue(tok, out Name? n))
             {
                 continue;
             }
-            string[] w = body.Split(' ');
+            // The well-ordering layer of a constant that uses choice ranges over the tower's union; that is not an open level.
+            string[] w = body.Replace($"~P ( U. ran {UniverseVar} X. U. ran {UniverseVar} )", "~P W", StringComparison.Ordinal).Split(' ');
             var levels = new SortedSet<int>();
             bool all = false;
             for (int i = 0; i + 4 < w.Length; i++)
@@ -199,7 +202,7 @@ public sealed partial class Model
             }
             if (all)
             {
-                (env.Find(n)?.Kind == ConstKind.Recursor ? whole : open).Add($"{n}");
+                (tok == QuotEqv ? helpers : env.Find(n)?.Kind == ConstKind.Recursor ? whole : open).Add($"{n}");
             }
         }
         if (lowered)
@@ -251,7 +254,32 @@ public sealed partial class Model
             Wrap(sb, "U. ran U also stands for a universe parameter left open, in: ", open);
             sb.AppendLine("  (a projection names its structure without universe levels, so the structure, and what its type uses, is defined with them open)");
         }
+        if (helpers.Count > 0)
+        {
+            Wrap(sb, "U. ran U is the domain of the quotient's relation, in: ", helpers);
+            sb.AppendLine("  (the least equivalence relation containing r, on a type at any level: one helper serves Quot.{k} for every k)");
+        }
+        ChoiceAssumption(sb);
         return Ascii(sb.ToString());
+    }
+
+    /// <summary>
+    /// The choice part of the header: which constants take a well-ordering because they use Classical.choice, and what
+    /// a theorem about them assumes (ModelBuiltins.cs). Nothing when no constant uses choice.
+    /// </summary>
+    private void ChoiceAssumption(System.Text.StringBuilder sb)
+    {
+        var uses = _values.Keys.Where(_choiceDependent.Contains).Select(tok => _tokenNames.TryGetValue(tok, out Name? n) ? $"{n}" : tok).ToList();
+        if (uses.Count == 0)
+        {
+            return;
+        }
+        string all = WellOrdered("U");
+        sb.AppendLine($"Choice: Classical.choice is the least element in a well-ordering W of {all}" + (tower ? ", the tower's union, so one" : ", so the"));
+        sb.AppendLine("well-ordering serves every level. ZFC defines no global choice function, so W is a parameter (as set.mm's hta");
+        sb.AppendLine($"emulates Hilbert's epsilon): each constant below takes W e. ~P ( {all} X. {all} ) after U, and a theorem that");
+        sb.AppendLine($"needs choice to pick an element has the hypothesis W We {all}. ZFC proves such a W exists (weth), so no axiom is added.");
+        Wrap(sb, "Constants that take W: ", uses);
     }
 
     private static int? OrdinalValue(string s) => s switch

@@ -107,7 +107,8 @@ jobs:
       # The model's default is a tower of universes, one per level (docs/milestone3.md, "Tower mode"). Universe
       # parameters are instantiated at 0 unless a name gives levels: id.{1} is id at Type, where id.{0} is id at Prop. Quote such
       # names: bash expands Function.comp.{1,1,1} into three words.
-      # Quotients and choice still need the one-universe model (--single-universe).
+      # Quotients and choice are in the tower too: Quot.{1} is a quotient of a type, Quot.{0} of a proposition (the
+      # proposition itself), and Classical.choice.{1} takes one well-ordering of the tower's union.
       - name: Translate definitions and inductive types by the generic model and verify (milestone 3)
         run: |
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/model.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/model.mm" 'id.{1}' 'Function.comp.{1,1,1}' 'Function.const.{1,1}'
@@ -120,11 +121,14 @@ jobs:
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/setvars.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/setvars.mm" Lean.Grind.Config.casesOn Lean.Meta.Simp.Config.zeta
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/mutual.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/mutual.mm" Tm Args Tm.var Tm.app Args.nil Args.cons Tm.rec Args.rec Rose Rose.node Rose.rec Rose.rec_1
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/strings.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/strings.mm" Lean.origin String.instInhabited instToStringBool
-          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define --single-universe tests/fixtures/axioms.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/axioms.mm" propext Quot Quot.mk Quot.ind Quot.lift Classical.choice Classical.choose Classical.propDecidable
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define tests/fixtures/axioms.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/axioms.mm" propext 'Quot.{1}' 'Quot.mk.{1}' 'Quot.ind.{1}' 'Quot.lift.{1,1}' 'Quot.{0}' 'Quot.lift.{0,1}' 'Classical.choice.{1}' 'Classical.choose.{1}' Classical.propDecidable
+          grep -q '^Choice: Classical.choice is the least element in a well-ordering W of U. ran U' "$RUNNER_TEMP/mm/setmm/axioms.mm"
+          # The one-universe quotient and choice stay available for comparison.
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define --single-universe tests/fixtures/axioms.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/axioms1.mm" propext Quot Quot.mk Quot.ind Quot.lift Classical.choice Classical.choose Classical.propDecidable
           # The one-universe model stays available, and in it structurally recursive definitions collapse: the old
           # bridge output proves Nat.below empty, and takes Nat.add's computation rules as hypotheses.
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- nat-bridge --single-universe tests/fixtures/natadd.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natbridge1.mm" 2
-          for g in model ind props bridge rec tree natle setvars strings axioms mutual natbridge1; do
+          for g in model ind props bridge rec tree natle setvars strings axioms axioms1 mutual natbridge1; do
             out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read $g.mm" "verify proof *" "exit")
             echo "$out" | tail -2
             if echo "$out" | grep -q '?Error'; then exit 1; fi
@@ -175,13 +179,24 @@ jobs:
           echo "$out" | tail -2
           if echo "$out" | grep -q '?Error'; then exit 1; fi
           (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" thm.mm)
+      # Quotients in the tower: Quot.ind's typing (every class is a class of some element), Quot.lift's (a function on
+      # the classes, because of h), and its computation rule as a conversion step (Quot.liftBeta is rfl in Lean); at
+      # level 0 and at level 1.
+      - name: Prove Lean theorems about quotients through the generic model and verify
+        run: |
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem tests/fixtures/quotthm.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/quotthm.mm" \
+            Quot.inductionOn Quot.exists_rep Quot.liftBeta Quot.indBeta 'Quot.inductionOn.{1}' 'Quot.liftBeta.{1,1}' 'Quot.indBeta.{1}'
+          out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read quotthm.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" quotthm.mm)
       - name: Check the translated definitions with mmj2's definitionCheck (milestone 3, step 2)
         run: |
           mkdir -p "$RUNNER_TEMP/mm/mmj2/macros"
           raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
           curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
           for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
-          for g in model ind props rec tree natle setvars strings axioms mutual natbridge1 natbridge natzfc thm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natzfc thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
       # The Init-wide run (docs/milestone3.md) in miniature: define-all on a small export, in two chunks, and
       # scripts/verify-all with all three checkers. The full run on Init is too big for CI.
       - name: define-all and verify-all on a small export (milestone 3 at scale)
