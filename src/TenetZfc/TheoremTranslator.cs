@@ -870,7 +870,12 @@ public sealed partial class Model
                 string a = pr.Render(n.Children[0]), dom = pr.Render(n.Children[1]), body = pr.Render(n.Children[2]);
                 if (ctx.Split(' ').Contains(a))
                 {
-                    throw new Refused($"{ind.Name}'s field variable {a} occurs in the hypotheses");
+                    // A parameter's type binds the same letter: rename the union's variable apart (cbviunv), and
+                    // descend the renamed union.
+                    string a2 = FreshFor(ctx, node, goal);
+                    string node2 = $"U_ {a2} e. {dom} {SubstFree(body, a, a2)}";
+                    Proof bi = pr.Apply("eleq2d", S(("ph", ctx), ("A", node), ("B", node2), ("C", x)), AlphaIn(ctx, node, node2));
+                    return pr.Apply("sylbid", S(("ph", ctx), ("ps", $"{x} e. {node}"), ("ch", $"{x} e. {node2}"), ("th", goal)), bi, Descend(ctx, node2));
                 }
                 vars.Add(a);
                 string ctx2 = $"( {ctx} /\\ {a} e. {dom} )";
@@ -946,7 +951,11 @@ public sealed partial class Model
             string body = pr.Render(n.Children[0]), a = pr.Render(n.Children[1]), dom = pr.Render(n.Children[2]);
             if (ctx.Split(' ').Contains(a) || goal.Split(' ').Contains(a))
             {
-                throw new Refused($"{ind.Name}'s field variable {a} occurs in the hypotheses");
+                // Renamed apart, as in ProjLemma.
+                string a2 = FreshFor(ctx, w, goal);
+                string w2 = $"E. {a2} e. {dom} {SubstFree(body, a, a2)}";
+                Proof eqv = _d.Lift(ctx, pr.Apply("mptru", S(("ph", $"( {w} <-> {w2} )")), Alpha("wff", w, w2)!.Value));
+                return pr.Apply("sylbid", S(("ph", ctx), ("ps", w), ("ch", w2), ("th", goal)), eqv, Descend(ctx, w2));
             }
             string ctx2 = $"( {ctx} /\\ {a} e. {dom} )";
             Proof inner;

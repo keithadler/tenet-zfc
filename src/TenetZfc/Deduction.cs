@@ -98,6 +98,15 @@ public sealed class Deduction(Prover pr)
         SyntaxTree c = pr.Parse(type, context.Split(' ')) ?? throw new InvalidOperationException($"does not parse: {context}");
         (string h, string x) = Split(ab.Proves);
         (string a, string b, _) = Sides(x);
+        // A binder of the context (A. w e. …, raleqbidv) must be distinct from the hypothesis, which may bind the same
+        // letter itself. Then prove the congruence under the equation alone, ( a = b -> … ), and chain it (syl).
+        var ctxTokens = context.Split(' ').ToHashSet();
+        var clash = h.Split(' ').Where(ctxTokens.Contains).Where(tok => tok.Length > 0 && char.IsLower(tok[0]) && pr.Parse("setvar", [tok]) is not null).ToHashSet();
+        if (clash.Count > 0 && !x.Split(' ').Any(clash.Contains))
+        {
+            Proof inner = Go(c, hole, x, a, b, pr.Apply("id", S(("ph", x)))) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
+            return Syl(ab, inner);
+        }
         return Go(c, hole, h, a, b, ab) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
     }
 

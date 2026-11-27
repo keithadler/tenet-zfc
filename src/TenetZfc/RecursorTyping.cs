@@ -166,7 +166,11 @@ public sealed partial class Model
             string f = pr.Render(n.Children[0]), dom = pr.Render(n.Children[1]), body = pr.Render(n.Children[2]);
             if (ctx.Split(' ').Contains(f))
             {
-                throw new Refused($"a field variable {f} occurs in the hypotheses");
+                // A parameter's type binds the same letter: rename the union's variable apart (cbviunv) first.
+                string f2 = FreshFor(ctx, part, q, tv, string.Join(' ', fields));
+                string part2 = $"U_ {f2} e. {dom} {SubstFree(body, f, f2)}";
+                return pr.Apply("eqsstrd", S(("ph", ctx), ("A", part), ("B", part2), ("C", q)), AlphaIn(ctx, part, part2),
+                    PartSub(ctx, part2, j, fields, s, rInI, rInS));
             }
             string ctx2 = $"( {ctx} /\\ {f} e. {dom} )";
             Proof Weak(Proof p) => pr.Apply("adantr", S(("ph", ctx), ("ps", _d.Split(p.Proves).X), ("ch", $"{f} e. {dom}")), p);
