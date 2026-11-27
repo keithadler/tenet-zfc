@@ -165,6 +165,19 @@ jobs:
           if scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" lean-nn0-Nat.add_zero; then exit 1; fi
           # ...and a use of ax-groth: set.mm's inaex (inaccessibles exist) is proved from it.
           if scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" --axioms-only inaex; then exit 1; fi
+      # The multiplication bridge (docs/bridges.md): the model's Nat.mul is x. through F, its rules proved from its
+      # definition; Nat.mul_zero, Nat.zero_mul and Nat.mul_succ restated in NN0, and 2 * 2 = 4 by set.mm's 2t2e4.
+      - name: Prove the Nat.mul bridge, restate Lean's mul theorems in NN0, and verify
+        env:
+          TENET_ZFC_JAVA: java
+        run: |
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- nat-bridge tests/fixtures/library.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natmul.mm" 2 4 Nat.mul_zero Nat.zero_mul Nat.mul_succ
+          grep -q 'lean-nn0-Nat.mul_succ \$p |- ( ( ( U e. lean.-tower /\\ A e. NN0 ) /\\ B e. NN0 ) -> ( A x. ( B + 1 ) ) = ( ( A x. B ) + A ) )' "$RUNNER_TEMP/mm/setmm/natmul.mm"
+          grep -q 'lean-nat-natmul-2t2e4 \$p' "$RUNNER_TEMP/mm/setmm/natmul.mm"
+          out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read natmul.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" natmul.mm)
       - name: Prove the List/Word bridge and verify
         run: |
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- list-bridge tests/fixtures/library.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/listbridge.mm" --bridge-only
@@ -201,7 +214,7 @@ jobs:
           raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
           curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
           for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
-          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natzfc thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natmul natzfc thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
       # The Init-wide run (docs/milestone3.md) in miniature: define-all on a small export, in two chunks, and
       # scripts/verify-all with all three checkers. The full run on Init is too big for CI.
       - name: define-all and verify-all on a small export (milestone 3 at scale)
