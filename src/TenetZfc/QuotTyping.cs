@@ -182,7 +182,7 @@ public sealed partial class Model
         Proof inSq = pr.Apply("opabssxp", S(("x", Kid("class", r0, "x")), ("y", Kid("class", r0, "y")), ("A", "A"), ("B", "A"),
             ("ph", Kid("wff", Kid("class", r0, "ph"), "ps"))));
         Proof each = pr.Apply("rgen", S(("x", sv), ("A", pw), ("ph", $"( {phi} -> {r0} C_ {sv} )")),
-            pr.Apply("simpl", S(("ph", $"{r0} C_ {sv}"), ("ps", $"{sv} Er A"))));
+            _d.Lift($"{sv} e. {pw}", pr.Apply("simpl", S(("ph", $"{r0} C_ {sv}"), ("ps", $"{sv} Er A")))));
         Proof inInt = pr.Apply("mpbir", S(("ph", $"{r0} C_ |^| {sx}"), ("ps", $"A. {sv} e. {pw} ( {phi} -> {r0} C_ {sv} )")), each,
             pr.Apply("ssintrab", S(("A", r0), ("x", sv), ("B", pw), ("ph", phi))));
         Proof inE = pr.Apply("mpbi", S(("ph", $"( {r0} C_ {sq} /\\ {r0} C_ |^| {sx} )"), ("ps", $"{r0} C_ {ebody}")),

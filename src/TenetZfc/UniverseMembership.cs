@@ -120,19 +120,22 @@ public sealed partial class Model
                 return LevelIn(d.Ph, C(0), k);
             case "cfv" when pr.Parse("class", C(1).Split(' ')) is { Rule.Label: "crdg" } rdg:
                 return StageIn(d, x, rdg, C(0), g);
-            case "ciun":
+            case "ciun" or "cixp":
                 {
                     string v = C(0), dom = C(1), body = C(2);
                     if (d.Ph.Split(' ').Contains(v))
                     {
-                        throw new Refused($"the union's variable {v} occurs in the hypotheses");
+                        // The hypotheses bind the same letter: rename it apart (cbviunv, cbvixpv).
+                        string v2 = FreshFor(d.Ph, x, g);
+                        string x2 = $"{(n.Rule.Label == "ciun" ? "U_" : "X_")} {v2} e. {dom} {SubstFree(body, v, v2)}";
+                        return pr.Apply("eqeltrd", S(("ph", d.Ph), ("A", x), ("B", x2), ("C", g)), AlphaIn(d.Ph, x, x2), UnivMem(d, x2, g));
                     }
                     Proof domIn = UnivMem(d, dom, g);
                     PCtx e = EnterText(d, v, dom);
                     Proof bodyIn = UnivMem(e, body, g);
                     Proof all = pr.Apply("ralrimiva", S(("ph", d.Ph), ("ps", $"{body} e. {g}"), ("x", v), ("A", dom)), bodyIn);
                     return _d.Syl(pr.Apply("3jca", S(("ph", d.Ph), ("ps", $"{g} e. Univ"), ("ch", $"{dom} e. {g}"), ("th", $"A. {v} e. {dom} {body} e. {g}")), Univ(), domIn, all),
-                        pr.Apply("gruiun", S(("U", g), ("x", v), ("A", dom), ("B", body))));
+                        pr.Apply(n.Rule.Label == "ciun" ? "gruiun" : "gruixp", S(("U", g), ("x", v), ("A", dom), ("B", body))));
                 }
         }
         // A constant (a type former) applied: its typing lemma, then each argument.
@@ -155,6 +158,27 @@ public sealed partial class Model
             }
             Proof tyIn = ty == "2o" ? UnivMem(d, "2o", g) : LevelIn(d.Ph, pr.Render(pr.Parse("class", ty.Split(' '))!.Children[0]), k);
             return GruEl(d.Ph, k, ty, x, tyIn, cur);
+        }
+        // A value of a function into G: F e. ( G ^m D ) and a e. D (elmapi, ffvelcdmd).
+        if (n.Rule.Label == "cfv")
+        {
+            string fn = C(1), arg = C(0);
+            foreach ((Proof p, string h) in Facts(d))
+            {
+                if (!h.StartsWith($"{fn} e. ( {g} ^m ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                string map = h[(fn.Length + 4)..];
+                string fdom = pr.Render(pr.Parse("class", map.Split(' '))!.Children[1]);
+                Proof? aIn = TryHyp(d, $"{arg} e. {fdom}") ?? HypAlpha(d, arg, fdom);
+                if (aIn is not Proof ai)
+                {
+                    continue;
+                }
+                Proof isF = _d.Syl(p, pr.Apply("elmapi", S(("A", fn), ("B", g), ("C", fdom))));
+                return pr.Apply("ffvelcdmd", S(("ph", d.Ph), ("F", fn), ("A", fdom), ("B", g), ("C", arg)), isF, ai);
+            }
         }
         // A member of something that is itself in G (G is transitive).
         foreach ((Proof p, string h) in Facts(d))
