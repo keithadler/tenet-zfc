@@ -25,7 +25,7 @@ It is the candidate for milestone 5 because `set.mm` proves the same fact indepe
 
 **Not done yet:**
 
-- No theorem of the cone has been run through `tenet-zfc theorem`. The definitions translating says nothing about how many of the 146 proofs go through.
+- No theorem of the cone has been proved through the model yet. The workflow `.github/workflows/headline.yml` runs `tenet-zfc run examples/Primes.lean` on GitHub's runners and reports each theorem as proved, refused or failed in its summary. The definitions translating says nothing about how many of the 146 proofs go through.
 - The bridges the restatement needs don't exist: `Nat.mul` to `x.`, `<` and `≤` to `set.mm`'s, `∣` to `||`, and `Prime` to the statement in `infpn`.
 - Plain ZFC: the result would still carry the universe hypothesis until `--lowered` covers `theorem`.
 
