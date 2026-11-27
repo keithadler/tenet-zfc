@@ -940,3 +940,16 @@ This covers any recursive proposition with a premise under binders, and any recu
 **Verified.** The definitional equations of `Acc`, `Acc.intro`, `Acc.rec`, `WellFounded.fix`, `Nat.lt_wfRel` and `Nat.strongRecOn` (at `Type`) pass metamath-exe, mmverify.py and mmj2's definition check, and a test on the `acc436.ndjson` fixture checks them.
 
 **Not yet: `Acc.rec`'s computation rule.** `Acc.rec F (Acc.intro x h) = F x h (fun y hy => Acc.rec F (h y hy))` follows from `frr2` once `R Fr L` and `R Se L` are proved for the least set `L`. `R Se L` holds because `R` is a set. `R Fr L` is the real lemma: if `B ⊆ L` is nonempty with no `R`-minimal element, then `L \ B` is closed under the step, so `L ⊆ L \ B` and `B` is empty. Proving it means unfolding the step inside a `Deduction` proof, which is the next piece of work. Until then `Acc.intro`'s computation rule is refused with that reason. `Lean.Order.iterates`, the other non-finitary proposition in `Init`, takes the same path, but its `sup` constructor's index is `CCPO.csup c`, which uses `Classical.choice`, and the tower model doesn't cover choice yet.
+
+## The Init-wide run, again (built)
+
+The run above was made in the one-universe model, before names were escaped and before `Acc`. This one is in the tower, the default, with everything above and these fixes, each found by running the refused constants of the first run again:
+
+- **`outParam` in the tower.** The kernel strips `outParam` from recursors' binder types, so the model translates through it (fix 2 of the first run). In the tower its instance is `outParam.{2}`, which the check didn't recognise, so `HAdd.mk`'s computation rule and those of the other heterogeneous operators were refused again. The check now strips a level suffix first.
+- **More than 20 arguments.** set.mm has 20 class variables, `A` to `T`. Statements with more arguments (`IO.Error.rec` and the computation rules of `IO.Error`'s 18 constructors) now use class variables of the output's own, `AA1`, `AA2`, …, declared with `$v` and `$f class` the first time they are used, as the extra set variables are. A `$f` adds no axiom.
+- **Fields whose types bind variables** (`Bind.mk`, `Functor.mk`, `Pure.mk`). Their type is written once for the constructor and once inside the inductive type, with bound variables named independently, so the computation rule couldn't find a field's hypothesis by its text. It now finds it up to renaming of bound variables (`eleqtrd` with `Alpha`).
+- **Proof fields of ∀-statements** (`Iff.intro`, `WellFounded.intro`): the same, for a proposition's computation rule.
+- **Proofs at level 0.** `define-all` instantiates every universe parameter at 0, which puts `Prop` where Lean has `Sort u`: in `Eq.refl.{0}` and `CoeDep.mk.{0,0}` a parameter or field is then a proof, which the translation writes as `(/)` in some places but its class variable in others, so the computation rule failed (`fvmptd3`). A computation rule now takes `(/)` for such a parameter or field from the start.
+- **Empty types.** A type with no constructors is `(/)`, and its recursor is `(/)`: its major premise ranges over nothing. `Empty.rec`, `PEmpty.rec`, `Empty.elim` and `absurd` translate.
+
+Each of these is checked by a test on `tests/fixtures/rest.ndjson`, through metamath-exe and mmverify.py.

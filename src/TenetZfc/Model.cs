@@ -1074,7 +1074,35 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             setvars.UnionWith(_values[tok].Split(' ').Where(SetVarSet.Contains));
         }
         setvars.UnionWith(_renamedTo);
-        return [string.Join(' ', setvars.Concat(classVars).Append("U"))];
+        return [string.Join(' ', setvars.Concat(classVars.Where(v => v != "(/)")).Append("U"))];
+    }
+
+    /// <summary>
+    /// A parameter or field that is a proof is (/) in the model, so the computation rule takes (/) for it rather than a
+    /// class variable that the translation would replace by (/) in some places only. This happens at instances that put
+    /// Prop where Lean has Sort u (define-all's level 0): Eq.refl.{0}, CoeDep.mk.{0,0}.
+    /// </summary>
+    private void ProofsAsEmpty(Expr ctorType, int np, List<string> recArgs, List<string> fields)
+    {
+        var types = new Dictionary<ulong, Expr>();
+        Expr ty = ctorType;
+        for (int i = 0; i < np + fields.Count && ty is Binder { IsPi: true } b; i++)
+        {
+            if (_typing.IsProposition(b.Domain, types) == true)
+            {
+                if (i < np)
+                {
+                    recArgs[i] = "(/)";
+                }
+                else
+                {
+                    fields[i - np] = "(/)";
+                }
+            }
+            Expr fv = t.FVar(_fresh++);
+            types[((FVar)fv).Id] = b.Domain;
+            ty = _ops.Instantiate(b.Body, [fv]);
+        }
     }
 
     /// <summary>
@@ -1133,6 +1161,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         List<string> cv = ClassVarsFor(nrec + nf, "more arguments than class variables");
         List<string> recArgs = cv.Take(nrec).ToList();
         List<string> fields = cv.Skip(nrec).Take(nf).ToList();
+        ProofsAsEmpty(ctor.Type, np, recArgs, fields);
         List<string> ctorArgs = recArgs.Take(np).Concat(fields).ToList();
         string v = ctorArgs.Aggregate($"( {ctok} ` U )", (acc, a) => $"( {acc} ` {a} )");
 
@@ -1620,6 +1649,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         }
         int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors;
         List<string> recArgs = ClassVarsFor(nrec, "more arguments than class variables");
+        ProofsAsEmpty(ctor.Type, np, recArgs, []);
 
         // The constructor's indices, with the parameters as the class variables and every field (a proof) as (/).
         var vars = new Dictionary<ulong, string>();
