@@ -33,7 +33,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     private static readonly string[] ClassVars = "A B C D E F G H I J K L M N O P Q R S T".Split(' ');   // U is the universe, Z a hole
 
     private readonly Ops _ops = new(t);
-    private readonly Typing _typing = new(t, env) { Deadline = () => pr.Deadline };   // define-all's time budget
+    private readonly Typing _typing = new(t, env) { Deadline = () => pr.CurrentDeadline() };   // define-all's time budget
     private readonly Deduction _d = new(pr);
     private readonly HashSet<Name> _defined = new(ReferenceEqualityComparer.Instance);
     private readonly StringBuilder _out = new();

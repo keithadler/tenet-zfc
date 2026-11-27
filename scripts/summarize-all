@@ -3,6 +3,9 @@
 
 usage: scripts/summarize-all <outdir>
 
+A theorem-all run (its folder holds theorem-all.shape) gets its own totals: theorems proved, refused, over the budget,
+failed; the blockers ranked; checker failures; proof sizes and times.
+
 Reads every chunk-NNNN.tsv (what define-all translated) and chunk-NNNN.verify (what scripts/verify-all checked), and
 prints: constants translated, by kind; equations and computation rules emitted and verified; refusals by reason;
 theorems that failed a checker; output size and checker time.
@@ -28,6 +31,8 @@ def category(reason):
 
 
 def main(out):
+    if os.path.exists(os.path.join(out, "theorem-all.shape")):
+        return theorems(out)
     rows = []
     for f in sorted(glob.glob(os.path.join(out, "chunk-*.tsv"))):
         chunk = os.path.basename(f)[:-4]
@@ -104,6 +109,126 @@ def main(out):
     print("slowest constants:")
     for r in sorted(rows, key=lambda r: -r["secs"])[:10]:
         print(f"  {r['secs']:7.0f}s  {r['name']} ({r['eq']:,} + {r['isteps']:,} steps, {r['status']})")
+
+
+def read_verify(out):
+    verify = {}
+    for f in glob.glob(os.path.join(out, "chunk-*.verify")):
+        cols = open(f).read().rstrip("\n").split("\t")
+        verify[cols[0]] = dict(result=cols[1], bytes=int(cols[2]), theorems=int(cols[3]), mm=float(cols[5]),
+                               mv=float(cols[7]), dc=float(cols[9]), failing=set(cols[10].split()) if len(cols) > 10 else set())
+    return verify
+
+
+def blocker(reason):
+    """What stops a theorem, from its refusal: the construct (a typing rule, a conversion) or the constant."""
+    r = reason
+    m = re.match(r"no typing lemma yet for (\S+) \(an? (\w+)\)", r)
+    if m:
+        return f"no typing lemma for a {m.group(2)}", m.group(1)
+    m = re.match(r"(\S+): the name has", r)
+    if m:
+        return "a name set.mm can't hold", m.group(1)
+    m = re.match(r"typing (\S+) needs itself", r)
+    if m:
+        return "typing a constant needs itself", m.group(1)
+    m = re.search(r"(lean\.[^ `]+)", r)
+    const = m.group(1) if m else ""
+    return category(r), const
+
+
+def theorems(out):
+    rows = []
+    for f in sorted(glob.glob(os.path.join(out, "chunk-*.tsv"))):
+        chunk = os.path.basename(f)[:-4]
+        with open(f) as fh:
+            next(fh)
+            for line in fh:
+                cols = line.rstrip("\n").split("\t")
+                if len(cols) == 7:
+                    cols.insert(6, cols[5])   # before cpu_seconds was recorded
+                name, status, steps, lemmas, lsteps, secs, cpu, reason = cols
+                rows.append(dict(chunk=chunk, name=name, status=status, steps=int(steps), lemmas=int(lemmas),
+                                 lsteps=int(lsteps), secs=float(secs), cpu=float(cpu), reason=reason))
+    verify = read_verify(out)
+    print(open(os.path.join(out, "theorem-all.shape")).read().strip())
+    chunks = sorted({r["chunk"] for r in rows})
+    print(f"chunks: {len(chunks)} proved, {len(verify)} checked, {sum(v['result'] == 'pass' for v in verify.values())} passed all three checkers")
+    unverified = [c for c in chunks if c not in verify]
+    if unverified:
+        print(f"  not yet checked: {' '.join(unverified)}")
+
+    def label(name):
+        # Model.LabelPart's spelling
+        name = name.replace("{", "u").replace(",", "_").replace("}", "")
+        return "lean-thm-" + re.sub(r"[^A-Za-z0-9._-]", lambda m: f"-{ord(m.group(0)):x}-", name)
+
+    proved = [r for r in rows if r["status"] == "proved"]
+    failing = set().union(*[v["failing"] for v in verify.values()]) if verify else set()
+    checked = [r for r in proved if r["chunk"] in verify]
+    ok = [r for r in checked if label(r["name"]) not in failing and verify[r["chunk"]]["result"] == "pass"]
+    n = len(rows)
+    pct = lambda k: f"{100 * k / n:.1f}%" if n else "-"
+    print(f"\ntheorems: {n}")
+    for st in ["proved", "refused", "timeout", "error", "crash"]:
+        k = sum(r["status"] == st for r in rows)
+        print(f"  {st:<8} {k:6}  {pct(k)}")
+    print(f"  proved and in a chunk that passed all three checkers: {len(ok)} ({pct(len(ok))}); proved, chunk not yet checked: {len(proved) - len(checked)}")
+    print(f"\nchecker failures: {len(failing)} labels named")
+    for l in sorted(failing)[:40]:
+        print(f"  {l}")
+    for c, v in sorted(verify.items()):
+        if v["result"] != "pass":
+            print(f"  {c}: FAIL (see {c}.verify.log)")
+
+    print("\nwhat stops the others, by construct (refusals, timeouts, errors):")
+    by = collections.Counter()
+    ex = {}
+    consts = collections.defaultdict(collections.Counter)
+    for r in rows:
+        if r["status"] in ("proved",):
+            continue
+        if r["status"] == "timeout":
+            k, c = "over the time budget", ""
+        elif r["status"] == "crash":
+            k, c = "crashed the process", ""
+        else:
+            k, c = blocker(r["reason"])
+            if r["status"] == "error":
+                k = "ERROR: " + k
+        by[k] += 1
+        ex.setdefault(k, r["name"])
+        if c:
+            consts[k][c] += 1
+    for k, cnt in by.most_common(40):
+        top = ", ".join(f"{c} {m}" for c, m in consts[k].most_common(4))
+        print(f"  {cnt:6}  {k}  (e.g. {ex[k]}){'; constants: ' + top if top else ''}")
+
+    print("\nconstants named by refusals (all reasons), most first:")
+    allc = collections.Counter()
+    for k in consts:
+        allc.update(consts[k])
+    for c, m in allc.most_common(25):
+        print(f"  {m:6}  {c}")
+
+    def dist(xs, unit):
+        xs = sorted(xs)
+        if not xs:
+            return "-"
+        q = lambda p: xs[min(len(xs) - 1, int(p * len(xs)))]
+        return f"median {q(0.5):,.1f}{unit}, 90% {q(0.9):,.1f}{unit}, 99% {q(0.99):,.1f}{unit}, max {xs[-1]:,.1f}{unit}"
+    print(f"\nproof size of proved theorems (flat steps): {dist([r['steps'] for r in proved], '')}")
+    print(f"CPU time of proved theorems: {dist([r['cpu'] for r in proved], 's')}")
+    print(f"CPU time of refused theorems: {dist([r['cpu'] for r in rows if r['status'] == 'refused'], 's')}")
+    print(f"translation time, summed: {sum(r['cpu'] for r in rows):.0f}s CPU, {sum(r['secs'] for r in rows):.0f}s wall")
+    size = sum(v["bytes"] for v in verify.values())
+    print(f"output: {size / 2**20:.1f} MiB in {len(verify)} checked chunks")
+    if verify:
+        print(f"checker time, summed over chunks: metamath-exe {sum(v['mm'] for v in verify.values()):.0f}s, "
+              f"mmverify.py {sum(v['mv'] for v in verify.values()):.0f}s, definitionCheck {sum(v['dc'] for v in verify.values()):.0f}s")
+    print("slowest proved:")
+    for r in sorted(proved, key=lambda r: -r["cpu"])[:8]:
+        print(f"  {r['cpu']:7.1f}s CPU  {r['name']} ({r['steps']:,} steps, {r['lemmas']} new lemmas)")
 
 
 if __name__ == "__main__":

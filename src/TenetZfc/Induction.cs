@@ -136,7 +136,10 @@ public sealed partial class Model
             string pMinor = Ty(minorVar), pMajor = Ty(majorVar);
             Proof minor = HypIn(d, $"(/) e. {pMinor}"), major = HypIn(d, $"(/) e. {pMajor}");
             // The major premise's proposition, unfolded: if ( φ , 1o , (/) ), so φ.
-            var iargs = vs.Take(np).Concat(vs.Skip(nb).Take(ni)).ToList();
+            // Each argument as the terms write it: a binder that is a proof is (/), not its variable (Eq.{0}, at a
+            // universe level 0 where the type is a proposition and its elements are proofs).
+            var texts = d.Vars.Values.ToHashSet();
+            var iargs = vs.Take(np).Concat(vs.Skip(nb).Take(ni)).Select(v => texts.Contains(v) ? v : "(/)").ToList();
             (Proof eqI, _, _) = Unfold(d.Ph, itok, iargs, (i, dom) => HypIn(d, $"{iargs[i]} e. {dom}"));
             Proof inIf = pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", "(/)"), ("B", pMajor), ("C", Rhs(eqI))), major,
                 AlphaIn(d.Ph, pMajor, Lhs(eqI)) is var a1 ? _d.Trans(a1, eqI) : eqI);
