@@ -2,6 +2,15 @@
 
 All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org). Until v0.1.0 is tagged, builds carry the version `0.1.0-dev`.
 
+## Unreleased (after 0.1.0)
+
+### Universe elimination (milestone 4, started)
+
+- **`--lowered`** (for `nat-bridge`): the model's universe tower is `lean.-wtower`, an increasing ω-sequence of reflecting weak universes (`lean.-wuni`), instead of Grothendieck universes. Indexed unions, which weak universes aren't closed under, are bounded: by a product for tuples, and by the reflection step `lean-wu-r` for a recursive type's stages.
+- **`lean-wit-tw`**: ZFC proves a lowered tower exists (R1 at ω²·(n+1)), so a theorem whose statement doesn't mention `U` is discharged to plain ZFC. First ones: `lean-zfc-Nat.add_zero`, `|- ( A e. NN0 -> ( A + 0 ) = A )`, and `lean-zfc-Nat.zero_add`, from Lean's proofs.
+- **`scripts/check-axioms`**: metamath-exe's `trace_back /axioms`, failing on `ax-groth` or a universe left in the statement; in CI.
+- Each output's header says whether its theorems are plain ZFC. Design and plan: [docs/milestone4.md](docs/milestone4.md).
+
 ## [0.1.0] - unreleased
 
 The first version meant for someone else to install and use: independently checked ZFC proofs from their own Lean code, on a stated, tested fragment. Everything below exists on `main` today; the release is tagged when the rest of the v0.1 roadmap in the README is done.
@@ -15,6 +24,12 @@ The first version meant for someone else to install and use: independently check
 - **Release workflow** (`.github/workflows/release.yml`): on a `v*` tag, runs all of CI, builds the package and binaries, and creates a GitHub Release with them, the verified fixture outputs and the worked example's run attached.
 - **CI**: the tool is packed, installed and run on Linux, macOS and Windows; the README's worked example (`tests/fixtures/Example.lean`) runs end to end, Lean to checked output.
 - `CHANGELOG.md` and `CONTRIBUTING.md`.
+
+### The headline demo: `List.length_append` as `ccatlen`
+
+- **The `List`/`Word` bridge** (`tenet-zfc list-bridge`, [docs/bridges.md](docs/bridges.md#list-and-word)): a proved bijection `W` from the model's `List A` onto `set.mm`'s `Word A`, nil to `(/)` and `cons a l` to `( <" a "> ++ ( W ` l ) )`; `List.length` is `#` and `List.append` and `HAppend.hAppend` are `++` through it, with `List.length`'s and `List.append`'s computation rules proved from their definitions.
+- **Two independent proofs of one ZFC statement**: Lean's `List.length_append`, proved through the model from its proof term and restated through the bridges, is `lean-ccatlen`, whose consequent is `set.mm`'s `ccatlen` token for token; `lean-ccatlen-setmm` proves the same statement from `set.mm`'s hand-written `ccatlen`. All three checkers accept both.
+- **`scripts/demo`** ([docs/demo.md](docs/demo.md)) runs it end to end with sizes and times, plus sabotage checks (a corrupted proof step, `+` changed to `x.`, a broken Lean proof), each rejected. CI runs it weekly and by hand (job `demo`); the bijection alone is checked on every push.
 
 ### Milestone 3: the full kernel (in progress)
 

@@ -1,0 +1,45 @@
+#!/bin/sh
+# Check that theorems of a tenet-zfc output are plain ZFC (docs/milestone4.md): metamath-exe's
+# `show trace_back <label> /axioms` lists every axiom a theorem rests on, through every theorem it uses. A theorem
+# that used ax-groth, or any set.mm theorem proved from it (grothtsk, inaex, ...), would list ax-groth.
+#
+# Also checks that each statement has no universe hypothesis: no lean.-tower, lean.-wtower, Univ or WUni, and no U
+# left (the class variable the model's universe argument is written with).
+#
+# usage: scripts/check-axioms <metamath> <out.mm, next to set.mm> [--axioms-only] <label>...
+#
+# --axioms-only: check only the axioms, for the labels after it (lean-wit-tw states that lean.-wit is a lowered tower,
+# so it names one; it is not a hypothesis).
+set -eu
+mm="$1"; file="$2"; shift 2
+only=""
+if [ "${1:-}" = "--axioms-only" ]; then only=1; shift; fi
+[ $# -gt 0 ] || { echo "check-axioms: no labels given"; exit 2; }
+dir="$(cd "$(dirname "$file")" && pwd)"; name="$(basename "$file")"
+cd "$dir"
+status=0
+for label in "$@"; do
+  out=$("$mm" "read $name" "show statement $label" "show trace_back $label /axioms" "exit")
+  if echo "$out" | grep -q '?Error\|?There is no statement'; then
+    echo "$out" | grep -A3 '?'
+    echo "check-axioms: $label: metamath-exe reported an error"; status=1; continue
+  fi
+  # metamath-exe prints the statement as "<number> <label> $p |- ... $= ... $." (possibly over several lines).
+  stmt=$(echo "$out" | awk -v l="$label" '$2 == l && $3 == "$p" {f=1} f {print} f && /\$\./ {exit}' | tr -s ' \n' ' ')
+  [ -n "$stmt" ] || { echo "check-axioms: $label is not a \$p in $name"; status=1; continue; }
+  # The axioms (and definitions) the proof rests on, as listed after the trace_back command.
+  axioms=$(echo "$out" | awk '/show trace_back/{f=1; next} f' | tr ' ' '\n' | grep -E '^ax-' | sort -u | tr '\n' ' ')
+  [ -n "$axioms" ] || { echo "$out"; echo "check-axioms: $label: no axiom list from metamath-exe"; status=1; continue; }
+  if echo " $axioms" | grep -q ' ax-groth '; then
+    echo "check-axioms: $label uses ax-groth"; status=1; continue
+  fi
+  if [ -z "$only" ] && echo "$stmt" | grep -Eq '(^| )(lean\.-tower|lean\.-wtower|Univ|WUni|U)( |$)'; then
+    echo "check-axioms: $label still has a universe hypothesis: $stmt"; status=1; continue
+  fi
+  if [ -n "$only" ]; then
+    echo "check-axioms: $label uses no ax-groth (axioms: $axioms)"
+  else
+    echo "check-axioms: $label is plain ZFC (axioms: $axioms)"
+  fi
+done
+exit $status

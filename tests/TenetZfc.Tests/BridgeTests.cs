@@ -50,6 +50,25 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    public void ListIsWordThroughTheBridgeAndVerifies()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        // The bijection alone (docs/bridges.md, "List and Word"); the restatement of List.length_append as ccatlen
+        // runs in CI's demo job (scripts/demo).
+        var (text, proved) = ListBridge.Emit(Fixture("library.ndjson"), Path.Combine(SetMm, "set.mm"), [], bridgeOnly: true);
+        var by = proved.ToDictionary(p => p.Label, p => p.Statement.ToString());
+        string h = ListBridge.H0, l = ListBridge.L, w = ListBridge.W;
+        Assert.Equal($"|- ( {h} -> {w} : {l} -1-1-onto-> Word A )", by["lean-list-wf1o"]);
+        Assert.Equal($"|- ( {h} -> ( {w} ` <. (/) , (/) >. ) = (/) )", by["lean-list-wnil"]);
+        Assert.Equal($"|- ( ( ( {h} /\\ B e. A ) /\\ C e. {l} ) -> ( {w} ` {ListBridge.Cons("B", "C")} ) = ( <\" B \"> ++ ( {w} ` C ) ) )", by["lean-list-wcons"]);
+        Assert.DoesNotContain(text.Split('\n'), x => x.Contains(" $a |-") && !x.TrimStart().StartsWith("df-lean.", StringComparison.Ordinal));
+        Verify(text, "listbridge");
+    }
+
+    [Fact]
     public void InTheOneUniverseModelNatAddCollapsesAndItsRulesAreHypotheses()
     {
         if (SetMm is null)
@@ -66,6 +85,27 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
             by["lean-nat-belowempty"]);
         Assert.Contains("one Grothendieck universe for every universe level", text);
         Verify(text, "natbridge1");
+    }
+
+    [Fact]
+    public void LoweredTowerGivesNatAddZeroInPlainZfc()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        // Universe elimination (docs/milestone4.md): the same proof in a tower of weak universes, which ZFC proves exists.
+        var (text, proved) = NatBridge.Emit(Fixture("theorems.ndjson"), Path.Combine(SetMm, "set.mm"), [], restate: ["Nat.add_zero"], lowered: true);
+        var by = proved.ToDictionary(p => p.Label, p => p.Statement.ToString());
+        Assert.Equal("|- ( ( U e. lean.-wtower /\\ A e. NN0 ) -> ( A + 0 ) = A )", by["lean-nn0-Nat.add_zero"]);
+        Assert.Equal("|- lean.-wit e. lean.-wtower", by["lean-wit-tw"]);
+        Assert.Equal("|- ( A e. NN0 -> ( A + 0 ) = A )", by["lean-zfc-Nat.add_zero"]);
+        Assert.Contains("lean.-wuni = { w e. WUni |", text);
+        Assert.DoesNotContain("lean.-tower", text);
+        Assert.DoesNotContain(" gruiun ", text);
+        Assert.Contains("Plain ZFC (no universe hypothesis, no ax-groth", text);
+        Assert.DoesNotContain(text.Split('\n'), l => l.Contains(" $a |-") && !l.TrimStart().StartsWith("df-lean.", StringComparison.Ordinal));
+        Verify(text, "natzfc");
     }
 
     private void Verify(string text, string tag)

@@ -382,6 +382,18 @@ public sealed class ProofKit(Prover pr)
                     UseS("frecseq123", [("R", L("R")), ("S", R("R")), ("A", L("A")), ("B", R("A")), ("F", L("F")), ("G", R("F"))]));
             case "wceq":
                 return Use("eqeq12d", Sub("A"), Sub("B"));
+            case "wf":
+                return Use("feq123d", Sub("F"), Sub("A"), Sub("B"));
+            case "wf1":
+                return Use("f1eq123d", Sub("F"), Sub("A"), Sub("B"));
+            case "wf1o":
+                return Use("f1oeq123d", Sub("F"), Sub("A"), Sub("B"));
+            case "wfun":
+                return Use("funeqd", Sub("A"));
+            case "cs1":
+                return Use("s1eqd", Sub("A"));
+            case "cif":
+                return Use("ifbieq12d", SubW("ph"), Sub("A"), Sub("B"));
             case "wcel":
                 return Use("eleq12d", Sub("A"), Sub("B"));
             case "wss":
@@ -399,10 +411,10 @@ public sealed class ProofKit(Prover pr)
             case "w3a":
                 return Use("3anbi123d", SubW("ph"), SubW("ps"), SubW("ch"));
             case "wral":
-                if (In("A")) break;
+                if (In("A")) return UseS("raleqbidv", [("x", L("x"))], Sub("A"), SubW("ph"));
                 return UseS("ralbidv", [("x", L("x")), ("A", L("A"))], SubW("ph"));
             case "wrex":
-                if (In("A")) break;
+                if (In("A")) return UseS("rexeqbidv", [("x", L("x"))], Sub("A"), SubW("ph"));
                 return UseS("rexbidv", [("x", L("x")), ("A", L("A"))], SubW("ph"));
         }
         throw new InvalidOperationException($"no congruence rule for {n.Rule.Label} (in {Render(n, hole, a)})");

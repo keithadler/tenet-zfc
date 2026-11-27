@@ -34,7 +34,14 @@ const string Usage = """
                                                          Nat.add and literals, each numeral n given), from an export
                                                          with Nat.add (docs/bridges.md); each theorem named (such as
                                                          Nat.add_zero) is proved through the model and restated in
-                                                         set.mm's arithmetic
+                                                         set.mm's arithmetic; with --lowered, in a tower of weak
+                                                         universes that ZFC proves exists, so each restated theorem
+                                                         also comes out in plain ZFC (docs/milestone4.md)
+      tenet-zfc list-bridge <export.ndjson> <set.mm> <out.mm> [<theorem>...] [--bridge-only]
+                                                         prove that the model's List A is Word A (nil, cons, length,
+                                                         append), with the Nat bridge; each theorem named (such as
+                                                         List.length_append) is proved through the model and restated
+                                                         in set.mm's words (docs/bridges.md, docs/demo.md)
       tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
                                                          which constants block the rest
 
@@ -83,7 +90,9 @@ if (args.Length == 5 && args[0] == "emit")
 // universe for every level, under which structurally recursive definitions collapse (docs/milestone3.md). --tower is
 // accepted for scripts written when the tower was opt-in.
 bool singleUniverse = args.Contains("--single-universe");
-args = args.Where(a => a is not "--single-universe" and not "--tower").ToArray();
+// Universe elimination (docs/milestone4.md): a tower of weak universes, which ZFC proves exists, instead of Grothendieck universes.
+bool lowered = args.Contains("--lowered");
+args = args.Where(a => a is not "--single-universe" and not "--tower" and not "--lowered").ToArray();
 if (args.Length >= 5 && args[0] == "define")
 {
     // Milestone 3: definitions through the generic model, each with its definitional equation. In tower mode the
@@ -113,18 +122,20 @@ if (args.Length >= 5 && args[0] == "define")
             var (stmt, proof, distinct) = model.Equation(nm);
             proved.Add(($"lean-{Model.LabelOf(nm)}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
             Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps)");
-            if (name == "Quot.lift")
+            string baseOf = System.Text.RegularExpressions.Regex.Replace(name, @"\.\{[0-9,]+\}$", "");
+            if (baseOf == "Quot.lift" && QuotMkFor(dt, mono, name) is Name mkInst)
             {
-                // The quotient's computation rule: Quot.lift f h (Quot.mk r a) = f a.
-                var (qstmt, qproof, qdistinct) = model.QuotLiftIota();
-                proved.Add(($"lean-{name}-iota", qstmt, qproof, qdistinct, "The computation rule of the quotient: Quot.lift f h (Quot.mk r a) = f a."));
+                // The quotient's computation rule: Quot.lift f h (Quot.mk r a) = f a (in the tower, Quot.lift.{k,l}
+                // with Quot.mk.{k}; at level 0 one of them is a proof and there is nothing to compute).
+                var (qstmt, qproof, qdistinct) = model.QuotLiftIota(nm, mkInst);
+                proved.Add(($"lean-{Model.LabelOf(nm)}-iota", qstmt, qproof, qdistinct, "The computation rule of the quotient: Quot.lift f h (Quot.mk r a) = f a."));
                 Console.WriteLine($"{name} (computation rule): {qstmt} ({qproof.Count} proof steps)");
             }
-            if (name == "Classical.choice")
+            if (baseOf == "Classical.choice" && name != "Classical.choice.{0}")
             {
-                // Choice picks an element of α, given a well-ordering of the universe.
-                var (cstmt, cproof, cdistinct) = model.ChoiceSpec();
-                proved.Add(($"lean-{name}-spec", cstmt, cproof, cdistinct, "Classical.choice picks an element of a nonempty type, given a well-ordering W of the universe."));
+                // Choice picks an element of α, given a well-ordering of the universe (of the tower's union).
+                var (cstmt, cproof, cdistinct) = model.ChoiceSpec(nm);
+                proved.Add(($"lean-{Model.LabelOf(nm)}-spec", cstmt, cproof, cdistinct, $"{name} picks an element of a nonempty type, given a well-ordering W of the universe{(singleUniverse ? "" : "s' union")}."));
                 Console.WriteLine($"{name} (picks an element): {cstmt} ({cproof.Count} proof steps)");
             }
             if (denv.Find(nm)?.Kind == ConstKind.Constructor)
@@ -209,6 +220,10 @@ if (args.Length >= 5 && args[0] == "theorem")
         {
             // A proof step that doesn't check: a bug in the translator, reported, and the other theorems go on.
             Console.WriteLine($"{name}: failed: {e.Message}");
+            if (System.Environment.GetEnvironmentVariable("TENET_DEBUG") is not null)
+            {
+                Console.Error.WriteLine(e.StackTrace);
+            }
             tstatus = 1;
         }
     }
@@ -252,7 +267,28 @@ if (args.Length >= 4 && args[0] == "nat-bridge")
             Console.Error.WriteLine("nat-bridge: restating theorems needs the tower model");
             return 2;
         }
-        var (text, proved) = NatBridge.Emit(args[1], args[2], numerals, compress: !uncompressed, tower: !singleUniverse, restate: restate);
+        var (text, proved) = NatBridge.Emit(args[1], args[2], numerals, compress: !uncompressed, tower: !singleUniverse, restate: restate, lowered: lowered);
+        foreach (var th in proved)
+        {
+            Console.WriteLine($"{th.Label}: {th.Statement} ({th.Proof.Count} proof steps)");
+        }
+        File.WriteAllText(args[3], text);
+    }
+    catch (Model.Refused e)
+    {
+        Console.Error.WriteLine($"refused: {e.Message}");
+        return 1;
+    }
+    return 0;
+}
+if (args.Length >= 4 && args[0] == "list-bridge")
+{
+    // The List/Word bridge, and Lean theorems about List restated in set.mm's words (docs/bridges.md, docs/demo.md).
+    try
+    {
+        bool bridgeOnly = args.Contains("--bridge-only");
+        var names = args[4..].Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
+        var (text, proved) = ListBridge.Emit(args[1], args[2], names, compress: !uncompressed, bridgeOnly: bridgeOnly, log: m => Console.Error.WriteLine(m));
         foreach (var th in proved)
         {
             Console.WriteLine($"{th.Label}: {th.Statement} ({th.Proof.Count} proof steps)");
@@ -583,6 +619,22 @@ static Name NameOf(Terms t, TenetZfc.Environment env, string given)
 
 // The instance of a constant at the levels its name gives (c.{1,0}), or with every universe parameter at 0. A recursor's
 // motive level may be left out: c.rec.{1} is the recursor of c.{1}.
+// The Quot.mk that Quot.lift's computation rule is about: Quot.mk, or in the tower Quot.mk.{k} for Quot.lift.{k,l}; null
+// at level 0, where Quot.mk or Quot.lift is a proof and there is nothing to compute.
+static Name? QuotMkFor(Terms t, Monomorph? mono, string lift)
+{
+    if (mono is null)
+    {
+        return t.Of("Quot.mk");
+    }
+    var m = System.Text.RegularExpressions.Regex.Match(lift, @"\.\{([0-9]+),([0-9]+)\}$");
+    if (!m.Success || m.Groups[1].Value == "0" || m.Groups[2].Value == "0")
+    {
+        return null;
+    }
+    return InstanceOf(t, mono, $"Quot.mk.{{{m.Groups[1].Value}}}");
+}
+
 static Name InstanceOf(Terms t, Monomorph mono, string given)
 {
     var m = System.Text.RegularExpressions.Regex.Match(given, @"^(.*)\.\{([0-9]+(?:,[0-9]+)*)\}$");

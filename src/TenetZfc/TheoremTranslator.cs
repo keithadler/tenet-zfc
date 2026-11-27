@@ -22,12 +22,14 @@ public sealed partial class TheoremTranslator
     private readonly Monomorph _mono;
     private readonly Model _model;
 
-    public TheoremTranslator(Terms t, Environment env, Prover pr)
+    /// <param name="lowered">Universe elimination (docs/milestone4.md): the tower is lean.-wtower, weak universes that ZFC
+    /// proves exist, instead of Grothendieck universes.</param>
+    public TheoremTranslator(Terms t, Environment env, Prover pr, bool lowered = false)
     {
         _t = t;
         pr.Sharing = true;
         _mono = new Monomorph(t, env);
-        _model = new Model(t, _mono.Env, pr, tower: true);
+        _model = new Model(t, _mono.Env, pr, tower: true, lowered: lowered);
     }
 
     /// <summary>The declarations and lemmas written so far, in order.</summary>
@@ -42,12 +44,26 @@ public sealed partial class TheoremTranslator
     /// </summary>
     public (MmExpr Statement, List<string> Proof) Prove(Name theorem)
     {
+        // A name may give the levels, as define's do: Quot.inductionOn.{1} is Quot.inductionOn at Type.
+        var given = System.Text.RegularExpressions.Regex.Match($"{theorem}", @"^(.*)\.\{([0-9]+(?:,[0-9]+)*)\}$");
+        if (given.Success)
+        {
+            theorem = _t.Of(given.Groups[1].Value);
+        }
         ConstInfo c = _mono.Env.Find(theorem) ?? throw new Model.Refused($"{theorem} is not in the export");
         if (c.Kind != ConstKind.Theorem || c.Value is null)
         {
             throw new Model.Refused($"{theorem} is not a theorem");
         }
-        Name inst = _mono.Instance(theorem, c.LevelParams.Select(_ => _t.Zero).ToArray());
+        Level Lv(int k) => k == 0 ? _t.Zero : _t.Succ(Lv(k - 1));
+        Level[] levels = given.Success
+            ? given.Groups[2].Value.Split(',').Select(x => Lv(int.Parse(x, System.Globalization.CultureInfo.InvariantCulture))).ToArray()
+            : c.LevelParams.Select(_ => _t.Zero).ToArray();
+        if (levels.Length != c.LevelParams.Length)
+        {
+            throw new Model.Refused($"{theorem} has {c.LevelParams.Length} universe parameters, given {levels.Length}");
+        }
+        Name inst = _mono.Instance(theorem, levels);
         return _model.ProveTheorem(_mono.Env.Find(inst)!);
     }
 }
@@ -132,6 +148,36 @@ public sealed partial class Model
 
     private bool Has(string label) => pr.Database.Statements.ContainsKey(label);
 
+    /// <summary>
+    /// What W e. lean.-wuni says (docs/milestone4.md), proved once: lean-wu-w, W is a weak universe; lean-wu-r, W contains
+    /// the weak universe ( R1 ` ( ( rank ` X ) +o _om ) ) for each member X.
+    /// </summary>
+    private void EnsureWuniLemmas()
+    {
+        if (Has("lean-wu-w"))
+        {
+            return;
+        }
+        const string inner = "A. x e. w ( R1 ` ( ( rank ` x ) +o _om ) ) e. w";
+        const string rab = "{ w e. WUni | " + inner + " }";
+        const string innerW = "A. x e. W ( R1 ` ( ( rank ` x ) +o _om ) ) e. W";
+        Proof iff = pr.Apply("eleq2i", S(("C", "W"), ("A", WuniToken), ("B", rab)), Cite($"df-{LabelPart(WuniToken)}"));
+        Proof toRab = Bi1(iff);
+        EmitLemma("lean-wu-w", "A reflecting weak universe is a weak universe.",
+            _d.Syl(toRab, pr.Apply("elrabi", S(("A", "W"), ("x", "w"), ("V", "WUni"), ("ph", inner)))));
+        string ph = $"( W e. {WuniToken} /\\ X e. W )";
+        Proof sub = _d.Congruence("wff", Subst(inner, "w", "Z"), "Z", pr.Apply("id", S(("ph", "w = W"))));
+        Proof el = pr.Apply("elrab", S(("x", "w"), ("A", "W"), ("B", "WUni"), ("ph", inner), ("ps", innerW)), sub);
+        Proof both = _d.Syl(_d.Syl(Hyp(ph, $"W e. {WuniToken}")!.Value, toRab), Bi1(el));
+        Proof all = pr.Apply("simprd", S(("ph", ph), ("ps", "W e. WUni"), ("ch", innerW)), both);
+        const string at = "( R1 ` ( ( rank ` Z ) +o _om ) ) e. W";
+        Proof sub2 = _d.Congruence("wff", at, "Z", pr.Apply("simpr", S(("ph", ph), ("ps", "x = X"))));
+        Proof r = pr.Apply("rspcdv", S(("ph", ph), ("x", "x"), ("A", "X"), ("B", "W"), ("ps", "( R1 ` ( ( rank ` x ) +o _om ) ) e. W"),
+            ("ch", "( R1 ` ( ( rank ` X ) +o _om ) ) e. W")), Hyp(ph, "X e. W")!.Value, sub2);
+        EmitLemma("lean-wu-r", "A reflecting weak universe contains the weak universe R1 at the rank of each member plus omega.",
+            pr.Apply("mpd", S(("ph", ph), ("ps", innerW), ("ch", "( R1 ` ( ( rank ` X ) +o _om ) ) e. W")), all, r));
+    }
+
     /// <summary>Facts about the tower U, proved once from the definition of lean.-tower.</summary>
     private void EnsureTowerLemmas()
     {
@@ -140,30 +186,31 @@ public sealed partial class Model
         {
             return;
         }
-        const string tw = "{ f | ( ( f : _om --> Univ /\\ _om e. ( f ` (/) ) ) /\\ A. n e. _om ( f ` n ) e. ( f ` suc n ) ) }";
-        const string body = "( ( U : _om --> Univ /\\ _om e. ( U ` (/) ) ) /\\ A. n e. _om ( U ` n ) e. ( U ` suc n ) )";
-        const string h = "U e. lean.-tower";
+        string tw = TowerBody("f");
+        string body = TowerCondition("U");
+        string h = UHyp;
+        string uc = UClass;
         // lean-tw: what U e. lean.-tower says.
         {
-            Proof df = Cite("df-lean.-tower");
-            Proof iff1 = pr.Apply("eleq2i", S(("C", "U"), ("A", TowerToken), ("B", tw)), df);
+            Proof df = Cite($"df-{LabelPart(Tower)}");
+            Proof iff1 = pr.Apply("eleq2i", S(("C", "U"), ("A", Tower), ("B", tw)), df);
             Proof inAb = _d.Syl(pr.Apply("id", S(("ph", h))), Bi1(iff1));
-            string inner = "( ( f : _om --> Univ /\\ _om e. ( f ` (/) ) ) /\\ A. n e. _om ( f ` n ) e. ( f ` suc n ) )";
+            string inner = TowerCondition("f");
             Proof sub = _d.Congruence("wff", Subst(inner, "f", "Z"), "Z", pr.Apply("id", S(("ph", "f = U"))));
             Proof elab = pr.Apply("elabg", S(("x", "f"), ("ph", inner), ("ps", body), ("A", "U"), ("V", "_V")), sub);
-            Proof isSet = pr.Apply("elex", S(("A", "U"), ("B", TowerToken)));
+            Proof isSet = pr.Apply("elex", S(("A", "U"), ("B", Tower)));
             Proof bi = _d.Syl(isSet, elab);
             Proof r = pr.Apply("mpbid", S(("ph", h), ("ps", $"U e. {tw}"), ("ch", body)), inAb, bi);
-            EmitLemma("lean-tw", "What U e. lean.-tower says.", r);
+            EmitLemma("lean-tw", $"What {h} says.", r);
         }
         string ph = $"( {h} /\\ K e. _om )";
         Proof tw0 = _d.Syl(Hyp(ph, h)!.Value, ApplyId("lean-tw", S(("U", "U"))));
-        Proof f = pr.Apply("simpld", S(("ph", ph), ("ps", "U : _om --> Univ"), ("ch", "_om e. ( U ` (/) )")),
-            pr.Apply("simpld", S(("ph", ph), ("ps", "( U : _om --> Univ /\\ _om e. ( U ` (/) ) )"), ("ch", "A. n e. _om ( U ` n ) e. ( U ` suc n )")), tw0));
-        EmitLemma("lean-tw-u", "Each level of a tower is a Grothendieck universe.",
-            pr.Apply("ffvelcdmd", S(("ph", ph), ("F", "U"), ("A", "_om"), ("B", "Univ"), ("C", "K")), f, Hyp(ph, "K e. _om")!.Value));
+        Proof f = pr.Apply("simpld", S(("ph", ph), ("ps", $"U : _om --> {uc}"), ("ch", "_om e. ( U ` (/) )")),
+            pr.Apply("simpld", S(("ph", ph), ("ps", $"( U : _om --> {uc} /\\ _om e. ( U ` (/) ) )"), ("ch", "A. n e. _om ( U ` n ) e. ( U ` suc n )")), tw0));
+        EmitLemma("lean-tw-u", lowered ? "Each level of a lowered tower is a reflecting weak universe." : "Each level of a tower is a Grothendieck universe.",
+            pr.Apply("ffvelcdmd", S(("ph", ph), ("F", "U"), ("A", "_om"), ("B", uc), ("C", "K")), f, Hyp(ph, "K e. _om")!.Value));
         {
-            Proof all = pr.Apply("simprd", S(("ph", ph), ("ps", "( U : _om --> Univ /\\ _om e. ( U ` (/) ) )"), ("ch", "A. n e. _om ( U ` n ) e. ( U ` suc n )")), tw0);
+            Proof all = pr.Apply("simprd", S(("ph", ph), ("ps", $"( U : _om --> {uc} /\\ _om e. ( U ` (/) ) )"), ("ch", "A. n e. _om ( U ` n ) e. ( U ` suc n )")), tw0);
             Proof sub = _d.Congruence("wff", "( U ` Z ) e. ( U ` suc Z )", "Z", pr.Apply("simpr", S(("ph", ph), ("ps", "n = K"))));
             Proof r = pr.Apply("rspcdv", S(("ph", ph), ("x", "n"), ("A", "K"), ("B", "_om"), ("ps", "( U ` n ) e. ( U ` suc n )"), ("ch", "( U ` K ) e. ( U ` suc K )")),
                 Hyp(ph, "K e. _om")!.Value, sub);
@@ -171,9 +218,13 @@ public sealed partial class Model
         }
         {
             Proof t0 = ApplyId("lean-tw", S(("U", "U")));
-            Proof a = pr.Apply("simpld", S(("ph", h), ("ps", "( U : _om --> Univ /\\ _om e. ( U ` (/) ) )"), ("ch", "A. n e. _om ( U ` n ) e. ( U ` suc n )")), t0);
+            Proof a = pr.Apply("simpld", S(("ph", h), ("ps", $"( U : _om --> {uc} /\\ _om e. ( U ` (/) ) )"), ("ch", "A. n e. _om ( U ` n ) e. ( U ` suc n )")), t0);
             EmitLemma("lean-tw-om", "The first level of a tower contains omega.",
-                pr.Apply("simprd", S(("ph", h), ("ps", "U : _om --> Univ"), ("ch", "_om e. ( U ` (/) )")), a));
+                pr.Apply("simprd", S(("ph", h), ("ps", $"U : _om --> {uc}"), ("ch", "_om e. ( U ` (/) )")), a));
+        }
+        if (lowered)
+        {
+            EnsureWuniLemmas();
         }
         // lean-prop: a proposition holds exactly when (/) is in it.
         {
@@ -1140,7 +1191,7 @@ public sealed partial class Model
     /// ( d.Ph -> body e. target ) from a lemma |- ( ( ( U e. … /\ A e. D1 ) /\ … ) -> X e. Y ): its class variables
     /// matched against body and target, its hypotheses discharged from the context.
     /// </summary>
-    private Proof UseLemma(PCtx d, string label, string body, string target)
+    private Proof UseLemma(PCtx d, string label, string body, string target, int arity = 0)
     {
         Statement st = pr.Database[label];
         (string ante, string concl) = _d.Split(st.Expr);
@@ -1150,6 +1201,12 @@ public sealed partial class Model
         if (!Match(concl, $"{body} e. {target}", sub))
         {
             throw new Refused($"{label} doesn't match {body} e. {target}");
+        }
+        // A lemma about the value at its first arity arguments, A, B, …, whose conclusion doesn't mention them all (a
+        // hypothesis like Quot.lift's h): those are the binders MapMem entered, the last arity ones.
+        for (int i = 0; i < arity && d.Binders.Count >= arity; i++)
+        {
+            sub.TryAdd(ClassVars[i], d.Binders[d.Binders.Count - arity + i]);
         }
         foreach (Statement h in st.Hyps.Where(h => h.Kind == 'f'))
         {
@@ -1260,6 +1317,12 @@ public sealed partial class Model
         var c = new PCtx { Ph = UHyp };
         Expr self = t.Const(n, ci.LevelParams.Select(p => t.Param(p)).ToArray());
         string text = TrIn(c, self);
+        if (Token(n) is string ctok && _choiceDependent.Contains(ctok))
+        {
+            // Its value takes choice's well-ordering of the tower's union (ModelBuiltins.cs); a theorem would need it,
+            // and W We U. ran U, among its hypotheses.
+            throw new Refused($"{n} depends on Classical.choice; theorems through choice aren't in the translator yet");
+        }
         string ty = TrIn(c, ci.Type);
         Proof p;
         switch (ci.Kind)
@@ -1351,6 +1414,20 @@ public sealed partial class Model
                     string cin = CtorInLemma(ci);
                     Proof unfold = DeltaEq(c.Ph, Token(n)!);
                     Proof inMap = MapMem(c, Rhs(unfold), ci.Type, ty, ci.NumParams + ci.NumFields, (d, body, _, target) => UseLemma(d, cin, body, target));
+                    p = pr.Apply("eqeltrd", S(("ph", c.Ph), ("A", text), ("B", Rhs(unfold)), ("C", ty)), unfold, inMap);
+                    break;
+                }
+            case ConstKind.Quot when text == "(/)":
+                // Quot.ind, and Quot.mk or Quot.lift into a proposition: proofs, whose statements hold in the model (QuotTyping.cs).
+                p = IntroPiProp(c, ci.Type, (d, body) => QuotProofHolds(d, body, BaseName(n)));
+                break;
+            case ConstKind.Quot when text != "(/)":
+                {
+                    // Quot, Quot.mk, Quot.lift: the value at its arguments is in the type (lean-in-c, ModelBuiltins.cs).
+                    string qin = QuotInLemma(ci, ty);
+                    Proof unfold = DeltaEq(c.Ph, Token(n)!);
+                    int depth = BaseName(n) switch { "Quot" => 2, "Quot.mk" => 3, _ => 5 };
+                    Proof inMap = MapMem(c, Rhs(unfold), ci.Type, ty, depth, (d, body, _, target) => UseLemma(d, qin, body, target, depth));
                     p = pr.Apply("eqeltrd", S(("ph", c.Ph), ("A", text), ("B", Rhs(unfold)), ("C", ty)), unfold, inMap);
                     break;
                 }
@@ -1657,6 +1734,8 @@ public sealed partial class Model
                 return IotaStep(c, e, k, rci, args);
             case Proj pj:
                 return ProjStep(c, pj, args);
+            case Const k when args.Count >= 6 && BaseName(k.Name) == "Quot.lift" && env.Find(k.Name) is { Kind: ConstKind.Quot }:
+                return QuotIotaStep(c, k, args);   // QuotTyping.cs
             case Const k when env.Find(k.Name) is { Kind: ConstKind.Definition or ConstKind.Opaque } ci && (ci.Value ?? ci.OpaqueValue) is Expr v:
                 {
                     Define(k.Name);

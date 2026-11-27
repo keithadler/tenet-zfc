@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# The headline demo (docs/demo.md): Lean's List.length_append, translated to ZFC through tenet-zfc's model and
+# restated through the List/Word bridge as set.mm's own ccatlen; checked by metamath-exe, mmverify.py and mmj2,
+# next to set.mm's hand-written proof of the same statement. Then three sabotage checks: a corrupted proof step,
+# a changed statement (+ to x.), and a broken Lean proof. Each must be rejected.
+#
+# usage: scripts/demo [<workdir>]
+#
+# Needs, as the verifier-gated tests do:
+#   TENET_ZFC_SETMM     set.mm
+#   TENET_ZFC_METAMATH  metamath-exe
+#   TENET_ZFC_MMVERIFY  mmverify.py (run with python3)
+#   TENET_ZFC_JAVA      Java 11, for mmj2
+#   TENET_ZFC_MMJ2      mmj2's directory (mmj2.jar, macros/)
+# Optional:
+#   TENET_ZFC           the tenet-zfc command (default: dotnet run on src/TenetZfc.Cli)
+#   TENET_ZFC_LEAN      lean, to print List.length_append's source from your toolchain (default: lean on the PATH)
+#   TENET_ZFC_LEANOUT   leanout, to export List.length_append from Lean's Init yourself; without it the demo uses
+#                       tests/fixtures/library.ndjson, the same export (leanout Init, Lean 4.36.0)
+#
+# Exit status 0 when the real proof passes all three checkers and every sabotaged one is rejected.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+work="${1:-$(mktemp -d "${TMPDIR:-/tmp}/tenet-zfc-demo.XXXXXX")}"
+mkdir -p "$work"
+work="$(cd "$work" && pwd)"
+: "${TENET_ZFC_SETMM:?set TENET_ZFC_SETMM to set.mm}"
+: "${TENET_ZFC_METAMATH:?set TENET_ZFC_METAMATH to metamath-exe}"
+: "${TENET_ZFC_MMVERIFY:?set TENET_ZFC_MMVERIFY to mmverify.py}"
+: "${TENET_ZFC_JAVA:?set TENET_ZFC_JAVA to Java 11}"
+: "${TENET_ZFC_MMJ2:?set TENET_ZFC_MMJ2 to the mmj2 directory}"
+if [ -n "${TENET_ZFC:-}" ]; then
+  tz=($TENET_ZFC)
+else
+  dotnet build "$repo/src/TenetZfc.Cli" -c Release -f net10.0 -v q -nologo > "$work/build.log"
+  tz=(dotnet "$repo/src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll")
+fi
+# Outputs include set.mm by name, so they sit next to it. TENET_ZFC_SETMM may name set.mm or its directory.
+setmm="$TENET_ZFC_SETMM"; [ -d "$setmm" ] && setmm="$setmm/set.mm"
+setmm="$(cd "$(dirname "$setmm")" && pwd)/$(basename "$setmm")"
+ln -sf "$setmm" "$work/set.mm"
+cd "$work"
+
+now() { python3 -c 'import time; print(time.time())'; }
+secs() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f", b - a }'; }
+size() { wc -c < "$1" | tr -d ' '; }
+banner() { printf '\n== %s\n' "$*"; }
+# metamath-exe and mmverify.py on the file's own theorems; prints one line per checker, returns 0 when both accept.
+proofcheck() {
+  local f="$1" first msg ok=0
+  first="$(grep -m1 -E '^ *[^ ]+ +\$p' "$f" | awk '{print $1}')"
+  printf 'set scroll continuous\nread %s\nverify proof lean-*\nexit\n' "$f" | "$TENET_ZFC_METAMATH" > "$f.metamath.log" 2>&1 || true
+  if grep -q '?Error' "$f.metamath.log" || ! grep -q 'were read into the source buffer' "$f.metamath.log"; then
+    msg="$(awk '/\?Error/ && !e {e = NR} e && NR == e + 1 {match($0, /"[^"]*"/); l = substr($0, RSTART, RLENGTH)} e && /^The / {print l ": " $0; exit}' "$f.metamath.log" | cut -c1-150)"
+    echo "  metamath-exe: REJECTED: $msg"; ok=1
+  else
+    echo "  metamath-exe: accepted"
+  fi
+  if python3 -I "$TENET_ZFC_MMVERIFY" -b "$first" "$f" > "$f.mmverify.log" 2>&1; then
+    echo "  mmverify.py:  accepted"
+  else
+    msg="$(grep -v '^ *$' "$f.mmverify.log" | tail -1 | sed 's/\[[^]]*\]//g; s/  */ /g; s/ \././' | cut -c1-150)"
+    echo "  mmverify.py:  REJECTED: $msg"; ok=1
+  fi
+  return $ok
+}
+
+status=0
+t_all=$(now)
+
+banner "1. Lean's theorem"
+lean="${TENET_ZFC_LEAN:-$(command -v lean || true)}"
+src=""
+[ -n "$lean" ] && src="$("$lean" --print-prefix 2>/dev/null)/src/lean/Init/Data/List/Basic.lean"
+if [ -n "$src" ] && [ -f "$src" ]; then
+  echo "$("$lean" --version | head -1), $src:"
+  echo
+  grep -A3 'theorem length_append ' "$src" | sed 's/^/  /'
+else
+  echo "Lean 4.36.0, src/lean/Init/Data/List/Basic.lean:"
+  echo
+  echo "  @[simp, grind =] theorem length_append {as bs : List α} : (as ++ bs).length = as.length + bs.length := by"
+  echo "    induction as with"
+  echo "    | nil => simp"
+  echo "    | cons _ as ih => simp [ih, Nat.succ_add]"
+fi
+echo
+if [ -n "${TENET_ZFC_LEANOUT:-}" ]; then
+  t0=$(now)
+  "$TENET_ZFC_LEANOUT" Init -o "$work/export.ndjson" -- List.length_append
+  export="$work/export.ndjson"
+  echo "exported with leanout: $(size "$export") bytes, $(secs "$t0" "$(now)") s"
+else
+  export="$repo/tests/fixtures/library.ndjson"
+  echo "export: tests/fixtures/library.ndjson (leanout Init, Lean 4.36.0), $(size "$export") bytes"
+fi
+
+banner "2. Translate: Lean's proof term -> ZFC, through the model and the List/Word bridge"
+t0=$(now)
+"${tz[@]}" list-bridge "$export" set.mm demo.mm List.length_append > list-bridge.out 2> list-bridge.log
+t_translate=$(secs "$t0" "$(now)")
+sed 's/^/  /' list-bridge.log
+echo "  output: demo.mm, $(size demo.mm) bytes, $(grep -c ' \$p ' demo.mm) theorems, $t_translate s"
+
+banner "3. The restated theorem, next to set.mm's own"
+if python3 - demo.mm set.mm <<'EOF'
+import re, sys
+def stmt(path, label):
+    m = re.search(r'(?m)^\s*' + re.escape(label) + r' \$p (.*?) \$=', open(path).read(), re.S)
+    return ' '.join(m.group(1).split())
+lean, twin, orig = stmt(sys.argv[1], 'lean-ccatlen'), stmt(sys.argv[1], 'lean-ccatlen-setmm'), stmt(sys.argv[2], 'ccatlen')
+print('  lean-ccatlen        (from Lean\'s proof)   ', lean)
+print('  lean-ccatlen-setmm  (from set.mm\'s proof) ', twin)
+print('  ccatlen             (set.mm)              ', orig)
+hyp = '|- ( ( U e. lean.-tower /\\ ( A e. ( U ` (/) ) /\\ B e. ( U ` (/) ) ) ) -> '
+ok = lean == twin and lean == hyp + orig[3:] + ' )'
+print('  -> one statement, two proofs; its consequent is ccatlen\'s statement, token for token' if ok else '  -> MISMATCH')
+sys.exit(0 if ok else 1)
+EOF
+then :; else status=1; fi
+
+banner "4. Check: metamath-exe, mmverify.py, mmj2 definitionCheck"
+t0=$(now)
+if "${tz[@]}" verify demo.mm > verify.log 2>&1; then :; else status=1; fi
+t_verify=$(secs "$t0" "$(now)")
+sed 's/^/  /' verify.log
+echo "  ($t_verify s)"
+
+banner "5. Sabotage: each must be rejected"
+reject() {   # <name> <file>
+  echo "$1"
+  if proofcheck "$2"; then echo "  -> NOT rejected: the demo fails"; status=1; else echo "  -> rejected"; fi
+}
+# (a) One step of lean-ccatlen's proof corrupted: the first letter of its compressed proof.
+python3 - demo.mm bad-step.mm <<'EOF'
+import re, sys
+s = open(sys.argv[1]).read()
+i = s.index('lean-ccatlen $p')
+j = s.index(') ', s.index('$=', i)) + 2          # after the label list "( ... )"
+c = s[j]
+s = s[:j] + ('B' if c != 'B' else 'C') + s[j+1:]
+open(sys.argv[2], 'w').write(s)
+EOF
+reject "(a) one proof step of lean-ccatlen changed" bad-step.mm
+# (b) The restated statement changed: + to x.
+python3 - demo.mm bad-stmt.mm <<'EOF'
+import sys
+s = open(sys.argv[1]).read()
+i = s.index('lean-ccatlen $p')
+j = s.index('$=', i)
+stmt = s[i:j]
+assert '( ( # ` S ) + ( # ` T ) )' in stmt
+s = s[:i] + stmt.replace('( ( # ` S ) + ( # ` T ) )', '( ( # ` S ) x. ( # ` T ) )') + s[j:]
+open(sys.argv[2], 'w').write(s)
+EOF
+reject "(b) lean-ccatlen's statement changed from + to x." bad-stmt.mm
+# (c) A broken Lean proof: List.length_append's proof term replaced by List.append_nil's. The translator types the
+# proof term against the theorem's statement (tenet-zfc theorem, the same code list-bridge runs), so it is the step
+# that meets it.
+python3 - "$export" bad-export.ndjson <<'EOF'
+import json, sys
+lines = open(sys.argv[1]).read().splitlines()
+objs = [json.loads(l) for l in lines]
+names = {o['in']: o for o in objs if 'in' in o}
+def full(i):
+    parts = []
+    while i:
+        n = names[i]
+        k = 'str' if 'str' in n else 'num'
+        parts.append(str(n[k].get('str', n[k].get('i'))))
+        i = n[k]['pre']
+    return '.'.join(reversed(parts))
+thms = {full(o['thm']['name']): k for k, o in enumerate(objs) if 'thm' in o}
+target, donor = thms['List.length_append'], thms['List.append_nil']
+objs[target]['thm']['value'] = objs[donor]['thm']['value']
+lines[target] = json.dumps(objs[target], separators=(',', ':'))
+open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
+EOF
+echo "(c) List.length_append's proof term replaced by List.append_nil's"
+"${tz[@]}" theorem bad-export.ndjson set.mm bad-proof.mm List.length_append > bad-proof.out 2>&1 || true
+if grep -q '^List.length_append: |-' bad-proof.out; then
+  if proofcheck bad-proof.mm; then echo "  -> NOT rejected: the demo fails"; status=1; else echo "  -> rejected by the checkers"; fi
+else
+  echo "  tenet-zfc: $(grep -m1 -E 'refused|Exception' bad-proof.out | cut -c1-160)"
+  echo "  -> rejected: no proof is produced, so there is nothing for the checkers to accept"
+fi
+
+banner "Summary"
+echo "  translate: $t_translate s; check (three checkers): $t_verify s; demo total: $(secs "$t_all" "$(now)") s"
+echo "  demo.mm: $(size demo.mm) bytes"
+[ $status -eq 0 ] && echo "  PASS: the real proof is accepted by all three checkers, and each sabotage is rejected" || echo "  FAIL"
+exit $status
