@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- ThreadCpu.cs: LibraryImport marshals through generated unsafe code -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>TenetZfc</RootNamespace>
     <!-- Shipped inside the tenet-zfc tool package, not as a package of its own. -->
     <IsPackable>false</IsPackable>

@@ -99,6 +99,12 @@ public sealed class NatBridge
         if (tt is not null)
         {
             bridge.NatAddRules(tt);
+            if (env.Find(t.Of("Nat.mul")) is not null)
+            {
+                // Multiplication too, when the export has it (tasks2.md, task 4).
+                model.Define(((Const)tt.Const0("Nat.mul")).Name);
+                bridge.NatMulRules(tt);
+            }
             foreach (string name in restate ?? [])
             {
                 bridge.Restate(tt, name);
@@ -738,6 +744,127 @@ public sealed class NatBridge
             Imp(h, "lean-nat-2p2e4", [Imp(h, "lean-nat-natadd-rules", [Hyp(h, h)])]));
     }
 
+    // ================================================================ multiplication (tower mode)
+
+    private const string ModelAdd = "( lean.Nat.add ` U )";
+
+    /// <summary>Nat.mul's computation rules for a function G: a * 0 = 0 and a * succ b = a * b + a (with the model's Nat.add).</summary>
+    public string MulRules(string g) =>
+        $"( ( U e. {D} /\\ A. a e. {Nat} ( ( {g} ` a ) ` {Zero} ) = {Zero} ) /\\ " +
+        $"A. a e. {Nat} A. b e. {Nat} ( ( {g} ` a ) ` {Succ("b")} ) = {Ga(ModelAdd, Ga(g, "a", "b"), "a")} )";
+
+    /// <summary>
+    /// The multiplication bridge (tasks2.md, task 4), on top of the addition bridge in tower mode: any G with Nat.mul's
+    /// computation rules is x. through F (lean-nat-mul, by induction on the second argument, as lean-nat-addind; the
+    /// step is F ( A * j + A ) = F A x. j + F A = F A x. ( j + 1 ), by lean-nat-natadd, adddi and mulrid). Then Nat.mul's
+    /// rules are proved from its definition, so ⟦Nat.mul⟧ is x. with no hypotheses but the tower's (lean-nat-natmul).
+    /// Needs NatAddRules first.
+    /// </summary>
+    public void NatMulRules(TheoremTranslator tt)
+    {
+        const string g = "G";
+        string h0 = MulRules(g);
+        string c0 = $"( {h0} /\\ A e. {Nat} )";
+        Proof eqG = UseS("eqid", [("A", Gm)]);
+        string r0 = $"A. a e. {Nat} ( ( {g} ` a ) ` {Zero} ) = {Zero}";
+        string r1 = $"A. a e. {Nat} A. b e. {Nat} ( ( {g} ` a ) ` {Succ("b")} ) = {Ga(ModelAdd, Ga(g, "a", "b"), "a")}";
+        {
+            string p = $"( {Ga(g, "A", Lt("n"))} e. {Nat} /\\ {Fv(Ga(g, "A", Lt("n")))} = ( {Fv("A")} x. {Gv("n")} ) )";
+            // Base: A * 0 = 0, and F 0 = 0 = F A x. 0.
+            Proof hu = Hyp(c0, $"U e. {D}"), ha = Hyp(c0, $"A e. {Nat}");
+            Proof l0 = Trans(Lift(c0, Ax("lean-nat-lit0")), Symm(Imp(c0, "lean-nat-zeroeq", [hu])));
+            Proof rz = Spec(SubBi("a", "A", $"( ( {g} ` a ) ` {Zero} ) = {Zero}"), Hyp(c0, r0), ha);
+            Proof g0 = Trans(Ce(Ga(g, "A", "Y"), l0), rz);
+            Proof mem0 = Use("eqeltrd", g0, Imp(c0, "lean-nat-zeroel", [hu]));
+            Proof fa = Imp(c0, "lean-nat-fcn", [hu, ha]);
+            Proof f0 = Trans(Ce(Fv("Y"), g0), Imp(c0, "lean-nat-fzero", [hu]));
+            Proof mul0 = Symm(Imp(c0, "mul01", [fa]));
+            Proof z0 = Symm(Ce($"( {Fv("A")} x. Y )", Lift(c0, Use("om2uz0i", Use("0z"), eqG))));
+            Proof b = Use("jca", mem0, Trans(f0, mul0, z0));
+
+            // Step: A * succ j = A * j + A.
+            string pj = ProofKit.Replace(p, "n", "j");
+            string h = $"( ( j e. _om /\\ {c0} ) /\\ {pj} )";
+            Proof hj = Hyp(h, "j e. _om"), hu2 = Hyp(h, $"U e. {D}"), ha2 = Hyp(h, $"A e. {Nat}");
+            string x = Ga(g, "A", Lt("j"));
+            Proof xm = Use("simpld", Hyp(h, pj));
+            Proof xf = Use("simprd", Hyp(h, pj));
+            Proof ljn = Imp(h, "lean-nat-litnat", [hu2, hj]);
+            Proof ls = Trans(Imp(h, "lean-nat-litsuc", [hj]), Symm(Imp(h, "lean-nat-succeq", [hu2, ljn])));
+            string body1(string a) => $"A. b e. {Nat} ( ( {g} ` {a} ) ` {Succ("b")} ) = {Ga(ModelAdd, Ga(g, a, "b"), a)}";
+            Proof ra = Spec(SubBi("a", "A", body1("a")), Hyp(h, r1), ha2);
+            Proof rb = Spec(SubBi("b", Lt("j"), $"( ( {g} ` A ) ` {Succ("b")} ) = {Ga(ModelAdd, Ga(g, "A", "b"), "A")}"), ra, ljn);
+            Proof g1 = Trans(Ce(Ga(g, "A", "Y"), ls), rb);
+            Proof both = Use("jca", xm, ha2);
+            Proof mem = Use("eqeltrd", g1, Imp(h, "lean-nat-natadd-el", [hu2, both]));
+            Proof fadd = Imp(h, "lean-nat-natadd", [hu2, both]);           // F ( x + A ) = F x + F A
+            Proof f3 = Ce($"( Y + {Fv("A")} )", xf);                       // = ( F A x. Gv j ) + F A
+            Proof faj = Imp(h, "lean-nat-fcn", [hu2, ha2]), gj = Imp(h, "lean-nat-gcn", [hj]);
+            Proof di = Imp(h, "adddi", [faj, gj, Lift(h, Use("ax-1cn"))]); // F A x. ( Gv j + 1 ) = F A x. Gv j + F A x. 1
+            Proof one = Ce($"( ( {Fv("A")} x. {Gv("j")} ) + Y )", Imp(h, "mulrid", [faj]));
+            Proof f4 = Symm(Trans(di, one));
+            Proof f5 = Ce($"( {Fv("A")} x. Y )", Symm(Imp(h, "om2uzsuci", [hj], closed: [Use("0z"), eqG])));
+            Proof st = Use("jca", mem, Trans(Ce(Fv("Y"), g1), fadd, f3, f4, f5));
+            Thm("lean-nat-mulind", "Multiplication by induction: any G with Nat.mul's computation rules multiplies literals as x. does.",
+                _k.Finds("n", "j", p, c0, b, st, "C"));
+        }
+        {
+            string h = $"( {h0} /\\ ( A e. {Nat} /\\ B e. {Nat} ) )";
+            Proof hu = Hyp(h, $"U e. {D}");
+            Proof ar = Rw(Hyp(h, $"B e. {Nat}"), Symm(Imp(h, "lean-nat-rnlit", [hu])));
+            Proof litf1o = Ax("lean-nat-litf1o");
+            Proof kom = Imp(h, "f1ocnvdm", [Lift(h, litf1o), ar]);
+            Proof ctx = Use("jca", Hyp(h, h0), Hyp(h, $"A e. {Nat}"));
+            Proof pk = Use("mpd", ctx, Imp(h, "lean-nat-mulind", [kom]));
+            Proof lk = Imp(h, "f1ocnvfv2", [Lift(h, litf1o), ar]);
+            Proof gk = Symm(Imp(h, "lean-nat-fval", [ar]));
+            Proof both = Rw(Rw(pk, lk), gk);
+            Thm("lean-nat-mulel", "A function with Nat.mul's computation rules stays in the model's Nat.", Use("simpld", both));
+            Thm("lean-nat-mul", "Bridge: any function with Nat.mul's computation rules is x. through F.", Use("simprd", both));
+        }
+
+        // The model's own Nat.mul: its rules from its definition.
+        Expr natT = tt.Const0("Nat"), zeroT = tt.Const0("Nat.zero"), succT = tt.Const0("Nat.succ"), addT = tt.Const0("Nat.add"), mulT = tt.Const0("Nat.mul");
+        Terms t = tt.Terms;
+        Expr Times(Expr a, Expr b2) => t.App(t.App(mulT, a), b2);
+        var (zs, zp) = tt.ProveDefEq([natT], v => (Times(v[0], zeroT), zeroT));
+        Add("lean-nat-natmul-zero", "Nat.mul's first computation rule, n * 0 = 0, proved from its definition: it holds in tower mode.", zs, zp, Required(zp));
+        var (ss, sp) = tt.ProveDefEq([natT, natT], v => (Times(v[0], t.App(succT, v[1])), t.App(t.App(addT, Times(v[0], v[1])), v[0])));
+        Add("lean-nat-natmul-succ", "Nat.mul's second computation rule, n * succ m = n * m + n, proved from its definition: it holds in tower mode.", ss, sp, Required(sp));
+        const string gm = "( lean.Nat.mul ` U )";
+        string hu0 = $"U e. {D}";
+        Proof rz0 = Use("ralrimiva", UseS("lean-nat-natmul-zero", [("U", "U"), ("A", "a")]));
+        Proof rs0 = Use("ralrimiva", Use("ralrimiva", UseS("lean-nat-natmul-succ", [("U", "U"), ("A", "a"), ("B", "b")])));
+        Proof rules = Use("jca", Use("jca", UseS("id", [("ph", hu0)]), rz0), rs0);
+        if (_k.Split(ProofKit.Of(rules)).X != MulRules(gm))
+        {
+            throw new InvalidOperationException($"Nat.mul's rules came out as {ProofKit.Of(rules)}, not {MulRules(gm)}");
+        }
+        Thm("lean-nat-natmul-rules", "In tower mode the model's Nat.mul satisfies its computation rules.", rules);
+        string hab = $"( {hu0} /\\ ( A e. {Nat} /\\ B e. {Nat} ) )";
+        Proof rr = Imp(hab, "lean-nat-natmul-rules", [Hyp(hab, hu0)]);
+        Proof ab = Hyp(hab, $"( A e. {Nat} /\\ B e. {Nat} )");
+        Thm("lean-nat-natmul", "Bridge: the model's Nat.mul is x. through F (no hypotheses but the tower's).", Imp(hab, "lean-nat-mul", [rr, ab]));
+        Thm("lean-nat-natmul-el", "The model's Nat.mul stays in the model's Nat.", Imp(hab, "lean-nat-mulel", [rr, ab]));
+
+        // 2 * 2 = 4 through the bridge, and set.mm's 2t2e4 back in the model.
+        {
+            string l2 = Lt(Ofn("2")), l4 = Lt(Ofn("4"));
+            string h = hu0;
+            Proof hu = Hyp(h, h);
+            Proof l2n = Imp(h, "lean-nat-litnumel", [hu, Lift(h, Use("2nn0"))]);
+            Proof l4n = Imp(h, "lean-nat-litnumel", [hu, Lift(h, Use("4nn0"))]);
+            Proof xm = Imp(h, "lean-nat-natmul-el", [hu, Use("jca", l2n, l2n)]);
+            Proof eqb = Imp(h, "lean-nat-eq", [hu, Use("jca", xm, l4n)]);
+            Proof fx = Imp(h, "lean-nat-natmul", [hu, Use("jca", l2n, l2n)]);
+            Proof f2 = Lift(h, Imp(null, "lean-nat-flitnum", [Use("2nn0")]));
+            Proof f4 = Lift(h, Imp(null, "lean-nat-flitnum", [Use("4nn0")]));
+            Proof iff = Rw(Rw(eqb, Trans(fx, Ce("( Y x. Y )", f2))), f4);
+            Thm("lean-nat-2t2e4-iff", "Cross-check: 2 * 2 = 4 in the model is set.mm's ( 2 x. 2 ) = 4, through the bridge.", iff);
+            Thm("lean-nat-natmul-2t2e4", "Cross-check: set.mm's 2t2e4 proves 2 * 2 = 4 for the model's Nat.mul.", Use("mpbird", Lift(h, Use("2t2e4")), iff));
+        }
+    }
+
     /// <summary>
     /// A Lean theorem about Nat, proved through the model and restated in set.mm's arithmetic. The theorem must be
     /// ∀ (a b … : Nat), l = r with l and r built from +, 0, literals, Nat.succ and the variables (Nat.add_zero,
@@ -861,8 +988,10 @@ public sealed class NatBridge
             (_, "Nat.succ", 1) => t.App(succ, Nf(tt, a[0])),
             (_, "Nat.add", 2) => t.App(t.App(add, Nf(tt, a[0])), Nf(tt, a[1])),
             (_, "HAdd.hAdd.{0,0,0}", 6) => t.App(t.App(add, Nf(tt, a[4])), Nf(tt, a[5])),
+            (_, "Nat.mul", 2) => t.App(t.App(tt.Const0("Nat.mul"), Nf(tt, a[0])), Nf(tt, a[1])),
+            (_, "HMul.hMul.{0,0,0}", 6) => t.App(t.App(tt.Const0("Nat.mul"), Nf(tt, a[4])), Nf(tt, a[5])),
             (_, "OfNat.ofNat.{0}", 3) when a[1] is NatLit l && l.Value <= 10 => Lit(l.Value),
-            _ => throw new Model.Refused($"restating: {e} is not built from +, literals, Nat.succ and variables"),
+            _ => throw new Model.Refused($"restating: {e} is not built from +, *, literals, Nat.succ and variables"),
         };
     }
 
@@ -886,6 +1015,11 @@ public sealed class NatBridge
             {
                 string x = _pr.Render(inner.Children[0]);
                 return Imp(ph, "lean-nat-natadd-el", [hu, Use("jca", Mem(ph, x, hu), Mem(ph, arg, hu))]);
+            }
+            if (inner.Rule.Label == "cfv" && _pr.Render(inner.Children[1]) == "( lean.Nat.mul ` U )")
+            {
+                string x = _pr.Render(inner.Children[0]);
+                return Imp(ph, "lean-nat-natmul-el", [hu, Use("jca", Mem(ph, x, hu), Mem(ph, arg, hu))]);
             }
         }
         return Hyp(ph, $"{nf} e. {Nat}");
@@ -918,6 +1052,17 @@ public sealed class NatBridge
                 string lx = _k.Sides(_k.Split(ProofKit.Of(fx)).X).R;
                 Proof c2 = Ce($"( {lx} + Y )", fy);
                 return Trans(add, c1, c2);
+            }
+            if (g.Rule.Label == "cfv" && _pr.Render(g.Children[1]) == "( lean.Nat.mul ` U )")
+            {
+                string x = _pr.Render(g.Children[0]);
+                Proof mul = Imp(ph, "lean-nat-natmul", [hu, Use("jca", Mem(ph, x, hu), Mem(ph, arg, hu))]);
+                Proof fx = FVal(ph, x, hu), fy = FVal(ph, arg, hu);
+                string ry = _k.Sides(_k.Split(ProofKit.Of(fy)).X).L;
+                Proof c1 = Ce($"( Y x. {ry} )", fx);
+                string lx = _k.Sides(_k.Split(ProofKit.Of(fx)).X).R;
+                Proof c2 = Ce($"( {lx} x. Y )", fy);
+                return Trans(mul, c1, c2);
             }
         }
         return _k.Refl(ph, Fv(nf));

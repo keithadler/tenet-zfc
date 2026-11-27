@@ -165,6 +165,19 @@ jobs:
           if scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" lean-nn0-Nat.add_zero; then exit 1; fi
           # ...and a use of ax-groth: set.mm's inaex (inaccessibles exist) is proved from it.
           if scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" --axioms-only inaex; then exit 1; fi
+      # The multiplication bridge (docs/bridges.md): the model's Nat.mul is x. through F, its rules proved from its
+      # definition; Nat.mul_zero, Nat.zero_mul and Nat.mul_succ restated in NN0, and 2 * 2 = 4 by set.mm's 2t2e4.
+      - name: Prove the Nat.mul bridge, restate Lean's mul theorems in NN0, and verify
+        env:
+          TENET_ZFC_JAVA: java
+        run: |
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- nat-bridge tests/fixtures/library.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/natmul.mm" 2 4 Nat.mul_zero Nat.zero_mul Nat.mul_succ
+          grep -q 'lean-nn0-Nat.mul_succ \$p |- ( ( ( U e. lean.-tower /\\ A e. NN0 ) /\\ B e. NN0 ) -> ( A x. ( B + 1 ) ) = ( ( A x. B ) + A ) )' "$RUNNER_TEMP/mm/setmm/natmul.mm"
+          grep -q 'lean-nat-natmul-2t2e4 \$p' "$RUNNER_TEMP/mm/setmm/natmul.mm"
+          out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read natmul.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" natmul.mm)
       - name: Prove the List/Word bridge and verify
         run: |
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- list-bridge tests/fixtures/library.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/listbridge.mm" --bridge-only
@@ -201,7 +214,7 @@ jobs:
           raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
           curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
           for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
-          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natzfc thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natmul natzfc listbridge thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
       # The Init-wide run (docs/milestone3.md) in miniature: define-all on a small export, in two chunks, and
       # scripts/verify-all with all three checkers. The full run on Init is too big for CI.
       - name: define-all and verify-all on a small export (milestone 3 at scale)
@@ -215,6 +228,31 @@ jobs:
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- define-all tests/fixtures/natle.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/defall" --chunk-size 8
           if grep -qP '\t(refused|error)\t' "$RUNNER_TEMP"/defall/chunk-*.tsv; then cat "$RUNNER_TEMP"/defall/chunk-*.tsv; exit 1; fi
           scripts/verify-all -j 2 "$RUNNER_TEMP/defall"
+      # Theorems at scale (docs/milestone3.md, "Theorems across Init") in miniature: theorem-all on a fixture cut from
+      # Init (scripts/subset-export), in two chunks, and verify-all. Refusals are expected (Nat.le, Quot.sound); a
+      # translator error, a crash or a timeout is not, and neither is fewer theorems proved than recorded.
+      - name: theorem-all and verify-all on a small export (theorems at scale)
+        env:
+          TENET_ZFC_SETMM: ${{ runner.temp }}/mm/setmm
+          TENET_ZFC_METAMATH: ${{ runner.temp }}/mm/metamath
+          TENET_ZFC_MMVERIFY: ${{ runner.temp }}/mm/mmverify/mmverify.py
+          TENET_ZFC_JAVA: java
+          TENET_ZFC_MMJ2: ${{ runner.temp }}/mm/mmj2
+        run: |
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem-all tests/fixtures/theoremall.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/thmall" --chunk-size 20 --budget 120
+          cat "$RUNNER_TEMP"/thmall/chunk-*.tsv
+          if grep -qP '\t(error|crash|timeout)\t' "$RUNNER_TEMP"/thmall/chunk-*.tsv; then exit 1; fi
+          proved=$(cat "$RUNNER_TEMP"/thmall/chunk-*.tsv | grep -cP '\tproved\t')
+          echo "proved: $proved of 23"
+          [ "$proved" -ge 23 ] || exit 1
+          scripts/verify-all -j 2 "$RUNNER_TEMP/thmall"
+          scripts/summarize-all "$RUNNER_TEMP/thmall"
+          # Theorems the Init sample's blockers stopped, fixed since (docs/milestone3.md, "Theorems across Init"): $d traps
+          # under binders (Nat.succ_mul, maxOn_eq_minOn), Decidable's proof field, literals past 10 (Char.ext), and
+          # Nat.le's constructors. Every one must prove.
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem-all tests/fixtures/blockers.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/blk" --chunk-size 16 --budget 120
+          if grep -vqP '\tproved\t|^name\t' "$RUNNER_TEMP"/blk/chunk-*.tsv; then cat "$RUNNER_TEMP"/blk/chunk-*.tsv; exit 1; fi
+          scripts/verify-all -j 2 "$RUNNER_TEMP/blk"
       # Every output above passed all three checks; keep them, for the release workflow to attach.
       - name: Collect the verified outputs
         run: |
@@ -228,9 +266,10 @@ jobs:
           path: ${{ runner.temp }}/verified
 
   # The whole starter library, the heavy theorems included (induction with large motives: Nat.succ_add,
-  # List.length_append, List.append_assoc, ...), checked by all three checkers. By hand (workflow_dispatch) and weekly.
+  # List.length_append, List.append_assoc, ...), checked by all three checkers. By hand (workflow_dispatch), weekly,
+  # and on a release tag, so a release is never cut without it.
   theorem-library:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -277,9 +316,9 @@ jobs:
 
   # The headline demo (docs/demo.md): Lean's List.length_append through the model and the List/Word bridge, restated
   # as set.mm's ccatlen next to set.mm's own proof, checked by all three checkers; then the sabotage checks (a corrupted
-  # proof step, + changed to x., a broken Lean proof), each of which must be rejected. By hand and weekly.
+  # proof step, + changed to x., a broken Lean proof), each of which must be rejected. By hand, weekly and on a release tag.
   demo:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""Cut a small export out of a big one: the named constants and everything they use, renumbered.
+
+usage: scripts/subset-export <export.ndjson> <out.ndjson> <name>... [--names-file f] [--theorems-every N]
+
+What `leanout Init -o out.ndjson -- <names>` writes, without Lean: for fixtures cut from the Init export that the
+milestone-3 runs use. Each named constant comes with every constant its type and value mention, transitively (an
+inductive type with its whole block: constructors, recursors, mutual types). With --theorems-every N, every Nth
+theorem of the export (in export order, as `tenet-zfc theorem-all --every N` counts them) is named too.
+
+The export format (leanout 3.1): name lines {"in":…}, level lines {"il":…}, expression lines {"ie":…}, then
+declarations; references are integer ids of earlier lines. The output keeps the input's order and renumbers densely.
+"""
+import json
+import sys
+
+NAME, LEVEL, EXPR = "n", "l", "e"
+
+
+def main(argv):
+    names, opts = [], {}
+    args = iter(argv)
+    for a in args:
+        if a in ("--names-file", "--theorems-every"):
+            opts[a] = next(args)
+        else:
+            names.append(a)
+    if len(names) < 2:
+        sys.exit(__doc__)
+    src, out, wanted = names[0], names[1], names[2:]
+    if "--names-file" in opts:
+        wanted += [l.strip() for l in open(opts["--names-file"]) if l.strip()]
+
+    lines = {NAME: {}, LEVEL: {}, EXPR: {}}
+    decls = []   # (index in file, parsed)
+    meta = None
+    with open(src) as fh:
+        for i, line in enumerate(fh):
+            if line.startswith('{"meta"'):
+                meta = line
+                continue
+            d = json.loads(line)
+            if "in" in d:
+                lines[NAME][d["in"]] = d
+            elif "il" in d:
+                lines[LEVEL][d["il"]] = d
+            elif "ie" in d:
+                lines[EXPR][d["ie"]] = d
+            else:
+                decls.append(d)
+
+    text = {0: ""}
+
+    def name_text(n):
+        if n in text:
+            return text[n]
+        d = lines[NAME][n]
+        body = d.get("str") or d.get("num")
+        part = body["str"] if "str" in d else str(body["i"])
+        p = name_text(body["pre"])
+        text[n] = part if p == "" else f"{p}.{part}"
+        return text[n]
+
+    # Each declaration's own names (an inductive block names its types, constructors and recursors).
+    by_name = {}
+    theorems = []
+    for k, d in enumerate(decls):
+        (kind, body), = d.items()
+        if kind == "inductive":
+            for part in body["types"] + body["ctors"] + body["recs"]:
+                by_name[name_text(part["name"])] = k
+        else:
+            by_name[name_text(body["name"])] = k
+            if kind == "thm":
+                theorems.append(name_text(body["name"]))
+    if "--theorems-every" in opts:
+        wanted += theorems[::int(opts["--theorems-every"])]
+    missing = [w for w in wanted if w not in by_name]
+    if missing:
+        sys.exit(f"subset-export: not in {src}: {' '.join(missing)}")
+
+    # The fields that refer to other lines, by kind of line.
+    def refs(d):
+        """(kind, id) for every reference a parsed line makes."""
+        r = []
+
+        def lv(x):
+            r.append((LEVEL, x))
+
+        def nm(x):
+            r.append((NAME, x))
+
+        def ex(x):
+            r.append((EXPR, x))
+        if "in" in d:
+            nm((d.get("str") or d.get("num"))["pre"])
+        elif "il" in d:
+            if "succ" in d:
+                lv(d["succ"])
+            elif "param" in d:
+                nm(d["param"])
+            else:
+                for x in d.get("max") or d.get("imax"):
+                    lv(x)
+        elif "ie" in d:
+            if "sort" in d:
+                lv(d["sort"])
+            elif "const" in d:
+                nm(d["const"]["name"])
+                for x in d["const"]["us"]:
+                    lv(x)
+            elif "forallE" in d or "lam" in d:
+                b = d.get("forallE") or d.get("lam")
+                ex(b["type"]), ex(b["body"]), nm(b["name"])
+            elif "app" in d:
+                ex(d["app"]["fn"]), ex(d["app"]["arg"])
+            elif "proj" in d:
+                ex(d["proj"]["struct"]), nm(d["proj"]["typeName"])
+            elif "mdata" in d:
+                ex(d["mdata"]["expr"])
+            elif "letE" in d:
+                b = d["letE"]
+                ex(b["type"]), ex(b["value"]), ex(b["body"]), nm(b["name"])
+        return r
+
+    def decl_refs(d):
+        (kind, body), = d.items()
+        r = []
+        parts = body["types"] + body["ctors"] + body["recs"] if kind == "inductive" else [body]
+        for p in parts:
+            r.append((NAME, p["name"]))
+            r += [(NAME, x) for x in p.get("levelParams", [])]
+            r += [(NAME, x) for x in p.get("all", [])]
+            r += [(NAME, x) for x in p.get("ctors", []) if isinstance(x, int)]
+            if "induct" in p:
+                r.append((NAME, p["induct"]))
+            for f in ("type", "value"):
+                if f in p:
+                    r.append((EXPR, p[f]))
+            for rule in p.get("rules", []):
+                r += [(NAME, rule["ctor"]), (EXPR, rule["rhs"])]
+        return r
+
+    keep = {NAME: {0}, LEVEL: {0}, EXPR: set()}
+    keep_decls = set()
+    todo = [by_name[w] for w in wanted]
+    while todo:
+        k = todo.pop()
+        if k in keep_decls:
+            continue
+        keep_decls.add(k)
+        stack = decl_refs(decls[k])
+        while stack:
+            kind, x = stack.pop()
+            if x in keep[kind]:
+                continue
+            keep[kind].add(x)
+            d = lines[kind][x]
+            stack += refs(d)
+            if kind == EXPR and "const" in d:
+                c = name_text(d["const"]["name"])
+                if c in by_name and by_name[c] not in keep_decls:
+                    todo.append(by_name[c])
+            if kind == EXPR and "proj" in d:
+                c = name_text(d["proj"]["typeName"])
+                if c in by_name and by_name[c] not in keep_decls:
+                    todo.append(by_name[c])
+
+    new = {kind: {old: i for i, old in enumerate(sorted(keep[kind]))} for kind in keep}
+
+    def rewrite(d, kind_of):
+        """A copy of a parsed object with every reference renumbered; kind_of(field) says what a field refers to."""
+        if isinstance(d, list):
+            return [rewrite(x, kind_of) for x in d]
+        if not isinstance(d, dict):
+            return d
+        o = {}
+        for f, v in d.items():
+            k = kind_of(f, v)
+            if k is None:
+                o[f] = rewrite(v, kind_of) if f != "data" else v
+            elif isinstance(v, list):
+                o[f] = [new[k][x] for x in v]
+            else:
+                o[f] = new[k][v]
+        return o
+
+    def line_kind(top):
+        def kind_of(f, v):
+            if f == "in" or f in ("pre", "param", "name", "typeName"):
+                return NAME
+            if f == "il" or f in ("succ", "max", "imax", "sort", "us"):
+                return LEVEL
+            if f == "ie" or f in ("type", "body", "fn", "arg", "struct", "expr", "value"):
+                return EXPR
+            return None
+        return kind_of
+
+    def decl_kind(f, v):
+        if f in ("name", "levelParams", "all", "induct", "ctor"):
+            return NAME
+        if f == "ctors" and isinstance(v, list) and v and isinstance(v[0], int):
+            return NAME
+        if f in ("type", "value", "rhs"):
+            return EXPR
+        return None
+
+    with open(out, "w") as fo:
+        if meta:
+            fo.write(meta)
+        for kind in (NAME, LEVEL, EXPR):
+            pass
+        # Lines in the input's order: names, levels and expressions are interleaved there, and each refers only to
+        # earlier ones, so sorting each kind by its id keeps that.
+        allk = [(NAME, x) for x in sorted(keep[NAME]) if x != 0] + [(LEVEL, x) for x in sorted(keep[LEVEL]) if x != 0] \
+            + [(EXPR, x) for x in sorted(keep[EXPR])]
+        for kind, x in allk:
+            fo.write(json.dumps(rewrite(lines[kind][x], line_kind(kind)), separators=(",", ":")) + "\n")
+        for k in sorted(keep_decls):
+            fo.write(json.dumps(rewrite(decls[k], decl_kind), separators=(",", ":")) + "\n")
+    print(f"{out}: {len(keep_decls)} declarations, {len(keep[EXPR])} expressions, from {len(wanted)} names")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -424,7 +424,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
         string d = m.Declarations;
         // Each type is its slice of the block's fixed point, tagged (/) for the first type and 1o for the second.
-        Assert.Matches(@"df-lean\.Tm \$a \|- lean\.Tm = \( u e\. Univ \|-> \( x e\. u \|-> \( U_ (\w+) e\. _om \( rec \( \( (\w+) e\. _V \|-> \( lean\.Tm\.-mstep ` <\. <\. u , <\. x , \(/\) >\. >\. , \2 >\. \) \) , \(/\) \) ` \1 \) "" \{ \(/\) \} \) \) \) \$\.", d);
+        Assert.Matches(@"df-lean\.Tm \$a \|- lean\.Tm = \( u e\. Univ \|-> \( x e\. u \|-> \( U_ (\w+) e\. _om \( rec \( \( (\w+) e\. _V \|-> \( lean\.Tm\.-stepm ` <\. <\. u , <\. x , \(/\) >\. >\. , \2 >\. \) \) , \(/\) \) ` \1 \) "" \{ \(/\) \} \) \) \) \$\.", d);
         Assert.Contains("\" { 1o } ) ) ) $.", d);
         // The step adds <. 1o , tag >. for Args.cons, its fields ranging over the last stage's slices.
         Assert.Contains("{ <. 1o , <. 1o , <. (/) , <. ", d);
@@ -447,7 +447,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
             m.Define(t.Of(n));
         }
         // Syntax, Array Syntax and List Syntax: three slices, the last tagged 2o.
-        Assert.Contains("df-lean.Lean.Syntax.-mstep $a", m.Declarations);
+        Assert.Contains("df-lean.Lean.Syntax.-stepm $a", m.Declarations);
         Assert.Contains("<. 2o , ", m.Declarations);
         Assert.Contains("df-lean.Lean.Syntax.rec_2 $a", m.Declarations);
     }

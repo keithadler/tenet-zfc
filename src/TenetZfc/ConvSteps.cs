@@ -172,15 +172,17 @@ public sealed partial class Model
     /// <summary>|- ( lean.Nat.-ofnum ` N ) = ( `' OfnumMap ` N ).</summary>
     private Proof OfnumIs(string n) => pr.Apply("fveq1i", S(("F", "lean.Nat.-ofnum"), ("G", $"`' {OfnumMap}"), ("A", n)), Cite("df-lean.Nat.-ofnum"));
 
-    /// <summary>|- N e. ( ZZ>= ` 0 ) for a numeral 0 … 10.</summary>
-    private Proof NumeralUz(int n)
-    {
-        Proof nn0 = n <= 9 ? pr.Apply($"{n}nn0", S()) : throw new Refused("Nat literals above 10 aren't supported yet");
-        return pr.Apply("eleqtri", S(("A", Decimal(n)), ("B", "NN0"), ("C", "( ZZ>= ` 0 )")), nn0, pr.Apply("nn0uz", S()));
-    }
+    /// <summary>|- N e. ( ZZ>= ` 0 ) for a numeral.</summary>
+    private Proof NumeralUz(System.Numerics.BigInteger n) =>
+        pr.Apply("eleqtri", S(("A", Decimal(n)), ("B", "NN0"), ("C", "( ZZ>= ` 0 )")), NumeralNn0(n), pr.Apply("nn0uz", S()));
+
+    /// <summary>|- N e. NN0 for a numeral: a digit (0nn0 … 9nn0), or ; D d by deccl.</summary>
+    private Proof NumeralNn0(System.Numerics.BigInteger n) => n <= 9
+        ? pr.Apply($"{n}nn0", S())
+        : pr.Apply("deccl", S(("A", Decimal(n / 10)), ("B", Decimal(n % 10))), NumeralNn0(n / 10), NumeralNn0(n % 10));
 
     /// <summary>|- ( `' OfnumMap ` N ) e. _om.</summary>
-    private Proof OfnumOm(int n)
+    private Proof OfnumOm(System.Numerics.BigInteger n)
     {
         Proof cnv = _d.Syl(pr.Apply("a1i", S(("ph", $"{OfnumMap} : _om -1-1-onto-> ( ZZ>= ` 0 )"), ("ps", "T.")), OfnumIso()), pr.Apply("f1ocnv", S(("F", OfnumMap), ("A", "_om"), ("B", "( ZZ>= ` 0 )"))));
         Proof f = _d.Syl(cnv, pr.Apply("f1of", S(("F", $"`' {OfnumMap}"), ("A", "( ZZ>= ` 0 )"), ("B", "_om"))));
@@ -276,9 +278,89 @@ public sealed partial class Model
         return Beta("T.", pr.Apply("eqid", S(("A", f))), x, "_V", body, a, Exists("T.", a), f);
     }
 
-    /// <summary>A Nat literal is in Nat: as Nat.zero or Nat.succ of the literal before it.</summary>
+    /// <summary>
+    /// lean-litnat: |- ( ( U e. … /\ A e. _om ) -> ( LitMap ` A ) e. ⟦Nat⟧ ), by induction on ω (finds2): LitMap's value at
+    /// (/) is ⟦Nat.zero⟧, and at suc j the tag over its value at j, which is ⟦Nat.succ⟧ of it. Every literal's numeral is
+    /// a member of ω (OfnumOm), so this types literals of any size, where unfolding them one succ at a time can't.
+    /// </summary>
+    private void EnsureLitNat(string natText)
+    {
+        if (Has("lean-litnat"))
+        {
+            return;
+        }
+        Name zero = t.Of("Nat.zero"), succ = t.Of("Nat.succ");
+        Define(zero);
+        Define(succ);
+        string ta = UHyp, k = "k", j = "j";
+        string fmap = "( x e. _V |-> <. 1o , <. (/) , <. x , (/) >. >. >. )";
+        string Phi(string at) => $"( {LitMap} ` {at} ) e. {natText}";
+        Proof Sub(string to) => _d.Congruence("wff", Phi("Z"), "Z", pr.Apply("id", S(("ph", $"{k} = {to}"))));
+        // The base: ( LitMap ` (/) ) = <. (/) , (/) >. = ⟦Nat.zero⟧.
+        Proof z = pr.Apply("fr0g", S(("A", "<. (/) , (/) >."), ("B", "_V"), ("F", fmap)));
+        Proof zc = pr.Apply("ax-mp", S(("ph", "<. (/) , (/) >. e. _V"), ("ps", $"( {LitMap} ` (/) ) = <. (/) , (/) >.")), pr.Apply("opex", S(("A", "(/)"), ("B", "(/)"))), z);
+        var c0 = new PCtx { Ph = ta };
+        Typed zIn = MemOf(c0, t.Const(zero, []));
+        if (zIn.Ty != natText)
+        {
+            throw new Refused($"Nat.zero came out in {zIn.Ty}, not {natText}");
+        }
+        Proof toZero = _d.Trans(_d.Lift(ta, zc), _d.Symm(DeltaEq(ta, Token(zero)!)));
+        Proof baseP = pr.Apply("eqeltrd", S(("ph", ta), ("A", $"( {LitMap} ` (/) )"), ("B", Rhs(toZero)), ("C", natText)), toZero, zIn.P);
+        // The step: ( LitMap ` suc j ) = ( F ` ( LitMap ` j ) ) = tag = ( ( lean.Nat.succ ` U ) ` ( LitMap ` j ) ), in ⟦Nat⟧.
+        string ctx3 = $"( ( {ta} /\\ {j} e. _om ) /\\ {Phi(j)} )";
+        string inner = $"( {LitMap} ` {j} )";
+        Proof jOm = Hyp(ctx3, $"{j} e. _om")!.Value;
+        Proof frs = _d.Syl(jOm, pr.Apply("frsuc", S(("A", "<. (/) , (/) >."), ("B", j), ("F", fmap))));
+        Proof beta = Beta(ctx3, pr.Apply("eqid", S(("A", fmap))), "x", "_V", "<. 1o , <. (/) , <. x , (/) >. >. >.", inner, Exists(ctx3, inner), fmap);
+        Proof innerIn = Hyp(ctx3, Phi(j))!.Value;
+        (Proof eqSucc, _, _) = Unfold(ctx3, Token(succ)!, [inner], (_, dom) => dom == natText ? innerIn : pr.Apply("eleqtrd", S(("ph", ctx3), ("A", inner), ("B", natText), ("C", dom)), innerIn, AlphaIn(ctx3, natText, dom)));
+        if (Rhs(eqSucc) != Rhs(beta))
+        {
+            throw new Refused($"Nat.succ's value came out as {Rhs(eqSucc)}, not {Rhs(beta)}");
+        }
+        Proof sIn = ConstAppMem(new PCtx { Ph = ctx3 }, succ, [inner], natText);
+        Proof toSucc = _d.Trans(_d.Trans(frs, beta), _d.Symm(eqSucc));
+        Proof stepIn = pr.Apply("eqeltrd", S(("ph", ctx3), ("A", $"( {LitMap} ` suc {j} )"), ("B", Rhs(toSucc)), ("C", natText)), toSucc, sIn);
+        Proof ex1 = pr.Apply("ex", S(("ph", $"( {ta} /\\ {j} e. _om )"), ("ps", Phi(j)), ("ch", Phi($"suc {j}"))), stepIn);
+        Proof ex2 = pr.Apply("ex", S(("ph", ta), ("ps", $"{j} e. _om"), ("ch", $"( {Phi(j)} -> {Phi($"suc {j}")} )")), ex1);
+        Proof stepP = pr.Apply("com12", S(("ph", ta), ("ps", $"{j} e. _om"), ("ch", $"( {Phi(j)} -> {Phi($"suc {j}")} )")), ex2);
+        Proof every = pr.Apply("finds2", S(("x", k), ("y", j), ("ph", Phi(k)), ("ps", Phi("(/)")), ("ch", Phi(j)), ("th", Phi($"suc {j}")), ("ta", ta)),
+            Sub("(/)"), Sub(j), Sub($"suc {j}"), baseP, stepP);
+        Proof all = pr.Apply("ralrimiv", S(("ph", ta), ("x", k), ("A", "_om"), ("ps", Phi(k))),
+            pr.Apply("com12", S(("ph", $"{k} e. _om"), ("ps", ta), ("ch", Phi(k))), every));
+        // At a class A: rspcv.
+        string ph0 = $"( {ta} /\\ A e. _om )";
+        Proof allA = pr.Apply("adantr", S(("ph", ta), ("ps", $"A. {k} e. _om {Phi(k)}"), ("ch", "A e. _om")), all);
+        Proof aOm = pr.Apply("simpr", S(("ph", ta), ("ps", "A e. _om")));
+        Proof rsp = pr.Apply("rspcv", S(("x", k), ("A", "A"), ("B", "_om"), ("ph", Phi(k)), ("ps", Phi("A"))), Sub("A"));
+        Proof r = pr.Apply("mpd", S(("ph", ph0), ("ps", $"A. {k} e. _om {Phi(k)}"), ("ch", Phi("A"))), allA, _d.Syl(aOm, rsp));
+        EmitLemma("lean-litnat", "Every value of the literal map on _om is in Nat: Nat literals of any size are in Nat.", r);
+    }
+
+    /// <summary>( c.Ph -> ⟦n⟧ e. ⟦Nat⟧ ) for a literal of any size: ⟦n⟧ = ( LitMap ` ( `' OfnumMap ` N ) ), by lean-litnat.</summary>
+    private Proof BigLitMem(PCtx c, System.Numerics.BigInteger value, string natText)
+    {
+        EnsureLitNat(natText);
+        string lit = TrIn(c, t.Nat(value)), num = Decimal(value);
+        string o = $"( `' {OfnumMap} ` {num} )";
+        Proof l1 = pr.Apply("fveq1i", S(("F", "lean.Nat.-lit"), ("G", LitMap), ("A", $"( lean.Nat.-ofnum ` {num} )")), Cite("df-lean.Nat.-lit"));
+        Proof l2 = pr.Apply("fveq2i", S(("F", LitMap), ("A", $"( lean.Nat.-ofnum ` {num} )"), ("B", o)), OfnumIs(num));
+        Proof toMap = pr.Apply("eqtri", S(("A", lit), ("B", $"( {LitMap} ` ( lean.Nat.-ofnum ` {num} ) )"), ("C", $"( {LitMap} ` {o} )")), l1, l2);
+        Proof inst = ApplyId("lean-litnat", S(("U", "U"), ("A", o)));
+        Proof both = _d.Jca(Hyp(c.Ph, UHyp) ?? throw new Refused("no universe hypothesis"), _d.Lift(c.Ph, OfnumOm(value)));
+        return pr.Apply("eqeltrd", S(("ph", c.Ph), ("A", lit), ("B", $"( {LitMap} ` {o} )"), ("C", natText)), _d.Lift(c.Ph, toMap), _d.Syl(both, inst));
+    }
+
+    /// <summary>A Nat literal is in Nat: as Nat.zero or Nat.succ of the literal before it, or past 10 by lean-litnat.</summary>
     private Typed LitMemImpl(PCtx c, NatLit lit)
     {
+        if (lit.Value > 10)
+        {
+            Expr natE = t.Const(t.Of("Nat"), []);
+            string nt = TrIn(c, natE);
+            return new Typed(BigLitMem(c, lit.Value, nt), nt, natE);
+        }
         Expr nat = t.Const(t.Of("Nat"), []);
         (Expr ctor, Proof eq) = LitToCtor(c, lit.Value);
         Typed m = MemOf(c, ctor);

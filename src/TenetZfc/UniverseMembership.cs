@@ -176,19 +176,22 @@ public sealed partial class Model
                 return LevelIn(d.Ph, C(0), k);
             case "cfv" when pr.Parse("class", C(1).Split(' ')) is { Rule.Label: "crdg" } rdg:
                 return StageIn(d, x, rdg, C(0), g);
-            case "ciun":
+            case "ciun" or "cixp" when !lowered:
                 {
                     string v = C(0), dom = C(1), body = C(2);
                     if (d.Ph.Split(' ').Contains(v))
                     {
-                        throw new Refused($"the union's variable {v} occurs in the hypotheses");
+                        // The hypotheses bind the same letter: rename it apart (cbviunv, cbvixpv).
+                        string v2 = FreshFor(d.Ph, x, g);
+                        string x2 = $"{(n.Rule.Label == "ciun" ? "U_" : "X_")} {v2} e. {dom} {SubstFree(body, v, v2)}";
+                        return pr.Apply("eqeltrd", S(("ph", d.Ph), ("A", x), ("B", x2), ("C", g)), AlphaIn(d.Ph, x, x2), UnivMem(d, x2, g));
                     }
                     Proof domIn = UnivMem(d, dom, g);
                     PCtx e = EnterText(d, v, dom);
                     Proof bodyIn = UnivMem(e, body, g);
                     Proof all = pr.Apply("ralrimiva", S(("ph", d.Ph), ("ps", $"{body} e. {g}"), ("x", v), ("A", dom)), bodyIn);
                     return _d.Syl(pr.Apply("3jca", S(("ph", d.Ph), ("ps", $"{g} e. Univ"), ("ch", $"{dom} e. {g}"), ("th", $"A. {v} e. {dom} {body} e. {g}")), Univ(), domIn, all),
-                        pr.Apply("gruiun", S(("U", g), ("x", v), ("A", dom), ("B", body))));
+                        pr.Apply(n.Rule.Label == "ciun" ? "gruiun" : "gruixp", S(("U", g), ("x", v), ("A", dom), ("B", body))));
                 }
         }
         // A constant (a type former) applied: its typing lemma, then each argument.
@@ -212,6 +215,27 @@ public sealed partial class Model
             Proof tyIn = ty == "2o" ? UnivMem(d, "2o", g) : LevelIn(d.Ph, pr.Render(pr.Parse("class", ty.Split(' '))!.Children[0]), k);
             return GruEl(d.Ph, k, ty, x, tyIn, cur);
         }
+        // A value of a function into G: F e. ( G ^m D ) and a e. D (elmapi, ffvelcdmd).
+        if (n.Rule.Label == "cfv")
+        {
+            string fn = C(1), arg = C(0);
+            foreach ((Proof p, string h) in Facts(d))
+            {
+                if (!h.StartsWith($"{fn} e. ( {g} ^m ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                string map = h[(fn.Length + 4)..];
+                string fdom = pr.Render(pr.Parse("class", map.Split(' '))!.Children[1]);
+                Proof? aIn = TryHyp(d, $"{arg} e. {fdom}") ?? HypAlpha(d, arg, fdom);
+                if (aIn is not Proof ai)
+                {
+                    continue;
+                }
+                Proof isF = _d.Syl(p, pr.Apply("elmapi", S(("A", fn), ("B", g), ("C", fdom))));
+                return pr.Apply("ffvelcdmd", S(("ph", d.Ph), ("F", fn), ("A", fdom), ("B", g), ("C", arg)), isF, ai);
+            }
+        }
         // A member of something that is itself in G (G is transitive).
         foreach ((Proof p, string h) in Facts(d))
         {
@@ -232,6 +256,27 @@ public sealed partial class Model
             }
         }
         throw new Refused($"no proof yet that {x} is in the universe {g}");
+    }
+
+    /// <summary>( d.Ph -> ( ( lean.c ` U ) ` a1 ) … e. dom ), by c's typing lemma and each argument's membership.</summary>
+    private Proof ConstAppMem(PCtx d, Name head, List<string> cargs, string dom)
+    {
+        (string label, string cty) = ConstTyLemma(head);
+        Proof cur = _d.Syl(Hyp(d.Ph, UHyp) ?? throw new Refused("no universe hypothesis"), ApplyId(label, S(("U", "U"))));
+        string f = $"( {Token(head)} ` U )", ty = cty;
+        foreach (string a in cargs)
+        {
+            SyntaxTree tn = pr.Parse("class", ty.Split(' '))!;
+            if (tn.Rule.Label is not ("co" or "cixp"))
+            {
+                throw new Refused($"applying {head}, whose type {ty} isn't a function type");
+            }
+            string adom = pr.Render(tn.Children[1]);
+            Proof aIn = TryHyp(d, $"{a} e. {adom}") ?? HypAlpha(d, a, adom) ?? TextMem(d, a, adom);
+            (cur, ty) = ApplyText(d.Ph, cur, f, ty, a, aIn);
+            f = $"( {f} ` {a} )";
+        }
+        return ty == dom ? cur : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", f), ("B", ty), ("C", dom)), cur, AlphaIn(d.Ph, ty, dom));
     }
 
     /// <summary>
@@ -429,7 +474,43 @@ public sealed partial class Model
             Proof df = pr.Apply("df2o3", S());
             return _d.Lift(d.Ph, pr.Apply("eleqtrri", S(("A", "(/)"), ("B", "{ (/) , 1o }"), ("C", "2o")), pr.Apply("prid1", S(("A", "(/)"), ("B", "1o")), pr.Apply("0ex", S())), df));
         }
+        if (ConstApp(x) is (Name head, List<string> cargs) && cargs.Count > 0)
+        {
+            // A proposition former applied (Bool.Reflects b p): through its typing lemma, argument by argument.
+            return ConstAppMem(d, head, cargs, "2o");
+        }
         throw new Refused($"no proof yet that {x} is a proposition");
+    }
+
+    /// <summary>The value of a Nat literal's text, ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` N ) ) with N a decimal, or null.</summary>
+    private static System.Numerics.BigInteger? LitOfText(string x)
+    {
+        const string pre = "( lean.Nat.-lit ` ( lean.Nat.-ofnum ` ", post = " ) )";
+        if (!x.StartsWith(pre, StringComparison.Ordinal) || !x.EndsWith(post, StringComparison.Ordinal))
+        {
+            return null;
+        }
+        // Decimal's inverse: a digit, or ; D d.
+        var toks = x[pre.Length..^post.Length].Split(' ');
+        int i = 0;
+        System.Numerics.BigInteger? Num()
+        {
+            if (i >= toks.Length)
+            {
+                return null;
+            }
+            string tok = toks[i++];
+            if (tok.Length == 1 && char.IsAsciiDigit(tok[0]))
+            {
+                return tok[0] - '0';
+            }
+            if (tok != ";" || Num() is not System.Numerics.BigInteger hi || i >= toks.Length || toks[i].Length != 1 || !char.IsAsciiDigit(toks[i][0]))
+            {
+                return null;
+            }
+            return hi * 10 + (toks[i++][0] - '0');
+        }
+        return Num() is System.Numerics.BigInteger v && i == toks.Length ? v : null;
     }
 
     /// <summary>( d.Ph -> x e. dom ) by the texts alone: a level of the tower, or a map into one (fmpt, mptelixpg).</summary>
@@ -439,6 +520,20 @@ public sealed partial class Model
         SyntaxTree xn = pr.Parse("class", x.Split(' '))!;
         if (xn.Rule.Label != "cmpt" || dn.Rule.Label is not ("co" or "cixp"))
         {
+            bool level = dom == "2o" || dn.Rule.Label == "cfv" && pr.Render(dn.Children[1]) == "U" && OrdinalIndex(pr.Render(dn.Children[0])) >= 0;
+            if (!level && LitOfText(x) is System.Numerics.BigInteger lv)
+            {
+                // A Nat literal, ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` N ) ), as an argument (OfNat.ofNat Nat 2 _):
+                // in Nat by its constructor form, as the literal itself is.
+                Typed lm = LitMem(d, (NatLit)t.Nat(lv));
+                return lm.Ty == dom ? lm.P : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", x), ("B", lm.Ty), ("C", dom)), lm.P, AlphaIn(d.Ph, lm.Ty, dom));
+            }
+            if (!level && ConstApp(x) is (Name head, List<string> cargs))
+            {
+                // Not a type in a universe but a term of an ordinary type (an instance, instLTNat : LT Nat): typed
+                // through its constant's typing lemma, argument by argument.
+                return ConstAppMem(d, head, cargs, dom);
+            }
             return UnivMem(d, x, dom);
         }
         string v = pr.Render(xn.Children[0]), vd = pr.Render(xn.Children[1]), body = pr.Render(xn.Children[2]);
