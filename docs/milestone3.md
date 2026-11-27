@@ -619,9 +619,9 @@ Since tower mode makes structurally recursive definitions mean what Lean means, 
 - **Nested blocks.** `Monomorph` now also instantiates a nested block's auxiliary recursors: `Rose.rec_1` becomes `Rose.{0}.rec_1`, beside `Rose.{0}.rec`.
 - **`nat-bridge`** runs in the tower and proves `Nat.add`'s computation rules, so `⟦Nat.add⟧ = +` has no hypotheses left ([bridges.md](bridges.md#natadds-computation-rules-proved)).
 - **`model-survey`** monomorphizes each definition at level 0 before translating it (below).
-- **`--single-universe`** (anywhere on the command line) gives the old model. Quotients and `Classical.choice` still need it: `QuotLiftIota` and `ChoiceSpec` are written for one universe (a well-ordering of `U`, `Quot`'s relation over `U`), so in the tower they are refused with that reason. CI translates `axioms.ndjson` with `--single-universe`. `--tower` is still accepted, and does nothing.
+- **`--single-universe`** (anywhere on the command line) gives the old model, kept for comparison. Quotients and `Classical.choice` needed it until they were brought into the tower ([below](#quotients-and-choice-in-the-tower-built)). `--tower` is still accepted, and does nothing.
 
-Every fixture CI translates (`model`, `ind`, `props`, `rec`, `tree`, `natle`, `setvars`, `strings`, `mutual`; `axioms` in the one-universe model) passes metamath-exe, mmverify.py and mmj2's `definitionCheck` in tower mode. One instance is refused that the one-universe model translated: the computation rule of `Eq.refl.{0}` and `HEq.refl.{0}`, equality of proofs, whose field is a proof (`no hypothesis (/) e. A`). At `Eq.{1}` both translate.
+Every fixture CI translates (`model`, `ind`, `props`, `rec`, `tree`, `natle`, `setvars`, `strings`, `mutual`, and since quotients and choice moved into the tower, `axioms`) passes metamath-exe, mmverify.py and mmj2's `definitionCheck` in tower mode. One instance is refused that the one-universe model translated: the computation rule of `Eq.refl.{0}` and `HEq.refl.{0}`, equality of proofs, whose field is a proof (`no hypothesis (/) e. A`). At `Eq.{1}` both translate.
 
 ### `model-survey` in the tower
 
@@ -667,6 +667,66 @@ $)
 - **Levels used** counts the tower's levels that some definition names, `( U ` k )` for Lean's `Type k`. One level means one universe, the first, which contains ω. Here `outParam.{2}`, the identity on `Type 1` that marks an output parameter of a class, names the second level, so the output uses two. A definition counts when it uses the level directly; one that only uses other constants needs what they need.
 - **The whole tower** appears where a level is left open: a recursor's motive level (one recursor serves every elimination level), and a structure that a projection names. A projection carries no universe levels, so its structure isn't monomorphized; that structure, and what its type uses (here `outParam`), is translated with its parameters ranging over the whole tower.
 - A one-universe output says instead that it has the hypothesis `U e. Univ`, and that structurally recursive definitions collapse in it.
+
+### Quotients and choice in the tower (built)
+
+Quotients and `Classical.choice` were written for one universe: `Quot`'s relation over `U`, and a well-ordering of `U`. They are now in the tower, so every output uses the one model, and no CI fixture needs `--single-universe`.
+
+**Quotients, at each level.** Monomorphization makes `Quot.{k}`, `Quot.mk.{k}` and `Quot.lift.{k,l}`, and each is defined at its levels. The least equivalence relation is one helper for every level: its α ranges over the tower's union, `U. ran u`, as `Quot`'s own type says before monomorphization.
+
+```
+df-lean.Quot.-eqv $a |- lean.Quot.-eqv = ( u e. lean.-tower |-> ( x e. U. ran u |-> ( y e. ( ( 2o ^m x ) ^m x ) |->
+    ( ( x X. x ) i^i |^| { a e. ~P ( x X. x ) | ( { <. b , c >. | ( ( b e. x /\ c e. x ) /\ (/) e. ( ( y ` b ) ` c ) ) } C_ a /\ a Er x ) } ) ) ) ) $.
+df-lean.Quot.u1 $a |- lean.Quot.{1} = ( u e. lean.-tower |-> ( x e. ( u ` (/) ) |-> ( y e. ( ( 2o ^m x ) ^m x ) |->
+    ( x /. ( ( ( lean.Quot.-eqv ` u ) ` x ) ` y ) ) ) ) ) $.
+```
+
+- **Level 0.** `Quot.{0}` is a quotient of a proposition, itself a proposition. The classes of `1o` would be `{ 1o }`, which isn't in `2o`, so `Quot α r` is `α` itself. `Quot.mk.{0}` is then a proof, `(/)`, and `Quot.lift.{0,l}` is `f`.
+- **`Quot.lift`'s `h`** is a proposition in the tower, `if ( A. v e. x (/) e. if ( … ) , 1o , (/) )`, not a set of functions. The computation rule reads it by instantiating each `A.` (`rspcv`, so no `$d` ties the bound variable to the context).
+- **The computation rule** `Quot.lift f h (Quot.mk r a) = f a` is proved for `Quot.lift.{k,l}` with `Quot.mk.{k}`, `k, l ≥ 1`. Unfolding the helper at `A e. ( U ` k )` needs `A e. U. ran U`, which the tower gives (`( U ` k ) C_ U. ran U`).
+- **`$d` lists.** The tower lemmas bring in `lean.-tower`'s bound variable `n`, so the rule's and choice's `$d` lists now also take what their proofs need (`DistinctVars.Required`).
+
+**Typing, for theorems.** The theorem translator types each constant by a lemma. The quotient's lemmas, for `k ≥ 1` and at level 0:
+
+| Constant | Typing |
+|---|---|
+| `Quot.{k}` | `( A /. R ) e. ( U ` j )`: it is inside `~P A` (`qsss`, since `R` is an equivalence relation), which is in the universe (`grupw`, `gruss`) |
+| `Quot.mk.{k}` | `[ C ] R e. ( A /. R )` (`ecelqsw`), and `( A /. R )` is `⟦Quot r⟧` |
+| `Quot.lift.{k,l}` | the lift is a function (`qliftfund`, because of `h`, as for the rule), from the classes to `β` (`qliftf`), so it is in `( β ^m ⟦Quot r⟧ )` (`elmapg`) |
+| `Quot.ind.{k}` | a proof, so its statement must hold: `q` is a class `[ z ] R` of some `z` in `α` (`elqsi`); the hypothesis at `z` gives `β (Quot.mk r z)`, and `Quot.mk r z` unfolds to `[ z ] R`, that is `q` (`rexlimdva`) |
+
+The computation rule is also a conversion step, as a recursor's rule at a constructor is, so `Quot.liftBeta`, which Lean proves by `rfl`, goes through. `theorem` now takes levels in a name, as `define` does: `'Quot.inductionOn.{1}'`. CI proves `Quot.inductionOn`, `Quot.exists_rep`, `Quot.liftBeta` and `Quot.indBeta` at level 0, and `Quot.inductionOn.{1}`, `Quot.liftBeta.{1,1}` and `Quot.indBeta.{1}` (`quotthm.ndjson`). `Quot.exists_rep.{1}` gets past every quotient lemma, and stops at `Exists.intro.{1}`, a constructor of a proposition with a data field, which the translator doesn't type yet.
+
+**Choice, from one well-ordering of the tower's union.** `Classical.choice.{k}` takes a well-ordering `W` of `U. ran u`, not one per level. The union holds every level's types, and one parameter keeps the definitions as they were: a constant that depends on choice gets one layer after the universe's, `( v e. ~P ( U. ran u X. U. ran u ) |-> … )`.
+
+```
+df-lean.Classical.choice.u1 $a |- lean.Classical.choice.{1} = ( u e. lean.-tower |-> ( v e. ~P ( U. ran u X. U. ran u ) |->
+    ( x e. ( u ` (/) ) |-> ( y e. ( ( lean.Nonempty.{1} ` u ) ` x ) |-> ( iota_ z e. x A. w e. x -. w v z ) ) ) ) ) $.
+```
+
+Choice picks an element given `W We U. ran U`: `α` is in its level, which is transitive, so `α C_ ( U ` k ) C_ U. ran U`, and `W` has a unique least element on it (`wereu`). `Classical.choice.{0}`, choice of a proof, is itself a proof, `(/)`. The definitions pass the definition check.
+
+Each output that uses choice says so in its header, after the universes:
+
+```
+Choice: Classical.choice is the least element in a well-ordering W of U. ran U, the tower's union, so one
+well-ordering serves every level. ZFC defines no global choice function, so W is a parameter (as set.mm's hta
+emulates Hilbert's epsilon): each constant below takes W e. ~P ( U. ran U X. U. ran U ) after U, and a theorem that
+needs choice to pick an element has the hypothesis W We U. ran U. ZFC proves such a W exists (weth), so no axiom is added.
+Constants that take W: Classical.choice.{1}, Classical.propDecidable.
+```
+
+**Checked:** CI translates `axioms.ndjson` in the tower (`propext`, `Quot.{1}`, `Quot.mk.{1}`, `Quot.ind.{1}`, `Quot.lift.{1,1}` with its computation rule, `Quot.{0}`, `Quot.lift.{0,1}`, `Classical.choice.{1}` with its spec, `Classical.choose.{1}`, `Classical.propDecidable`), and the one-universe version beside it for comparison. Both outputs, and the quotient theorems, pass metamath-exe, mmverify.py and `scripts/check-definitions`.
+
+**Not yet:** a theorem whose proof uses choice. The translator would need a well-ordering hypothesis in the theorem's statement.
+
+**`model-survey` in the tower, after this change:** on Lean 4.36's `Init`, **14,091 of 17,590 definitions** translate with everything they use. No definition stops at a quotient or at `Classical.choice` any more; before, 95 were counted first under those two reasons. The earlier figure, 14,105, was measured before the refusal of definitions too large for mmj2's definition check (from the Init-wide run), which now stops at least 105 among the 25 most common reasons. So the two runs aren't on the same code, and the difference isn't attributed to this change. The first reasons now:
+
+| Definitions | First reason |
+|---|---|
+| 1,300 or more | a name with characters a `set.mm` token can't hold (`'`, `?`, `₂`) |
+| 268 | `Acc.intro`: a premise that is a function into the type |
+| 105 or more | a definition larger than mmj2's definition check can hold |
 
 ### How a theorem is proved
 

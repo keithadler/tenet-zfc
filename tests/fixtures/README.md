@@ -1,6 +1,6 @@
 # Fixtures
 
-The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadler/tenet, `tests/fixtures`), which say how each was made, except `quot.ndjson`, `syntax.ndjson`, `gate.ndjson`, `lenapp.ndjson`, `tree.ndjson`, `mutual.ndjson`, `strings.ndjson` and `axioms.ndjson`, made here with [leanout](https://github.com/keithadler/leanout):
+The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadler/tenet, `tests/fixtures`), which say how each was made, except `quot.ndjson`, `syntax.ndjson`, `gate.ndjson`, `lenapp.ndjson`, `tree.ndjson`, `mutual.ndjson`, `strings.ndjson`, `axioms.ndjson` and `quotthm.ndjson`, made here with [leanout](https://github.com/keithadler/leanout):
 
 | Export | Lean | Format |
 |---|---|---|
@@ -14,6 +14,7 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `tree.ndjson` | 4.36.0 | `Tree.lean` (here), compiled with `lean -o Tree.olean Tree.lean` and exported with `leanout Tree -- Tree.rec`: a binary tree, whose `node` has two recursive fields |
 | `strings.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.origin String.instInhabited instToStringBool`): definitions with string literals, and `String.ofList`, `Char.ofNat` and what they use |
 | `axioms.ndjson` | 4.36.0 | leanout (`leanout Init -- Quot.lift Quot.ind propext Classical.choice Classical.choose Classical.propDecidable`): the quotient block, Init's two axioms, and definitions that use choice |
+| `quotthm.ndjson` | 4.36.0 | leanout (`leanout Init -- Quot.inductionOn Quot.exists_rep Quot.liftBeta Quot.indBeta Quot.liftOn`): theorems about the quotient, for `tenet-zfc theorem` in the tower |
 | `mutual.ndjson` | 4.36.0 | `Mutual.lean` (here), compiled with `lean -o Mutual.olean Mutual.lean` and exported with `leanout Mutual -- Tm.rec Args.rec Rose.rec Rose.rec_1`: a mutual block (`Tm`, `Args`) and a nested type (`Rose`, holding a `List (Rose α)`) |
 | `syntax.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Syntax`): the nested inductive `Lean.Syntax` (it holds an `Array Syntax`) with its 272 dependencies; the same file as Tenet's `tests/fixtures/nested/Lean.Syntax.ndjson` |
 | `setvars.ndjson` | 4.36.0 | leanout (`leanout Init -- Lean.Grind.Config.casesOn Lean.Meta.Simp.Config.zeta`): two definitions that need more set variables than set.mm's 26 letters |
