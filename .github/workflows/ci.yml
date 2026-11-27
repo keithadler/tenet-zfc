@@ -231,7 +231,7 @@ jobs:
           if grep -qP '\t(error|crash|timeout)\t' "$RUNNER_TEMP"/thmall/chunk-*.tsv; then exit 1; fi
           proved=$(cat "$RUNNER_TEMP"/thmall/chunk-*.tsv | grep -cP '\tproved\t')
           echo "proved: $proved of 23"
-          [ "$proved" -ge 16 ] || exit 1
+          [ "$proved" -ge 18 ] || exit 1
           scripts/verify-all -j 2 "$RUNNER_TEMP/thmall"
           scripts/summarize-all "$RUNNER_TEMP/thmall"
       # Every output above passed all three checks; keep them, for the release workflow to attach.

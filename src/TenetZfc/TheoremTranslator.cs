@@ -1579,7 +1579,7 @@ public sealed partial class Model
     private Proof ConvText(PCtx c, Expr a, string at, Expr b, string bt)
     {
         using var prof = Prof.Time("ConvText");
-        Proof p1 = AlphaTo(c, at, TrIn(c, a));
+        Proof p1 = TextAlpha(c, at, TrIn(c, a));
         // Each conversion the typing asks for gets its own fuel (conversions nest through the typing of binders).
         if (_convDepth == 0)
         {
@@ -1595,8 +1595,51 @@ public sealed partial class Model
         {
             _convDepth--;
         }
-        Proof p3 = AlphaTo(c, TrIn(c, b), bt);
+        Proof p3 = TextAlpha(c, TrIn(c, b), bt);
         return _d.Trans(_d.Trans(p1, p2), p3);
+    }
+
+    /// <summary>
+    /// ( ph -> x = y ) for texts equal up to bound names after beta steps on either side's head: a membership's type
+    /// text may be a motive applied, ( ( y e. ( lean.Bool ` U ) |-> 2o ) ` X ), where the Lean type is already reduced
+    /// (Nat.succ_ne_zero). The argument's membership in the map's domain is shown from the text (TextMem).
+    /// </summary>
+    private Proof TextAlpha(PCtx c, string x, string y)
+    {
+        try
+        {
+            return AlphaTo(c, x, y);
+        }
+        catch (Refused) when (TextBeta(c, x) is Proof bx)
+        {
+            return _d.Trans(bx, TextAlpha(c, Rhs(bx), y));
+        }
+        catch (Refused) when (TextBeta(c, y) is Proof by)
+        {
+            return _d.Trans(TextAlpha(c, x, Rhs(by)), _d.Symm(by));
+        }
+    }
+
+    /// <summary>( ph -> ( ( v e. D |-> B ) ` X ) = B[X/v] ), or null when the text isn't such a redex or X's membership can't be shown.</summary>
+    private Proof? TextBeta(PCtx c, string text)
+    {
+        SyntaxTree? n = pr.Parse("class", text.Split(' '));
+        if (n is not { Rule.Label: "cfv" } || n.Children[1].Rule.Label != "cmpt")
+        {
+            return null;
+        }
+        string f = pr.Render(n.Children[1]), arg = pr.Render(n.Children[0]);
+        SyntaxTree m = n.Children[1];
+        string v = pr.Render(m.Children[0]), dom = pr.Render(m.Children[1]), body = pr.Render(m.Children[2]);
+        try
+        {
+            Proof argIn = TryHyp(c, $"{arg} e. {dom}") ?? HypAlpha(c, arg, dom) ?? TextMem(c, arg, dom);
+            return BetaShadowed(c.Ph, pr.Apply("eqid", S(("A", f))), v, dom, body, arg, argIn, f);
+        }
+        catch (Refused)
+        {
+            return null;
+        }
     }
 
     /// <summary>( ph -> x = y ) for texts equal up to the names of bound variables.</summary>
