@@ -234,6 +234,12 @@ jobs:
           [ "$proved" -ge 18 ] || exit 1
           scripts/verify-all -j 2 "$RUNNER_TEMP/thmall"
           scripts/summarize-all "$RUNNER_TEMP/thmall"
+          # Theorems the Init sample's blockers stopped, fixed since (docs/milestone3.md, "Theorems across Init"): $d traps
+          # under binders (Nat.succ_mul, maxOn_eq_minOn), Decidable's proof field, literals past 10 (Char.ext), and
+          # Nat.le's constructors. Every one must prove.
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem-all tests/fixtures/blockers.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/blk" --chunk-size 16 --budget 120
+          if grep -vqP '\tproved\t|^name\t' "$RUNNER_TEMP"/blk/chunk-*.tsv; then cat "$RUNNER_TEMP"/blk/chunk-*.tsv; exit 1; fi
+          scripts/verify-all -j 2 "$RUNNER_TEMP/blk"
       # Every output above passed all three checks; keep them, for the release workflow to attach.
       - name: Collect the verified outputs
         run: |
