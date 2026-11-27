@@ -47,7 +47,7 @@ metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `
 | 1 | **Trace** | Replaying Tenet's trace re-derives every check it made, on all of Lean core | ✅ 64,045 declarations, 86 million steps, 0 failures |
 | 2 | **Bridge library** | `2 + 2 = 4` and `List.length_append` translate, and both verifiers accept them | ✅ verified in CI |
 | 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 definitions mostly done; 28 `Init` theorems proved through the model |
-| 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 started: the first plain-ZFC theorem, `Nat.add_zero` as `( A + 0 ) = A`, from Lean's proof with no universe hypothesis and no `ax-groth` ([docs/milestone4.md](docs/milestone4.md)) |
+| 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 started: the first plain-ZFC theorems, `Nat.add_zero` and `Nat.zero_add` as `( A + 0 ) = A` and `( 0 + A ) = A`, from Lean's proof with no universe hypothesis and no `ax-groth` ([docs/milestone4.md](docs/milestone4.md)) |
 | 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | not started |
 
 ### What works today

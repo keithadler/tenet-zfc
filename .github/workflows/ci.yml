@@ -159,7 +159,12 @@ jobs:
           echo "$out" | tail -2
           if echo "$out" | grep -q '?Error'; then exit 1; fi
           (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" natzfc.mm)
-          scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" lean-zfc-Nat.add_zero lean-wit-tw
+          scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" lean-zfc-Nat.add_zero
+          scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" --axioms-only lean-wit-tw
+          # The check must catch a universe hypothesis: the restatement before the discharge still has one.
+          if scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" lean-nn0-Nat.add_zero; then exit 1; fi
+          # ...and a use of ax-groth: set.mm's inaex (inaccessibles exist) is proved from it.
+          if scripts/check-axioms "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP/mm/setmm/natzfc.mm" --axioms-only inaex; then exit 1; fi
       - name: Prove the List/Word bridge and verify
         run: |
           dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- list-bridge tests/fixtures/library.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/listbridge.mm" --bridge-only

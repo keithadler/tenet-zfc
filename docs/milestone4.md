@@ -2,10 +2,11 @@
 
 Every output of milestone 3 holds under a hypothesis, `U e. lean.-tower`: `U` is an increasing ω-sequence of Grothendieck universes, the first containing ω. ZFC doesn't prove that such a tower exists (it needs inaccessible cardinals), so the results are "ZFC plus universes", not ZFC. Milestone 4 removes the hypothesis from theorems that don't really need it ([spec](spec.md#universe-elimination)).
 
-This document says which universe facts the outputs use, which of them plain ZFC proves, how the tower is replaced by sets ZFC proves exist, and how the final theorem is stated with no hypothesis. The first part is built: **`Nat.add_zero` comes out in plain ZFC**, as
+This document says which universe facts the outputs use, which of them plain ZFC proves, how the tower is replaced by sets ZFC proves exist, and how the final theorem is stated with no hypothesis. The first part is built: **`Nat.add_zero` and `Nat.zero_add` come out in plain ZFC**, as
 
 ```
 lean-zfc-Nat.add_zero $p |- ( A e. NN0 -> ( A + 0 ) = A ) $= … $.
+lean-zfc-Nat.zero_add $p |- ( A e. NN0 -> ( 0 + A ) = A ) $= … $.
 ```
 
 proved from Lean's proof term through the model, with no universe hypothesis and no `ax-groth`, accepted by metamath-exe, mmverify.py and mmj2's `definitionCheck` (`nat-bridge --lowered`, below).
@@ -73,7 +74,7 @@ for a third definition,
 df-lean.-wit $a |- lean.-wit = ( n e. _om |-> ( R1 ` ( _om .o ( _om .o suc n ) ) ) ) $.
 ```
 
-`R1` at the limit ordinals ω²·(n+1), ω² ω³-style ordinals written with `set.mm`'s ordinal multiplication. The lemmas:
+`R1` at the limit ordinals ω·(ω·(n+1)) = ω²·(n+1), written with `set.mm`'s ordinal multiplication. The lemmas:
 
 | Lemma | Statement | From |
 |---|---|---|
@@ -104,11 +105,13 @@ When `U` does occur in the statement (`A e. ( lean.Nat ` U )`), discharging stil
 
 ### Checking for `ax-groth`
 
-`scripts/check-axioms <metamath> <out.mm> <label>…` runs metamath-exe's `show trace_back <label> /axioms`, which lists every axiom a theorem rests on through every theorem it uses, so a use of `ax-groth` anywhere below (through `grothtsk`, `inaex`, …) shows as `ax-groth`. It fails if `ax-groth` is listed, or if the statement still mentions `U`, `lean.-tower`, `lean.-wtower`, `Univ` or `WUni`. CI runs it on `lean-zfc-Nat.add_zero` and `lean-wit-tw`. For `lean-zfc-Nat.add_zero` the list is
+`scripts/check-axioms <metamath> <out.mm> <label>…` runs metamath-exe's `show trace_back <label> /axioms`, which lists every axiom a theorem rests on through every theorem it uses, so a use of `ax-groth` anywhere below (through `grothtsk`, `inaex`, …) shows as `ax-groth`. It fails if `ax-groth` is listed, or if the statement still mentions `U`, `lean.-tower`, `lean.-wtower`, `Univ` or `WUni`. CI runs it on `lean-zfc-Nat.add_zero`, and with `--axioms-only` on `lean-wit-tw` (which names the tower by design). It also checks the check: it must fail on `lean-nn0-Nat.add_zero` (the restatement before the discharge, which has the hypothesis) and on `set.mm`'s `inaex` (proved from `ax-groth`). For `lean-zfc-Nat.add_zero` the list is
 
-AXIOMS_PLACEHOLDER
+```
+ax-1 ax-10 ax-11 ax-12 ax-1cn ax-1ne0 ax-1rid ax-2 ax-3 ax-4 ax-5 ax-6 ax-7 ax-8 ax-9 ax-addass ax-addcl ax-addrcl ax-cnex ax-cnre ax-distr ax-ext ax-gen ax-i2m1 ax-icn ax-inf2 ax-mp ax-mulass ax-mulcl ax-mulcom ax-mulrcl ax-nul ax-pow ax-pr ax-pre-ltadd ax-pre-lttri ax-pre-lttrn ax-pre-mulgt0 ax-reg ax-rep ax-resscn ax-rnegex ax-rrecex ax-sep ax-un
+```
 
-ZFC with choice's axioms as `set.mm` states them, and the complex-number axioms (`ax-1cn` …, which `set.mm` proves from ZFC's construction of the reals: they are theorems `axcnex`, `ax1cn`… restated as axioms for convenience); no `ax-groth`.
+the axioms of ZF as `set.mm` states them (not even choice, `ax-ac`), and the complex-number axioms (`ax-1cn` …, which `set.mm` proves from ZFC's construction of the reals: they are theorems `axcnex`, `ax1cn`… restated as axioms for convenience); no `ax-groth`.
 
 Note that the tower outputs never used `ax-groth` either: the tower was a hypothesis, not an axiom. What changes is that the hypothesis is now discharged.
 
@@ -124,21 +127,39 @@ What reflection can't lower is a proof that uses a universe as a set closed unde
 
 ## The per-output report
 
-Each output's header (from milestone 3) now says whether its theorems are plain ZFC. A lowered output says that its lemmas assume `U e. lean.-wtower`, that ZFC proves a lowered tower exists (`lean-wit-tw`), how indexed unions were bounded, and lists the plain-ZFC theorems. The header of `nat-bridge … Nat.add_zero --lowered`:
+Each output's header (from milestone 3) now says whether its theorems are plain ZFC. A lowered output says that its lemmas assume `U e. lean.-wtower`, that ZFC proves a lowered tower exists (`lean-wit-tw`), how indexed unions were bounded, and lists the plain-ZFC theorems. The header of `nat-bridge … Nat.add_zero Nat.zero_add --lowered` (then the levels used, by declaration, as in milestone 3):
 
 ```
-HEADER_PLACEHOLDER
+Assumptions (the universe analysis of docs/spec.md).
+Universes: lowered (docs/milestone4.md). Lemmas have the hypothesis U e. lean.-wtower: U is an increasing
+omega-sequence of reflecting weak universes (lean.-wuni: weak universes containing, with each member x, the
+weak universe R1 at rank x + omega), the first containing omega, and Lean's Sort (k+1) is ( U ` k ). ZFC
+proves such a tower exists: lean-wit-tw, for lean.-wit = R1 at the limit ordinals omega^2 (n + 1). So a
+theorem whose statement doesn't mention U holds outright: the universe hypothesis is discharged.
+No ax-groth: weak universes are closed under pairs, unions, power sets and function spaces, which ZF proves;
+indexed unions, which they lack, were bounded (by a product of the components' sets, or, for a recursive
+type's stages, by R1 at rank 0 + omega, a member of every level: the reflection step).
+Plain ZFC (no universe hypothesis, no ax-groth; scripts/check-axioms checks both): 
+  lean-zfc-Nat.add_zero (Nat.add_zero), lean-zfc-Nat.zero_add (Nat.zero_add).
 ```
 
 A Grothendieck-tower output says instead that none of its theorems is plain ZFC, and points to `--lowered`. A lowered run that meets an indexed union it can't bound is refused with the declaration and the union, for example `no bound yet for the union body … in a weak universe (milestone 4: an indexed union needs reflection)`: that is the list of declarations that need a universe, and why.
 
 ## Measurements
 
-MEASURE_PLACEHOLDER
+On an Apple-silicon Mac shared with other long jobs (so wall times are inflated; CPU times are the comparable figure):
+
+| Run | `$p` statements | Output | CPU |
+|---|---|---|---|
+| `nat-bridge … 2 4 256 Nat.add_zero` (Grothendieck tower) | 101 | 0.79 MB | 17 s |
+| `nat-bridge … 2 Nat.add_zero --lowered` | 111 | 0.80 MB | 17 s |
+| `nat-bridge … 2 4 256 Nat.add_zero Nat.zero_add --lowered` | 135 | 1.30 MB | 37 s (0.39 GB peak) |
+
+Lowering costs nothing measurable: the closure lemmas swap one for one, and the two bounded unions are a few steps each. The witness lemmas are proved once per output, nine theorems of 1 to 31 steps each before sharing. `Nat.zero_add` (induction through `Nat.brecOn` into `Prop`) lowered with no further change, as `lean-zfc-Nat.zero_add`: `|- ( A e. NN0 -> ( 0 + A ) = A )`. All three outputs pass metamath-exe, mmverify.py and mmj2's `definitionCheck`.
 
 ## Order of work
 
-1. **Done:** the lowered tower, weak-universe closure, the two bounded unions, the ZFC witness, `Discharge`, `check-axioms` in CI, the header; `Nat.add_zero` in plain ZFC.
+1. **Done:** the lowered tower, weak-universe closure, the two bounded unions, the ZFC witness, `Discharge`, `check-axioms` in CI, the header; `Nat.add_zero` and `Nat.zero_add` in plain ZFC.
 2. Recursive types with parameters (`lean-wu-r` at the parameters), then `list-bridge --lowered`: `List.length_append` as `ccatlen`, with a witness above the alphabet (case 3 above).
 3. `--lowered` for `theorem`, `define` and `define-all`, and a survey: how many of `Init`'s definitions and of the 28 library theorems lower, and the first reasons for the rest.
 4. The reflection theorem schema, proved once in `set.mm`, and per-theorem witnesses for unions over type families (case 2).
