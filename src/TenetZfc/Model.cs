@@ -1658,7 +1658,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         hyps.AddRange(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}"));
         hyps.AddRange(fieldProps.Select(p => $"(/) e. {p}"));
         string ph = Conj(hyps.Distinct());
-        Proof Pick(string h) => Hyp(ph, h) ?? throw new Refused($"no hypothesis {h}");
+        Proof Pick(string h) => Hyp(ph, h) ?? HypUpToRenaming(ph, h, hyps) ?? throw new Refused($"no hypothesis {h}");
 
         var allArgs = recArgs.Concat(indices).Append("(/)").ToList();
         Proof ArgIn(int i, string dom)
@@ -1735,7 +1735,8 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
                         ? _d.Congruence("wff", Subst(body, x, "Z"), "Z", pr.Apply("simpr", S(("ph", ph), ("ps", $"{x} = (/)"))))
                         : _d.BiRefl($"( {ph} /\\ {x} = (/) )", body);
                     return pr.Apply("rspcedvd", S(("ph", ph), ("x", x), ("A", "(/)"), ("B", dom), ("ps", body), ("ch", inst)),
-                        Hyp(ph, $"(/) e. {dom}") ?? throw new Refused($"no hypothesis (/) e. {dom}"), sub, ProveWff(ph, inst));
+                        Hyp(ph, $"(/) e. {dom}") ?? HypUpToRenaming(ph, $"(/) e. {dom}", Conjuncts(ph)) ?? throw new Refused($"no hypothesis (/) e. {dom}"),
+                        sub, ProveWff(ph, inst));
                 }
         }
         throw new Refused($"can't prove {w} yet");
