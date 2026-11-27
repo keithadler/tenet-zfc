@@ -12,7 +12,7 @@ theorem infinitude_of_primes (n : Nat) : ∃ p, n < p ∧ Prime p
 
 It is the candidate for milestone 5 because `set.mm` proves the same fact independently (`infpn`), with a statement of the same shape, so the translated theorem can meet a hand-written one, as `List.length_append` meets `ccatlen`.
 
-**Written for the translator.** Core's `Nat` and `∣` only; structural recursion (the prime-factor lemma inducts on a bound instead of using well-founded recursion); proofs as plain terms with `induction` and `cases`, and no `omega`, `decide` or `simp`. Lean 4.36 accepts it, on the axioms `propext`, `Classical.choice` and `Quot.sound`: the excluded middle decides whether a number is prime, and the rest come from core's lemmas.
+**Written for the translator.** Core's `Nat` and `∣` only; structural recursion (the prime-factor lemma inducts on a bound instead of using well-founded recursion); proofs as plain terms with `induction`, `cases` and `rw`, and no `omega`, `decide` or `simp`. Classical reasoning is `Classical.em` alone: core's `Classical.not_forall` and `Classical.not_imp` go through `Decidable` instances built from `Classical.choice`, which is choice used as data, so the two facts needed are proved in the file from the excluded middle (`not_forall`, `not_imp`). Lean 4.36 accepts it, on the axioms `propext`, `Classical.choice` and `Quot.sound`; the translator proves `Classical.em`'s statement in the model directly, where a proposition is a member of `2o`.
 
 **Its dependency cone**, exported with `leanout Primes -o primes.ndjson -- Headline.infinitude_of_primes`:
 
