@@ -10,13 +10,13 @@ Lean checks proofs in a dependent type theory. Most mathematicians name ZFC set 
 
 The translator itself is not trusted. If it makes a mistake, the verifiers reject the output.
 
-**Where it stands** (v0.1.0, released 27 November 2026; about 60% of the way to the goal):
+**Where it stands** (v0.1.0 released 27 November 2026; about 65% of the way to the goal):
 
-- **80% of the definitions in Lean core's `Init`** (14,091 of 17,590) translate together with everything they use.
-- **28 Lean theorems** about `Nat` and `List` are proved from their own proof terms, and all three checkers accept every one.
-- **Lean's `List.length_append` comes out as `set.mm`'s `ccatlen`**, next to `set.mm`'s hand-written proof of the same statement.
+- **98.5% of the definitions in Lean core's `Init`** (17,329 of 17,590) translate with their equations checked by the verifiers, in a complete run on GitHub's runners. 80% (14,091) translate *together with everything they use*, which is what a theorem needs.
+- **Lean theorems proved from their own proof terms**, each accepted by all three checkers: a starter library of 28 about `Nat` and `List`, and 114 of the 146 theorems that the infinitude of primes depends on.
+- **Lean's `List.length_append` comes out as `set.mm`'s `ccatlen`**, next to `set.mm`'s hand-written proof of the same statement. Lean's `+` and `*` on `Nat` are proved to be `set.mm`'s `+` and `x.`.
 - **Two theorems are in plain ZFC** so far. Everything else still assumes a tower of universes as a hypothesis ([Limits](#limits)).
-- **In progress:** the infinitude of primes, end to end ([examples/Primes.lean](examples/Primes.lean)). On a development branch, 5 of its 8 lemmas now go through the translator; they have not been through the Metamath verifiers yet ([Roadmap](#roadmap)).
+- **In progress:** the infinitude of primes, end to end ([examples/Primes.lean](examples/Primes.lean)). 114 of the 146 theorems it rests on are proved and checked; of the file's own lemmas, `fact_pos` is. The gap list is in [docs/milestone5.md](docs/milestone5.md).
 
 ```
 lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
@@ -50,15 +50,15 @@ metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `
 
 ## Status
 
-**About 60% of the way to the goal.** [v0.1.0](https://github.com/keithadler/tenet-zfc/releases/tag/v0.1.0) is released: the first version someone else can install and run on their own Lean code. Milestones 1 and 2 are done. Milestone 3 has most of Lean core's definitions and a first library of theorems; what it lacks is a measurement of how many of core's theorems go through. Milestones 4 and 5 are started.
+**About 65% of the way to the goal.** [v0.1.0](https://github.com/keithadler/tenet-zfc/releases/tag/v0.1.0) is released: the first version someone else can install and run on their own Lean code. Milestones 1 and 2 are done. Milestone 3 has nearly all of Lean core's definitions and a first measurement of its theorems; what it lacks is the measured share of all of core's theorems, and the constructs that stop the rest. Milestones 4 and 5 are started.
 
 | | Milestone | Gate | Status |
 |---|---|---|---|
 | 1 | **Trace** | Replaying Tenet's trace re-derives every check it made, on all of Lean core | ✅ 64,045 declarations, 86 million steps, 0 failures |
 | 2 | **Bridge library** | `2 + 2 = 4` and `List.length_append` translate, and both verifiers accept them | ✅ verified in CI |
-| 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 about 75%: 80% of `Init`'s definitions translate; 28 `Init` theorems proved through the model; the share of `Init`'s 45,588 theorems that goes through is not measured yet |
+| 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 about 80%: 98.5% of `Init`'s definitions translate with verified equations; theorems are proved from their proof terms, 114 of 146 in the primes proof's cone and 27% of a first sample of `Init` before the latest fixes; the share of all 45,588 is being measured |
 | 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 about 15%: the first plain-ZFC theorems, `Nat.add_zero` and `Nat.zero_add` as `( A + 0 ) = A` and `( 0 + A ) = A`, from Lean's proof with no universe hypothesis and no `ax-groth` ([docs/milestone4.md](docs/milestone4.md)) |
-| 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | 🚧 about 15%: the candidate is the infinitude of primes in core Lean ([examples/Primes.lean](examples/Primes.lean)); all the definitions it uses translate; on a development branch 5 of its 8 lemmas go through the translator, not yet checked by the verifiers; the main theorem doesn't yet |
+| 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | 🚧 about 20%: the candidate is the infinitude of primes in core Lean ([examples/Primes.lean](examples/Primes.lean)); all 169 definitions it uses translate; 114 of the 146 theorems it rests on are proved and pass all three checkers; four of the file's five lemmas, the main theorem among them, don't go through yet ([docs/milestone5.md](docs/milestone5.md)) |
 
 ### What works today
 
@@ -81,9 +81,9 @@ metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `
 | more than 20 arguments | class variables the output declares itself (`AA1`, …) | computation rules |
 | names with `'`, `?`, `₂`, `_@`, `«»` | escaped one-to-one into tokens and labels: `List.map'` is `lean.List.map-q` | |
 
-On Lean 4.36's `Init`, `model-survey` counts **14,091 of 17,590 definitions (80%)** translating together with everything they use, in the tower model with quotients and choice, up from 48 when milestone 3 began. Since names are escaped and `Acc` is in the model, the latest Init-wide run translated, emitted and verified **16,565 of the 17,000 constants** in the 34 of its 40 chunks that finished, up from 13,553 in the same chunks. That includes **14,366 of 14,769 definitions (97%)** and 653 computation rules, and 33 of the 34 chunks pass all three checkers ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-again-built)).
+On Lean 4.36's `Init`, a complete run on GitHub's runners translates **17,329 of 17,590 definitions (98.5%)** with verified equations: all 40 chunks, 19,618 equations and 670 computation rules, and no theorem rejected by a checker ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-on-githubs-runners-built)). `model-survey` counts **14,091 (80%)** translating *together with everything they use*, in the tower model with quotients and choice, up from 48 when milestone 3 began. The two numbers measure different things: a definition can translate on its own while something it uses is still refused, and a theorem needs the second.
 
-> **A caveat on these counts.** A code review after v0.1.0 found that the script totalling a run could count a theorem in a *failed* chunk as verified ([#17](https://github.com/keithadler/tenet-zfc/pull/17) fixes it). Chunks that passed all three checkers are counted correctly, which is 33 of the 34 here. The totals will be re-run with the fixed script and all 40 chunks, and replaced.
+> **A caveat on these counts.** A code review after v0.1.0 found that the script totalling a run could count a theorem in a *failed* chunk as verified ([#17](https://github.com/keithadler/tenet-zfc/pull/17) fixed it). The complete run above was totalled before that fix. 39 of its 40 chunks passed all three checkers, and those are counted correctly. The other, chunk 31, passed metamath-exe and mmverify.py and stopped in mmj2's definition check, on an error since fixed ([#23](https://github.com/keithadler/tenet-zfc/pull/23)); its constants are included in the total, and it has not been re-checked by mmj2 after the fix.
 
 **Theorems.** `tenet-zfc theorem` proves Lean theorems from their own proof terms, through the model. A proof's typing becomes membership, `(/) e. ⟦P⟧`, and each conversion becomes an equation.
 
@@ -96,7 +96,7 @@ A starter library of **28 `Init` theorems about `Nat` and `List`** is proved thi
 
 Two are refused, each with its reason: `Nat.succ_ne_zero` and `Nat.le_refl`. Sizes, times and reasons are in [docs/milestone3.md](docs/milestone3.md#results-a-starter-library).
 
-**Bridges.** The model's `List A` is proved to be `set.mm`'s `Word A`, by a bijection taking nil to `(/)` and `cons a l` to `( <" a "> ++ l )`, with `List.length` as `#` and `List.append` (Lean's `++`) as `set.mm`'s `++`; through it, Lean's `List.length_append` is `set.mm`'s `ccatlen` (above). The model's `Nat` is proved to be `set.mm`'s `NN0`: zero to `0`, `succ` to `+ 1`, literals to numerals, and `⟦Nat.add⟧` to `+`, with no hypotheses but the universe tower's. Lean's `Nat.add_zero` and `Nat.zero_add`, proved through the model, come out as `( A + 0 ) = A` and `( 0 + A ) = A` in `set.mm`'s arithmetic. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. See [docs/bridges.md](docs/bridges.md).
+**Bridges.** The model's `List A` is proved to be `set.mm`'s `Word A`, by a bijection taking nil to `(/)` and `cons a l` to `( <" a "> ++ l )`, with `List.length` as `#` and `List.append` (Lean's `++`) as `set.mm`'s `++`; through it, Lean's `List.length_append` is `set.mm`'s `ccatlen` (above). The model's `Nat` is proved to be `set.mm`'s `NN0`: zero to `0`, `succ` to `+ 1`, literals to numerals, `⟦Nat.add⟧` to `+` and `⟦Nat.mul⟧` to `x.`, with no hypotheses but the universe tower's. Lean's `Nat.add_zero` and `Nat.zero_add`, proved through the model, come out as `( A + 0 ) = A` and `( 0 + A ) = A` in `set.mm`'s arithmetic. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. See [docs/bridges.md](docs/bridges.md).
 
 **Proof size.** Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
 
