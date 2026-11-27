@@ -16,6 +16,12 @@ The first version meant for someone else to install and use: independently check
 - **CI**: the tool is packed, installed and run on Linux, macOS and Windows; the README's worked example (`tests/fixtures/Example.lean`) runs end to end, Lean to checked output.
 - `CHANGELOG.md` and `CONTRIBUTING.md`.
 
+### The headline demo: `List.length_append` as `ccatlen`
+
+- **The `List`/`Word` bridge** (`tenet-zfc list-bridge`, [docs/bridges.md](docs/bridges.md#list-and-word)): a proved bijection `W` from the model's `List A` onto `set.mm`'s `Word A`, nil to `(/)` and `cons a l` to `( <" a "> ++ ( W ` l ) )`; `List.length` is `#` and `List.append` and `HAppend.hAppend` are `++` through it, with `List.length`'s and `List.append`'s computation rules proved from their definitions.
+- **Two independent proofs of one ZFC statement**: Lean's `List.length_append`, proved through the model from its proof term and restated through the bridges, is `lean-ccatlen`, whose consequent is `set.mm`'s `ccatlen` token for token; `lean-ccatlen-setmm` proves the same statement from `set.mm`'s hand-written `ccatlen`. All three checkers accept both.
+- **`scripts/demo`** ([docs/demo.md](docs/demo.md)) runs it end to end with sizes and times, plus sabotage checks (a corrupted proof step, `+` changed to `x.`, a broken Lean proof), each rejected. CI runs it weekly and by hand (job `demo`); the bijection alone is checked on every push.
+
 ### Milestone 3: the full kernel (in progress)
 
 **The generic model** (`src/TenetZfc/Model.cs`, [docs/milestone3.md](docs/milestone3.md)) gives every Lean constant a `set.mm` definition computed from Lean's own, with no hand-written table, and proves its equations and computation rules. Every definition passes mmj2's `definitionCheck`.

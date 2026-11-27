@@ -19,7 +19,14 @@ public sealed partial class Model
     /// ( hypotheses -> ⟦l⟧ = ⟦r⟧ ) for (l, r) = sides(the free variables), over binders of the given closed types,
     /// whose texts are A, B, C, …. Tower mode only, on a monomorphized environment.
     /// </summary>
-    public (MmExpr Statement, List<string> Proof) ProveDefEq(IReadOnlyList<Expr> binderTypes, Func<IReadOnlyList<Expr>, (Expr L, Expr R)> sides)
+    public (MmExpr Statement, List<string> Proof) ProveDefEq(IReadOnlyList<Expr> binderTypes, Func<IReadOnlyList<Expr>, (Expr L, Expr R)> sides) =>
+        ProveDefEq(binderTypes.Select(b => (Func<IReadOnlyList<Expr>, Expr>)(_ => b)).ToList(), sides);
+
+    /// <summary>
+    /// As <see cref="ProveDefEq(IReadOnlyList{Expr}, Func{IReadOnlyList{Expr}, ValueTuple{Expr, Expr}})"/>, with each binder's
+    /// type computed from the free variables before it (List.length's α : Type, then l : List α).
+    /// </summary>
+    public (MmExpr Statement, List<string> Proof) ProveDefEq(IReadOnlyList<Func<IReadOnlyList<Expr>, Expr>> binderTypes, Func<IReadOnlyList<Expr>, (Expr L, Expr R)> sides)
     {
         if (!tower)
         {
@@ -35,8 +42,9 @@ public sealed partial class Model
         {
             Expr fv = t.FVar(_fresh++);
             ulong id = ((FVar)fv).Id;
-            string dom = TrIn(c, binderTypes[k]);
-            c.Types[id] = binderTypes[k];
+            Expr ty = binderTypes[k](fvs);
+            string dom = TrIn(c, ty);
+            c.Types[id] = ty;
             c.Vars[id] = ClassVars[k];
             hyps.Add($"{ClassVars[k]} e. {dom}");
             pending.Add((id, $"{ClassVars[k]} e. {dom}"));
@@ -73,4 +81,14 @@ public sealed partial class TheoremTranslator
     /// <summary>( hypotheses -> ⟦l⟧ = ⟦r⟧ ) for a definitional equation, as <see cref="Model.ProveDefEq"/>.</summary>
     public (MmExpr Statement, List<string> Proof) ProveDefEq(IReadOnlyList<Expr> binderTypes, Func<IReadOnlyList<Expr>, (Expr L, Expr R)> sides) =>
         _model.ProveDefEq(binderTypes, sides);
+
+    /// <summary>As <see cref="Model.ProveDefEq(IReadOnlyList{Func{IReadOnlyList{Expr}, Expr}}, Func{IReadOnlyList{Expr}, ValueTuple{Expr, Expr}})"/>: dependent binder types.</summary>
+    public (MmExpr Statement, List<string> Proof) ProveDefEq(IReadOnlyList<Func<IReadOnlyList<Expr>, Expr>> binderTypes, Func<IReadOnlyList<Expr>, (Expr L, Expr R)> sides) =>
+        _model.ProveDefEq(binderTypes, sides);
+}
+
+public sealed partial class Model
+{
+    /// <summary>|- a = b for two class texts that differ only in the names of their bound variables (Alpha.cs).</summary>
+    public Proof AlphaEq(string a, string b) => AlphaClosed(a, b);
 }

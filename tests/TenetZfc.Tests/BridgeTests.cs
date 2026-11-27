@@ -50,6 +50,25 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    public void ListIsWordThroughTheBridgeAndVerifies()
+    {
+        if (SetMm is null)
+        {
+            return;
+        }
+        // The bijection alone (docs/bridges.md, "List and Word"); the restatement of List.length_append as ccatlen
+        // runs in CI's demo job (scripts/demo).
+        var (text, proved) = ListBridge.Emit(Fixture("library.ndjson"), Path.Combine(SetMm, "set.mm"), [], bridgeOnly: true);
+        var by = proved.ToDictionary(p => p.Label, p => p.Statement.ToString());
+        string h = ListBridge.H0, l = ListBridge.L, w = ListBridge.W;
+        Assert.Equal($"|- ( {h} -> {w} : {l} -1-1-onto-> Word A )", by["lean-list-wf1o"]);
+        Assert.Equal($"|- ( {h} -> ( {w} ` <. (/) , (/) >. ) = (/) )", by["lean-list-wnil"]);
+        Assert.Equal($"|- ( ( ( {h} /\\ B e. A ) /\\ C e. {l} ) -> ( {w} ` {ListBridge.Cons("B", "C")} ) = ( <\" B \"> ++ ( {w} ` C ) ) )", by["lean-list-wcons"]);
+        Assert.DoesNotContain(text.Split('\n'), x => x.Contains(" $a |-") && !x.TrimStart().StartsWith("df-lean.", StringComparison.Ordinal));
+        Verify(text, "listbridge");
+    }
+
+    [Fact]
     public void InTheOneUniverseModelNatAddCollapsesAndItsRulesAreHypotheses()
     {
         if (SetMm is null)

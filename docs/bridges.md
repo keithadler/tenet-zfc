@@ -1,4 +1,4 @@
-# Bridge theorems: the model's `Nat` is `NN0`
+# Bridge theorems: the model's `Nat` is `NN0`, and its `List` is `Word`
 
 Milestone 3's model gives every Lean constant a `set.mm` definition computed from Lean's own (see [milestone3.md](milestone3.md)). A theorem translated through the model is about the model's sets: `lean.Nat`, `lean.Nat.succ`, `lean.Nat.add`. A reader wants it in `set.mm`'s own vocabulary: `NN0`, `+`, decimal numerals. Bridge theorems connect the two.
 
@@ -132,9 +132,65 @@ The rest of the chain is not machine-checked. `brecOn`'s motive is `PProd (motiv
 
 `StatementTranslator` and `Bridge.cs` stay as they are, because milestone 2's emitter still uses them. The generic route now exists for `Nat` equations: a theorem proved through the model is restated with the rows above (`NatBridge.Restate`, previous section). `lean-nat-2p2e4-iff` is the same restatement done by hand for a closed equation.
 
+## `List` and `Word`
+
+`tenet-zfc list-bridge <export.ndjson> <set.mm> <out.mm> [<theorem>...]` (`ListBridge.cs`) proves that the model's `List A` is `set.mm`'s `Word A`, and restates each theorem named (`List.length_append`) in `set.mm`'s words. The export must contain `List.length`, `List.append` and `Nat.add` (`tests/fixtures/library.ndjson`). With `--bridge-only` it proves the bijection alone, in seconds; CI checks that on every push. [demo.md](demo.md) runs it end to end, with the sabotage checks.
+
+### The bridge map
+
+The model's `List A`, at a universe `U` and a type `A e. ( U ` (/) )`, is `L = ( ( lean.List.{0} ` U ) ` A )`: the union of an ω-chain of stages of tagged tuples, where
+- nil is `<. (/) , (/) >.`;
+- `cons a l` is `<. 1o , <. (/) , <. a , <. l , (/) >. >. >. >.`;
+- stage `k + 1` is stage `k`, nil, and `cons a l` for every `a e. A` and `l` in stage `k`.
+
+The bridge `W` is built alongside the stages, by recursion on ω over graphs:
+
+```
+W = U_ n e. _om ( rec ( G , (/) ) ` n )
+G = ( r e. _V |-> ( s e. ( { nil } u. U_ b e. A U_ t e. dom r { cons b t } )
+                     |-> if ( s = nil , (/) , ( <" ( head s ) "> ++ ( r ` ( tail s ) ) ) ) ) )
+```
+
+`head s` and `tail s` are the tuple's projections, `( 1st ` ( 2nd ` ( 2nd ` s ) ) )` and `( 1st ` ( 2nd ` ( 2nd ` ( 2nd ` s ) ) ) )`. Stage `k` of `W` is a function on stage `k` of `L`: it takes nil to the empty word and `cons a l` to `( <" a "> ++ ( W ` l ) )`. `W` is a term in `set.mm`'s notation over the model's constants, not a new definition.
+
+### What is proved
+
+`H` is `( U e. lean.-tower /\ A e. ( U ` (/) ) )`; `len`, `app`, `hApp` and `+N` are the model's `List.length`, `List.append`, `HAppend.hAppend` at `List`'s instances, and `Nat.add`; `F` is the `Nat` bridge.
+
+| Label | Statement | Meaning |
+|---|---|---|
+| `lean-list-wf1o` | `( H -> W : L -1-1-onto-> Word A )` | `W` is a bijection from the model's `List A` onto `Word A` |
+| `lean-list-wnil` | `( H -> ( W ` nil ) = (/) )` | nil is the empty word |
+| `lean-list-wcons` | `( ( ( H /\ B e. A ) /\ C e. L ) -> ( W ` ( cons B C ) ) = ( <" B "> ++ ( W ` C ) ) )` | `cons` is "prepend a letter" |
+| `lean-list-len-nilm`, `-consm` | `len nil = Nat.zero`, `len ( cons B C ) = Nat.succ ( len C )` | `List.length`'s computation rules, proved from its definition (`ProveDefEq`) |
+| `lean-list-app-nilm`, `-consm` | `app nil B = B`, `app ( cons B C ) D = cons B ( app C D )` | `List.append`'s |
+| `lean-list-flen` | `( ( H /\ B e. L ) -> ( F ` ( len B ) ) = ( # ` ( W ` B ) ) )` | **`⟦List.length⟧` is `#`** |
+| `lean-list-wapp` | `( ( ( H /\ B e. L ) /\ C e. L ) -> ( W ` ( app B C ) ) = ( ( W ` B ) ++ ( W ` C ) ) )` | **`⟦List.append⟧` is `++`** |
+| `lean-list-whapp` | the same for `hApp`, Lean's `++` on lists | `HAppend.hAppend` through `instHAppendOfAppend` and `List.instAppend` is `++` |
+| `lean-thm-List.length_append` | `( ( ( H /\ B e. L ) /\ C e. L ) -> (/) e. ⟦(B ++ C).length = B.length + C.length⟧ )` | Lean's theorem, from its proof term ([milestone3.md](milestone3.md#results-a-starter-library)) |
+| `lean-list-List.length_append-model` | `( … -> ( len ( app B C ) ) = ( ( +N ` ( len B ) ) ` ( len C ) ) )` | the same, with `Eq` as `=` and the instances unfolded |
+| `lean-list-List.length_append` | `( … -> ( # ` ( ( W ` B ) ++ ( W ` C ) ) ) = ( ( # ` ( W ` B ) ) + ( # ` ( W ` C ) ) ) )` | through `W` and `F` |
+| `lean-word-List.length_append` | `( H -> ( ( S e. Word A /\ T e. Word A ) -> ( # ` ( S ++ T ) ) = ( ( # ` S ) + ( # ` T ) ) ) )` | for words: substitute `W`'s inverse |
+| `lean-ccatlen` | `( ( U e. lean.-tower /\ ( A e. ( U ` (/) ) /\ B e. ( U ` (/) ) ) ) -> ( ( S e. Word A /\ T e. Word B ) -> ( # ` ( S ++ T ) ) = ( ( # ` S ) + ( # ` T ) ) ) )` | **the headline**: its consequent is `set.mm`'s `ccatlen`, token for token |
+| `lean-ccatlen-setmm` | the same statement | proved from `set.mm`'s own `ccatlen` (`a1i`) |
+
+`lean-ccatlen` and `lean-ccatlen-setmm` are one ZFC statement with two unrelated proofs: one translated from Lean's proof term of `List.length_append`, through the model and the bridges, and one from `set.mm`'s hand-written proof of `ccatlen`. Neither uses the other. `ccatlen` allows two alphabets; `lean-ccatlen` gets them from `lean-word-List.length_append` at their union, which is in the same universe (`gruun`), since a word over `A` is a word over `( A u. B )` (`sswrd`).
+
+The hypothesis `U e. lean.-tower` is the one every tower-mode theorem has: ZFC doesn't prove that a tower of universes exists, so the statement holds in every model of ZFC that has one. `A e. ( U ` (/) )` says the alphabet is a type of Lean's `Type`, a member of the tower's first universe.
+
+### How it is proved
+
+1. **The stages.** `lean-list-stagesuc` unfolds the model's step (`rdgsuc`, the step's definition, projections out of its argument).
+2. **`W`'s step.** `lean-list-gsuc`: stage `k + 1` of `W` is `G` at stage `k`. `G`'s binders are renamed first (`lean-list-gf2`, `cbvmptv`, `cbviunv`) so that the lemmas about `G` at a graph `R` can be used at a stage of `W`, whose text contains `G`'s own binders. Every lemma carries only the `$d` conditions its proof needs, for the same reason.
+3. **Each stage is one-to-one into `Word A`** (`lean-list-mpf1`, induction): nil goes to `(/)`, a cons to a nonempty word (`ccat0`, `s1nz`), and `( <" a "> ++ w ) = ( <" a' "> ++ w' )` gives `a = a'` and `w = w'` (`ccatopth`, `s111`), so the tails are equal by the stage before (`f1fveq`).
+4. **The stages form a chain** (`lean-list-gmono`, `lean-list-gss`, with `ordtri2or2`), so their union is one-to-one (`f1iun`). Its domain is the union of the model's stages (`lean-list-gdm`, two inductions), so `W : L -1-1-> Word A`.
+5. **Onto**, by induction on a word's length (`nn0ind`): a nonempty word is its first letter, then the rest (`pfxcctswrd`, `pfx1`, `swrdlen`), and the rest is `W` of some list by induction.
+6. **`List.length` and `List.append`.** Their computation rules are proved from their definitions by `ProveDefEq`, as `Nat.add`'s are. Then induction over the model's `List`, by its stages (`ListInd`: `finds` over the stages, cases nil and cons): `F ( len l ) = # ( W l )` (with `lean-nat-fzero`, `lean-nat-fsucc`, `ccatlen`, `s1len`), and `W ( app l C ) = ( W l ++ W C )` (with `ccatlid`, `ccatass`). Each induction carries "stays in `Nat`" or "stays in `List`" with the equation, as `Nat.add`'s does.
+7. **The restatement** (`ListBridge.Restate`): `Eq` is `=` (`lean-Eq.u1-eq`, `lean-prop`); the statement's two sides unfold to `len ( app B C )` and `+N ( len B ) ( len C )` (`ProveDefEq`); `F` takes `+N` to `+` (`lean-nat-natadd`); `W` and `F` take the rest to `#` and `++`; and for words `S` and `T`, `( `' W ` S )` is a list with `W ( `' W ` S ) = S` (`f1ocnvfv2`).
+
 ## Not yet
 
-- **`List` and `Word`.** The bijection from `( ( lean.List.{0} ` U ) ` A )` onto `Word A`, with `length` as `#` and `append` as `++`, and `List.length_append` restated as `ccatlen`. The method carries over: a map defined by recursion, proved bijective by induction over the stages. Lists have a parameter and two fields per `cons`, so the proofs are longer. In tower mode `List.length` and `List.append` satisfy their computation rules, so, unlike before, nothing blocks it but the work; `ProveDefEq` proves the rules as it does `Nat.add`'s.
+- **More `List` theorems restated.** `list-bridge` restates theorems of the shape of `List.length_append`. Others in the starter library (`List.append_assoc` as `ccatass`, `List.append_nil` as `ccatrid`, `List.length_map` as `lenco`) need the same steps with `List.map` through `W` (`o.` on words).
 - **Literal arithmetic.** `Nat.add` on two literals would need `set.mm`'s `decadd` toolkit for multi-digit numerals. The bridge reduces the kernel's GMP steps to it: `lean-nat-lit-n` and `lean-nat-add` together turn `lit a + lit b = lit c` into `a + b = c` in `NN0`.
 
 ## The proof kit

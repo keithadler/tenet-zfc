@@ -17,6 +17,19 @@ lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
 
 *Lean's `theorem two_add_two : 2 + 2 = 4 := rfl`, from its kernel trace, as a `set.mm` theorem. metamath-exe and mmverify.py both accept it, in CI, on every push.*
 
+### The headline demo: one statement, two independent proofs
+
+Lean's `List.length_append`, translated from its proof term through tenet-zfc's model and the proved `List`/`Word` bridge, comes out as `set.mm`'s own theorem `ccatlen`, which `set.mm` proves by hand:
+
+```
+lean-ccatlen        $p |- ( ( U e. lean.-tower /\ ( A e. ( U ` (/) ) /\ B e. ( U ` (/) ) ) ) ->
+                          ( ( S e. Word A /\ T e. Word B ) -> ( # ` ( S ++ T ) ) = ( ( # ` S ) + ( # ` T ) ) ) )
+lean-ccatlen-setmm  $p   (the same statement, from set.mm's ccatlen)
+ccatlen             $p |- ( ( S e. Word A /\ T e. Word B ) -> ( # ` ( S ++ T ) ) = ( ( # ` S ) + ( # ` T ) ) )
+```
+
+metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `+` changed to `x.` in the statement, and a broken Lean proof are each rejected. `scripts/demo` runs it all, from the Lean source to the checkers' verdicts, in about 10 minutes; [docs/demo.md](docs/demo.md) has the commands and output. The hypotheses are the universe tower's, which every tower-mode theorem has (see [Limits](#limits)).
+
 ---
 
 ## Why it matters
@@ -68,7 +81,7 @@ A starter library of **28 `Init` theorems about `Nat` and `List`** is proved thi
 
 Two are refused, each with its reason: `Nat.succ_ne_zero` and `Nat.le_refl`. Sizes, times and reasons are in [docs/milestone3.md](docs/milestone3.md#results-a-starter-library).
 
-**Bridges.** The model's `Nat` is proved to be `set.mm`'s `NN0`: zero to `0`, `succ` to `+ 1`, literals to numerals, and `⟦Nat.add⟧` to `+`, with no hypotheses but the universe tower's. Lean's `Nat.add_zero` and `Nat.zero_add`, proved through the model, come out as `( A + 0 ) = A` and `( 0 + A ) = A` in `set.mm`'s arithmetic. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. See [docs/bridges.md](docs/bridges.md).
+**Bridges.** The model's `List A` is proved to be `set.mm`'s `Word A`, by a bijection taking nil to `(/)` and `cons a l` to `( <" a "> ++ l )`, with `List.length` as `#` and `List.append` (Lean's `++`) as `set.mm`'s `++`; through it, Lean's `List.length_append` is `set.mm`'s `ccatlen` (above). The model's `Nat` is proved to be `set.mm`'s `NN0`: zero to `0`, `succ` to `+ 1`, literals to numerals, and `⟦Nat.add⟧` to `+`, with no hypotheses but the universe tower's. Lean's `Nat.add_zero` and `Nat.zero_add`, proved through the model, come out as `( A + 0 ) = A` and `( 0 + A ) = A` in `set.mm`'s arithmetic. Lean's `2 + 2 = 4`, read in the model, is proved equivalent to `set.mm`'s `( 2 + 2 ) = 4`. See [docs/bridges.md](docs/bridges.md).
 
 **Proof size.** Proofs are written in Metamath's compressed format, sharing repeated subproofs. The largest outputs shrink by up to about 40 times compared with flat proofs.
 
@@ -93,7 +106,7 @@ v0.1 is the first version someone else can install and use to get independently 
 **Soundness and trust**
 - [x] Tower mode as the default, so that structurally recursive definitions mean what Lean means. Quotients and choice still need `--single-universe`.
 - [x] The bridge `⟦Nat.add⟧ = +` proved without hypotheses, and `Nat.add_zero`/`Nat.zero_add` restated as `( A + 0 ) = A` and `( 0 + A ) = A`
-- [ ] The same for `List`/`Word`, `length`/`#` and `++`, with `List.length_append` restated as `ccatlen`
+- [x] The same for `List`/`Word`, `length`/`#` and `++`, with `List.length_append` restated as `ccatlen`: two independent proofs of one ZFC statement, and sabotage checks ([docs/demo.md](docs/demo.md))
 - [x] Each output's header states its assumptions: which universes it uses, and which declarations need them
 - [ ] Quotients and choice in the tower model
 
@@ -266,6 +279,7 @@ docs/                  spec, design and status
 
 - [docs/spec.md](docs/spec.md): goals, architecture, milestones and risks
 - [docs/milestone3.md](docs/milestone3.md): the generic model, step by step, with measurements
+- [docs/demo.md](docs/demo.md): the headline demo, `List.length_append` as `ccatlen`, with sabotage checks
 - [docs/bridges.md](docs/bridges.md): bridge theorems from the model to `set.mm`'s vocabulary
 - [docs/interpretation.md](docs/interpretation.md): milestone 2's interpretation and the universe question
 - [docs/trace-format.md](docs/trace-format.md): Tenet's trace format, and what replay checks
