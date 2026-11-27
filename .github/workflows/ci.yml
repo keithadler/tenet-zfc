@@ -201,7 +201,7 @@ jobs:
           raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
           curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
           for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
-          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natzfc thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natzfc listbridge thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
       # The Init-wide run (docs/milestone3.md) in miniature: define-all on a small export, in two chunks, and
       # scripts/verify-all with all three checkers. The full run on Init is too big for CI.
       - name: define-all and verify-all on a small export (milestone 3 at scale)
@@ -228,9 +228,10 @@ jobs:
           path: ${{ runner.temp }}/verified
 
   # The whole starter library, the heavy theorems included (induction with large motives: Nat.succ_add,
-  # List.length_append, List.append_assoc, ...), checked by all three checkers. By hand (workflow_dispatch) and weekly.
+  # List.length_append, List.append_assoc, ...), checked by all three checkers. By hand (workflow_dispatch), weekly,
+  # and on a release tag, so a release is never cut without it.
   theorem-library:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -277,9 +278,9 @@ jobs:
 
   # The headline demo (docs/demo.md): Lean's List.length_append through the model and the List/Word bridge, restated
   # as set.mm's ccatlen next to set.mm's own proof, checked by all three checkers; then the sabotage checks (a corrupted
-  # proof step, + changed to x., a broken Lean proof), each of which must be rejected. By hand and weekly.
+  # proof step, + changed to x., a broken Lean proof), each of which must be rejected. By hand, weekly and on a release tag.
   demo:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

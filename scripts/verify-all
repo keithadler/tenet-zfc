@@ -5,7 +5,8 @@
 #   - mmverify.py: every proof from the chunk's first $p on, exit status 0;
 #   - scripts/check-definitions: mmj2's definitionCheck on every df-lean.* definition.
 # Writes verify-all.tsv in the output folder, one line per chunk, and prints the totals. Chunks already checked
-# (chunk-NNNN.verify newer than chunk-NNNN.mm) are not checked again.
+# (chunk-NNNN.verify newer than chunk-NNNN.mm) are not checked again. Exits 1 if any chunk failed, wasn't checked, or
+# there are no chunks at all; 2 if it couldn't run.
 #
 # usage: scripts/verify-all [-j jobs] <outdir>
 # The tools come from the same variables the tests use:
@@ -81,8 +82,20 @@ for f in "$out"/chunk-*.mm; do
   v="${f%.mm}.verify"
   [ -s "$v" ] && [ "$v" -nt "$f" ] || echo "$f"
 done | xargs -P "$jobs" -n 1 sh -c '"$0" --one "$1" > "${1%.mm}.verify.tmp" && mv "${1%.mm}.verify.tmp" "${1%.mm}.verify"' "$0" \
-  && true
-cat "$out"/chunk-*.verify 2>/dev/null | sort >> "$tsv"
+  || echo "verify-all: a checking job didn't finish (xargs status $?)"
+# A chunk with no result (its job was killed, or never ran) is a failure, not an absence: it gets a FAIL line here,
+# and no chunk-NNNN.verify, so the next run checks it again.
+for f in "$out"/chunk-*.mm; do
+  [ -e "$f" ] || continue
+  v="${f%.mm}.verify"
+  if [ -s "$v" ]; then cat "$v"; else
+    rm -f "$v.tmp"
+    printf '%s\tFAIL\t%s\t0\t0\t0\t0\t0\t0\t0\t\n' "$(basename "${f%.mm}")" "$(wc -c < "$f" | tr -d ' ')"
+    echo "verify-all: $(basename "$f") was not checked" >&2
+  fi
+done | sort >> "$tsv"
+chunks=$(($(wc -l < "$tsv") - 1))
+[ "$chunks" -gt 0 ] || { echo "verify-all: no chunk-*.mm in $out: nothing was checked"; exit 1; }
 tail -n +2 "$tsv" | awk -F'\t' '{ printf "%s %s  %8.1f MiB  %5d theorems  metamath %ss  mmverify %ss  definitionCheck %ss\n", $1, $2, $3/1048576, $4, $6, $8, $10 }'
 end=$(now)
 awk -F'\t' -v wall="$(sub "$end" "$start")" -v jobs="$jobs" 'NR > 1 {

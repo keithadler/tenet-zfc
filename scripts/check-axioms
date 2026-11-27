@@ -1,7 +1,8 @@
 #!/bin/sh
 # Check that theorems of a tenet-zfc output are plain ZFC (docs/milestone4.md): metamath-exe's
 # `show trace_back <label> /axioms` lists every axiom a theorem rests on, through every theorem it uses. A theorem
-# that used ax-groth, or any set.mm theorem proved from it (grothtsk, inaex, ...), would list ax-groth.
+# that used ax-groth, or any set.mm theorem proved from it (grothtsk, inaex, ...), would list ax-groth. Every axiom
+# listed must be one of set.mm's axioms of ZFC.
 #
 # Also checks that each statement has no universe hypothesis: no lean.-tower, lean.-wtower, Univ or WUni, and no U
 # left (the class variable the model's universe argument is written with).
@@ -17,6 +18,9 @@ if [ "${1:-}" = "--axioms-only" ]; then only=1; shift; fi
 [ $# -gt 0 ] || { echo "check-axioms: no labels given"; exit 2; }
 dir="$(cd "$(dirname "$file")" && pwd)"; name="$(basename "$file")"
 cd "$dir"
+# set.mm's axioms of ZFC: logic (ax-mp, ax-gen, ax-1 to ax-13), ZF, choice (ax-cc and ax-dc follow from it), and the
+# complex-number axioms, which set.mm proves from its construction of the reals and restates as axioms.
+zfc='ax-(mp|gen|[0-9]+|ext|rep|sep|nul|pow|pr|un|reg|inf|inf2|ac|ac2|cc|dc|resscn|1cn|icn|addcl|addrcl|mulcl|mulrcl|mulcom|addass|mulass|distr|i2m1|1ne0|1rid|rnegex|rrecex|cnre|pre-lttri|pre-lttrn|pre-ltadd|pre-mulgt0|pre-sup|addf|mulf)'
 status=0
 for label in "$@"; do
   out=$("$mm" "read $name" "show statement $label" "show trace_back $label /axioms" "exit")
@@ -32,6 +36,12 @@ for label in "$@"; do
   [ -n "$axioms" ] || { echo "$out"; echo "check-axioms: $label: no axiom list from metamath-exe"; status=1; continue; }
   if echo " $axioms" | grep -q ' ax-groth '; then
     echo "check-axioms: $label uses ax-groth"; status=1; continue
+  fi
+  # Plain ZFC is an allowlist, not only the absence of ax-groth: any other axiom (a mathbox's, Hilbert space's, one
+  # added later) fails here by name.
+  other=$(echo "$axioms" | tr ' ' '\n' | grep -Ev "^($zfc)?\$" | tr '\n' ' ')
+  if [ -n "$other" ]; then
+    echo "check-axioms: $label uses axioms outside ZFC: $other"; status=1; continue
   fi
   if [ -z "$only" ] && echo "$stmt" | grep -Eq '(^| )(lean\.-tower|lean\.-wtower|Univ|WUni|U)( |$)'; then
     echo "check-axioms: $label still has a universe hypothesis: $stmt"; status=1; continue
