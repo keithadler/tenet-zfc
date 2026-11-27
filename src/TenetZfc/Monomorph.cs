@@ -63,7 +63,12 @@ public sealed class Monomorph
             return done;
         }
         Name inst = name();
-        _instances[(n, key)] = inst;   // before rewriting: the type refers to itself through its constructors
+        if (!ReferenceEquals(inst, n) && _src.Find(inst) is not null)
+        {
+            // An export constant already has the instance's name (a component «{0}»): the two would share a token.
+            throw new Model.Refused($"{n}'s instance at levels {{{key}}} would be named {inst}, which the export already has");
+        }
+        _instances[(n, key)] = inst;  // before rewriting: the type refers to itself through its constructors
         ConstInfo c = _src.Find(n)!;
         Name[] ps = keep is null ? c.LevelParams : c.LevelParams[1..];
         if (ps.Length != levels.Length)

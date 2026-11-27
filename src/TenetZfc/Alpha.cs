@@ -314,4 +314,36 @@ public sealed partial class Model
         }
         return _d.Lift("T.", closed);
     }
+
+    /// <summary>
+    /// ( ph -> A e. D ) from a hypothesis A e. D' among <paramref name="hyps"/> whose D' differs from D only in the names
+    /// of bound variables: a field's type, written once for the constructor and once inside the type, names its binders
+    /// independently (Bind.mk's field ( a e. U |-> … )). Null when there is none.
+    /// </summary>
+    private Proof? HypUpToRenaming(string ph, string h, IEnumerable<string> hyps)
+    {
+        int at = h.IndexOf(" e. ", StringComparison.Ordinal);
+        if (at < 0)
+        {
+            return null;
+        }
+        string a = h[..at], d = h[(at + 4)..];
+        foreach (string g in hyps.Where(g => g.StartsWith(a + " e. ", StringComparison.Ordinal) && g != h))
+        {
+            string d2 = g[(a.Length + 4)..];
+            if (Hyp(ph, g) is not Proof hg)
+            {
+                continue;
+            }
+            try
+            {
+                Proof eq = AlphaIn(ph, d2, d);
+                return pr.Apply("eleqtrd", S(("ph", ph), ("A", a), ("B", d2), ("C", d)), hg, eq);
+            }
+            catch (Refused)
+            {
+            }
+        }
+        return null;
+    }
 }

@@ -19,7 +19,7 @@ public sealed partial class Model
     /// <summary>lean-iota-c: the computation rule of a constructor, written into the output once.</summary>
     private string IotaLemma(Name ctor)
     {
-        string label = $"lean-iota-{LabelPart($"{ctor}")}";
+        string label = $"lean-iota-{LabelOf(ctor)}";
         if (!Has(label))
         {
             var (stmt, proof, _) = Iota(ctor);
@@ -34,7 +34,7 @@ public sealed partial class Model
     /// </summary>
     private string RecTyLemma(ConstInfo ind)
     {
-        string label = $"lean-recty-{LabelPart($"{ind.Name}")}";
+        string label = $"lean-recty-{LabelOf(ind.Name)}";
         if (Has(label))
         {
             return label;

@@ -115,38 +115,36 @@ if (args.Length >= 5 && args[0] == "define")
         string name = given;
         try
         {
-            if (mono is not null)
-            {
-                // Each universe parameter at level 0, written c.{0,…}, unless the name gives the levels (Eq.{1}); a
-                // recursor keeps its motive level.
-                name = $"{InstanceOf(dt, mono, given)}";
-            }
-            var (stmt, proof, distinct) = model.Equation(dt.Of(name));
-            proved.Add(($"lean-{Model.LabelPart(name)}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
+            // Each universe parameter at level 0, written c.{0,…}, unless the name gives the levels (Eq.{1}); a
+            // recursor keeps its motive level. The Name itself is kept: reparsing its text loses numeric parts.
+            Name nm = mono is not null ? InstanceOf(dt, mono, given) : NameOf(dt, denv, given);
+            name = $"{nm}";
+            var (stmt, proof, distinct) = model.Equation(nm);
+            proved.Add(($"lean-{Model.LabelOf(nm)}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
             Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps)");
             string baseOf = System.Text.RegularExpressions.Regex.Replace(name, @"\.\{[0-9,]+\}$", "");
             if (baseOf == "Quot.lift" && QuotMkFor(dt, mono, name) is Name mkInst)
             {
                 // The quotient's computation rule: Quot.lift f h (Quot.mk r a) = f a (in the tower, Quot.lift.{k,l}
                 // with Quot.mk.{k}; at level 0 one of them is a proof and there is nothing to compute).
-                var (qstmt, qproof, qdistinct) = model.QuotLiftIota(dt.Of(name), mkInst);
-                proved.Add(($"lean-{Model.LabelPart(name)}-iota", qstmt, qproof, qdistinct, "The computation rule of the quotient: Quot.lift f h (Quot.mk r a) = f a."));
+                var (qstmt, qproof, qdistinct) = model.QuotLiftIota(nm, mkInst);
+                proved.Add(($"lean-{Model.LabelOf(nm)}-iota", qstmt, qproof, qdistinct, "The computation rule of the quotient: Quot.lift f h (Quot.mk r a) = f a."));
                 Console.WriteLine($"{name} (computation rule): {qstmt} ({qproof.Count} proof steps)");
             }
             if (baseOf == "Classical.choice" && name != "Classical.choice.{0}")
             {
                 // Choice picks an element of α, given a well-ordering of the universe (of the tower's union).
-                var (cstmt, cproof, cdistinct) = model.ChoiceSpec(dt.Of(name));
-                proved.Add(($"lean-{Model.LabelPart(name)}-spec", cstmt, cproof, cdistinct, $"{name} picks an element of a nonempty type, given a well-ordering W of the universe{(singleUniverse ? "" : "s' union")}."));
+                var (cstmt, cproof, cdistinct) = model.ChoiceSpec(nm);
+                proved.Add(($"lean-{Model.LabelOf(nm)}-spec", cstmt, cproof, cdistinct, $"{name} picks an element of a nonempty type, given a well-ordering W of the universe{(singleUniverse ? "" : "s' union")}."));
                 Console.WriteLine($"{name} (picks an element): {cstmt} ({cproof.Count} proof steps)");
             }
-            if (denv.Find(dt.Of(name))?.Kind == ConstKind.Constructor)
+            if (denv.Find(nm)?.Kind == ConstKind.Constructor)
             {
                 // A constructor also has its computation rule: the recursor on it reduces to its minor premise.
                 try
                 {
-                    var (istmt, iproof, idistinct) = model.Iota(dt.Of(name));
-                    proved.Add(($"lean-{Model.LabelPart(name)}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {name}."));
+                    var (istmt, iproof, idistinct) = model.Iota(nm);
+                    proved.Add(($"lean-{Model.LabelOf(nm)}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {name}."));
                     Console.WriteLine($"{name} (computation rule): {istmt} ({iproof.Count} proof steps)");
                 }
                 catch (Model.Refused e) when (e.Message.Contains("only into Prop"))
@@ -158,9 +156,10 @@ if (args.Length >= 5 && args[0] == "define")
             {
                 // A nested block's auxiliary recursor (Rose.rec_1, on List (Rose α)): the computation rule on each of the
                 // nested type's constructors (List.nil, List.cons).
-                foreach (var (ctor, istmt, iproof, idistinct) in model.RecursorIotas(dt.Of(name)))
+                foreach (var (ctor, istmt, iproof, idistinct) in model.RecursorIotas(nm))
                 {
-                    proved.Add(($"lean-{Model.LabelPart(name)}-{Model.LabelPart(ctor.ToString()!)}-iota", istmt, iproof, idistinct, $"The computation rule of {name} on {ctor}."));
+                    // "--" never occurs in an escaped name, so these labels can't meet a constructor's lean-c-iota.
+                    proved.Add(($"lean-{Model.LabelOf(nm)}--{Model.LabelOf(ctor)}-iota", istmt, iproof, idistinct, $"The computation rule of {name} on {ctor}."));
                     Console.WriteLine($"{name} on {ctor} (computation rule): {istmt} ({iproof.Count} proof steps)");
                 }
             }
@@ -204,7 +203,7 @@ if (args.Length >= 5 && args[0] == "theorem")
             var (stmt, proof) = translator.Prove(tt.Of(name));
             // Replayed here (every step's hypotheses, and the $d conditions), so a broken proof fails on its own.
             _ = TenetZfc.Metamath.DistinctVars.Required(tpr.Database, proof);
-            done.Add(($"lean-thm-{Model.LabelPart(name)}", stmt, proof, name));
+            done.Add(($"lean-thm-{Model.LabelOf(tt.Of(name))}", stmt, proof, name));
             Console.WriteLine($"{name}: {stmt} ({tpr.Database.Shared.Size(proof)} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
             Console.WriteLine($"{name}: {translator.LemmaSteps.Count - lemmasBefore} new lemmas ({translator.LemmaSteps.Values.Sum() - stepsBefore} flat steps)");
         }
@@ -598,6 +597,26 @@ static (List<string>, TenetZfc.Metamath.Expr)? TryListInduction(ListInduction li
     }
 }
 
+// A constant's name as given on the command line: as Lean prints it (Nat.add), or as its token or escaped name
+// (lean.List.map-q, hint._-a.Init.Hints.1215944719._hyg.3), for names with numeric parts or characters a shell mangles.
+static Name NameOf(Terms t, TenetZfc.Environment env, string given)
+{
+    Name plain = t.Of(given);
+    if (env.Find(plain) is not null)
+    {
+        return plain;
+    }
+    try
+    {
+        Name escaped = NameEscape.Unescape(t, given.StartsWith("lean.", StringComparison.Ordinal) ? given[5..] : given);
+        return env.Find(escaped) is not null ? escaped : plain;
+    }
+    catch (System.FormatException)
+    {
+        return plain;
+    }
+}
+
 // The instance of a constant at the levels its name gives (c.{1,0}), or with every universe parameter at 0. A recursor's
 // motive level may be left out: c.rec.{1} is the recursor of c.{1}.
 // The Quot.mk that Quot.lift's computation rule is about: Quot.mk, or in the tower Quot.mk.{k} for Quot.lift.{k,l}; null
@@ -620,7 +639,7 @@ static Name InstanceOf(Terms t, Monomorph mono, string given)
 {
     var m = System.Text.RegularExpressions.Regex.Match(given, @"^(.*)\.\{([0-9]+(?:,[0-9]+)*)\}$");
     string baseName = m.Success ? m.Groups[1].Value : given;
-    ConstInfo c = mono.Env.Find(t.Of(baseName)) ?? throw new Model.Refused($"{baseName} is not in the export");
+    ConstInfo c = mono.Env.Find(NameOf(t, mono.Env, baseName)) ?? throw new Model.Refused($"{baseName} is not in the export");
     if (!m.Success)
     {
         return mono.Instance(c.Name, c.LevelParams.Select(_ => t.Zero).ToArray());

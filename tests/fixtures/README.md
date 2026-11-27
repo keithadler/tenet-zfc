@@ -1,6 +1,6 @@
 # Fixtures
 
-The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadler/tenet, `tests/fixtures`), which say how each was made, except `quot.ndjson`, `syntax.ndjson`, `gate.ndjson`, `lenapp.ndjson`, `tree.ndjson`, `mutual.ndjson`, `strings.ndjson`, `axioms.ndjson` and `quotthm.ndjson`, made here with [leanout](https://github.com/keithadler/leanout):
+The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadler/tenet, `tests/fixtures`), which say how each was made, except `quot.ndjson`, `syntax.ndjson`, `gate.ndjson`, `lenapp.ndjson`, `tree.ndjson`, `mutual.ndjson`, `strings.ndjson`, `axioms.ndjson`, `quotthm.ndjson` and `rest.ndjson`, made here with [leanout](https://github.com/keithadler/leanout):
 
 | Export | Lean | Format |
 |---|---|---|
@@ -21,6 +21,7 @@ The `.ndjson` exports are copied from Tenet's test fixtures (github.com/keithadl
 | `natadd.ndjson` | 4.36.0 | leanout (`leanout Init -- Nat.add`): `Nat.add` with `Nat`, `Nat.below`, `Nat.brecOn` and its other dependencies, for `tenet-zfc nat-bridge` |
 | `theorems.ndjson` | 4.36.0 | leanout (`leanout Init -- Nat.add_zero Nat.zero_add Nat.succ_add List.length_append`): the first theorems proved through the model, for `tenet-zfc theorem` |
 | `library.ndjson` | 4.36.0 | leanout (`leanout Init -- Nat.add_zero Nat.zero_add Nat.succ_add Nat.add_succ Nat.add_one Nat.succ_eq_add_one Nat.add_comm Nat.add_assoc Nat.add_left_comm Nat.add_right_comm Nat.succ_ne_zero Nat.mul_zero Nat.mul_succ Nat.zero_mul Nat.pred_succ Nat.pred_zero Nat.sub_zero Nat.succ_sub_succ Nat.le_refl List.length_nil List.length_cons List.append_nil List.nil_append List.cons_append List.append_assoc List.length_append List.map_nil List.map_cons List.length_map List.reverse_nil`): the starter library of theorems through the model (docs/milestone3.md) |
+| `rest.ndjson` | 4.36.0 | leanout (`leanout Init -- Empty.elim Bind.mk Iff.intro HAdd.mk List.head? IO.Error.rec`): constants the Init-wide run refused before names were escaped and before the fixes of docs/milestone3.md's "The Init-wide run, again": a name with `?`, more than 20 class variables, a field whose type binds a variable, a proof field of a ∀-statement, `outParam` in the tower, and an empty type |
 
 Each `.trace.ndjson` was made from the export beside it by Tenet's main branch (commit `125fd3d` or later), which records checking-mode inference as `Check` and recalls earlier conclusions with `"of"`:
 

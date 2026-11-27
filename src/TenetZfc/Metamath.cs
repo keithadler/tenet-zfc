@@ -889,7 +889,7 @@ public sealed class Writer
     public Writer(string include, string header, Database? compressAgainst)
     {
         _db = compressAgainst;
-        _sb.AppendLine($"$( {header} $)");
+        _sb.AppendLine($"$( {NameEscape.CommentText(header)} $)");
         _assumptionsAt = _sb.Length;
         _sb.AppendLine($"$[ {include} $]");
         _sb.AppendLine();
@@ -902,12 +902,12 @@ public sealed class Writer
     /// <summary>State the output's assumptions (Model.Assumptions) in a comment after the header.</summary>
     public void Assumptions(string text)
     {
-        _sb.Insert(_assumptionsAt, $"$(\n{text.TrimEnd()}\n$)\n");
+        _sb.Insert(_assumptionsAt, $"$(\n{NameEscape.CommentText(text.TrimEnd())}\n$)\n");
     }
 
     public void Theorem(string label, string comment, Expr statement, IEnumerable<string> proof)
     {
-        _sb.AppendLine($"  $( {comment} $)");
+        _sb.AppendLine($"  $( {NameEscape.CommentText(comment)} $)");
         _sb.AppendLine($"  {label} $p {statement} $=");
         AppendProof(_sb, "    ", statement, proof.ToList());
         _sb.AppendLine(" $.");
