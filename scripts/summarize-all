@@ -34,9 +34,12 @@ def main(out):
         with open(f) as fh:
             next(fh)
             for line in fh:
-                name, kind, status, eq, iota, isteps, secs, reason = line.rstrip("\n").split("\t")
+                cols = line.rstrip("\n").split("\t")
+                name, kind, status, eq, iota, isteps, secs, reason = cols[:8]
+                # The label define-all gave the constant's theorems (older runs' files don't have the column).
+                label = cols[8] if len(cols) > 8 else None
                 rows.append(dict(chunk=chunk, name=name, kind=kind, status=status, eq=int(eq), iota=iota,
-                                 isteps=int(isteps), secs=float(secs), reason=reason))
+                                 isteps=int(isteps), secs=float(secs), reason=reason, label=label))
     verify = {}
     for f in glob.glob(os.path.join(out, "chunk-*.verify")):
         cols = open(f).read().rstrip("\n").split("\t")
@@ -57,13 +60,22 @@ def main(out):
         print(f"  {kind:<12} {len(rs):6}: {len(ok):6} translated with their equations, "
               f"{sum(r['status'] == 'refused' for r in rs):6} refused, {sum(r['status'] == 'error' for r in rs):5} errors")
 
-    # A theorem counts as verified when its chunk was checked and no checker named it. When a chunk fails only
-    # mmj2's or mmverify's check, the theorems metamath-exe didn't name are still counted, and the chunk is listed.
+    # A theorem counts as verified when its chunk passed all three checkers. In a chunk that failed, it counts only
+    # when metamath-exe named the failing theorems and this isn't one of them: a chunk that failed without a named
+    # theorem (it didn't read, or only mmverify.py or mmj2 rejected it) verifies nothing.
+    unlabelled = set()
+
     def verified(r, suffix):
         v = verify.get(r["chunk"])
-        # Labels as Model.LabelPart writes them: a set.mm label can't hold { } or ,
-        label = r["name"].replace("{", "u").replace(",", "_").replace("}", "")
-        return v is not None and f"lean-{label}-{suffix}" not in v["failing"]
+        if v is None:
+            return False
+        if v["result"] == "pass":
+            return True
+        if not v["failing"] or not r["label"]:
+            if v["failing"]:
+                unlabelled.add(r["chunk"])
+            return False
+        return f"lean-{r['label']}-{suffix}" not in v["failing"]
 
     eqs = [r for r in rows if r["status"] == "ok"]
     iotas = [r for r in rows if r["iota"] == "ok"]
@@ -72,6 +84,9 @@ def main(out):
           f"none needed (into Prop): {sum(r['iota'] == 'none-needed' for r in rows)}; "
           f"refused: {sum(r['iota'] == 'refused' for r in rows)}; errors: {sum(r['iota'] == 'error' for r in rows)}")
     print(f"proof steps (uncompressed count): {sum(r['eq'] for r in eqs):,} in equations, {sum(r['isteps'] for r in iotas):,} in computation rules")
+
+    if unlabelled:
+        print(f"  (failed chunks written before define-all recorded labels count as unverified: {' '.join(sorted(unlabelled))})")
 
     long_ = sorted({re.search(r"Theorem (\S+):", l).group(1) for f in glob.glob(os.path.join(out, "chunk-*.mmj2-long"))
                     for l in open(f) if "Theorem " in l})
@@ -83,7 +98,7 @@ def main(out):
         print(f"  {label}")
     for c, v in sorted(verify.items()):
         if v["result"] != "pass" and not v["failing"]:
-            print(f"  {c}: failed a checker without metamath-exe naming a theorem (see {c}.verify.log)")
+            print(f"  {c}: failed a checker without metamath-exe naming a theorem, so none of its theorems count as verified (see {c}.verify.log)")
 
     print("\nwhy the others aren't translated (refusals, errors, refused computation rules):")
     reasons = collections.Counter()

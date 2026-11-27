@@ -16,7 +16,7 @@ The translator itself is not trusted. If it makes a mistake, the verifiers rejec
 - **28 Lean theorems** about `Nat` and `List` are proved from their own proof terms, and all three checkers accept every one.
 - **Lean's `List.length_append` comes out as `set.mm`'s `ccatlen`**, next to `set.mm`'s hand-written proof of the same statement.
 - **Two theorems are in plain ZFC** so far. Everything else still assumes a tower of universes as a hypothesis ([Limits](#limits)).
-- **Next:** the infinitude of primes, end to end ([examples/Primes.lean](examples/Primes.lean)).
+- **In progress:** the infinitude of primes, end to end ([examples/Primes.lean](examples/Primes.lean)). On a development branch, 5 of its 8 lemmas now go through the translator; they have not been through the Metamath verifiers yet ([Roadmap](#roadmap)).
 
 ```
 lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
@@ -58,7 +58,7 @@ metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `
 | 2 | **Bridge library** | `2 + 2 = 4` and `List.length_append` translate, and both verifiers accept them | ✅ verified in CI |
 | 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 about 75%: 80% of `Init`'s definitions translate; 28 `Init` theorems proved through the model; the share of `Init`'s 45,588 theorems that goes through is not measured yet |
 | 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 about 15%: the first plain-ZFC theorems, `Nat.add_zero` and `Nat.zero_add` as `( A + 0 ) = A` and `( 0 + A ) = A`, from Lean's proof with no universe hypothesis and no `ax-groth` ([docs/milestone4.md](docs/milestone4.md)) |
-| 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | 🚧 about 10%: the candidate is written, the infinitude of primes in core Lean ([examples/Primes.lean](examples/Primes.lean)); all 169 definitions it uses translate; a first run through the model found two translator gaps, and none of its theorems is proved yet |
+| 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | 🚧 about 15%: the candidate is the infinitude of primes in core Lean ([examples/Primes.lean](examples/Primes.lean)); all the definitions it uses translate; on a development branch 5 of its 8 lemmas go through the translator, not yet checked by the verifiers; the main theorem doesn't yet |
 
 ### What works today
 
@@ -109,13 +109,18 @@ Two are refused, each with its reason: `Nat.succ_ne_zero` and `Nat.le_refl`. Siz
 The work between here and a famous theorem end to end, in order:
 
 - [x] **Pick the theorem and write it for the translator.** The infinitude of primes (Euclid) in core Lean, with no mathlib, structural recursion only, and no `omega`, `decide` or `simp`: [examples/Primes.lean](examples/Primes.lean). `set.mm` proves the same fact by hand (`infpn`), so the result can meet an independent proof, as `ccatlen` does. Its cone is 169 definitions, all of which translate, and 146 theorems ([examples/README.md](examples/README.md)).
-- [ ] **Prove its theorems through the model.** A workflow runs `tenet-zfc run` on the file on GitHub's runners and reports each theorem as proved, refused or failed. The first run (27 November): both definitions verify; the four lemmas stop at one translator bug, a distinct-variable clash when rewriting under a quantifier; the main theorem is refused because eliminating an existential (`Exists.rec`) has no typing lemma yet. Those two are the work list.
-- [ ] **Measure theorem coverage on all of `Init`.** 28 hand-picked theorems go through; the share of all 45,588 is unknown, and it decides the timeline.
-- [ ] **More bridges**, so results land in `set.mm`'s own vocabulary: `Nat.mul` to `x.`, order to `<_` and `<`, `∣` to `||`, `Prime` to the statement in `infpn`; `Int` to `ZZ`.
+- [ ] **Prove its theorems through the model.** In progress. A workflow (`.github/workflows/headline.yml`) runs `tenet-zfc run` on the file on GitHub's runners and reports each theorem as proved, refused or failed. The first run (27 November) proved none: every lemma stopped because the translator could not type the recursor of an inductive *proposition*, which is how Lean proves anything by cases or induction on a proof of `∃`, `∨`, `≤` or `<`. That is being built on a development branch, where so far:
+  - **Go through the translator** (5 of 8): `fact_succ`, `fact_pos` (`0 < n!`), `dvd_fact` (every `m ≤ n` divides `n!`), and the two classical lemmas `not_forall` and `not_imp`.
+  - **Not yet:** the prime-factor lemma, its corollary, and the main theorem.
+  - **Not yet checked:** none of these outputs has been through metamath-exe, mmverify.py or mmj2. Until they have, they count as nothing.
+  - **New in the translator for this:** recursors and constructors of inductive propositions, plain (`Exists`, `Or`, `And`, `Iff`) and recursive with indices (`Nat.le`, by induction over the stages of its least set); indices that are themselves proofs; conversion under a λ.
+  - **Excluded middle is proved in the model directly**, not from Lean's proof: a proposition of the model is a member of `2o`, so it is `(/)` or `1o`. Lean's own proof of `Classical.em` goes through `Classical.choice` used as data, which the theorem translator doesn't follow. `propext` is handled the same way. The example file therefore uses `Classical.em` alone, and proves the two other classical facts it needs from it.
+- [ ] **Measure theorem coverage on all of `Init`.** 28 hand-picked theorems go through; the share of all 45,588 is unknown, and it decides the timeline. A batch mode, `theorem-all`, with fixes for the first blockers it found, is in review ([#20](https://github.com/keithadler/tenet-zfc/pull/20)).
+- [ ] **More bridges**, so results land in `set.mm`'s own vocabulary: `Nat.mul` to `x.` (in review, [#21](https://github.com/keithadler/tenet-zfc/pull/21)), order to `<_` and `<`, `∣` to `||`, `Prime` to the statement in `infpn`; `Int` to `ZZ`.
 - [ ] **Plain ZFC for theorems in general** (milestone 4, below): `ccatlen` first, then the headline theorem, with no universe hypothesis.
 - [ ] **Finish `Init`'s definitions**: the 6 of 40 chunks that didn't finish, definitions too large for mmj2's check, and `Acc.rec`'s computation rule.
 
-Runs of this size happen on GitHub's runners: `.github/workflows/init-run.yml` translates and checks all of `Init` across parallel jobs ([#16](https://github.com/keithadler/tenet-zfc/pull/16)).
+Runs of this size happen on GitHub's runners: `.github/workflows/init-run.yml` translates and checks all of `Init` across parallel jobs, by hand from the Actions tab.
 
 ### v0.1.0 (released)
 

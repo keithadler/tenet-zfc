@@ -254,14 +254,19 @@ public static class RunCommand
         }
 
         // 3. Translate: theorems the trace didn't cover go through the model, each in its own process with a time limit.
+        // File names aren't one-to-one on Lean names (head?_nil and head!_nil both give head__nil, and some file
+        // systems ignore case), so a name already taken gets a number: no theorem's output replaces another's.
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (Decl d in theorems.Where(d => d.Status == "pending"))
         {
-            string file = Path.Combine(outDir, $"theorem-{FileName(d.Name)}.mm");
+            string stem = $"theorem-{FileName(d.Name)}";
+            for (int k = 2; !taken.Add(stem); k++) stem = $"theorem-{FileName(d.Name)}-{k}";
+            string file = Path.Combine(outDir, stem + ".mm");
             Console.WriteLine($"  translate  theorem {d.Name} through the model{(timeout is null ? "" : $" (time limit {timeoutSeconds}s)")} …");
             var argv = new List<string> { "theorem", export, localSetMm, file, d.Name };
             if (!compress) argv.Add("--uncompressed");
             if (switches.Contains("--single-universe")) argv.Add("--single-universe");
-            var (elapsed, _) = Translate(argv, [d], timeout, logDir, $"theorem-{FileName(d.Name)}");
+            var (elapsed, _) = Translate(argv, [d], timeout, logDir, stem);
             if (d.Status == "translated")
             {
                 d.Route = "model";

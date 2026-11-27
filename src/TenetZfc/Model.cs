@@ -568,7 +568,23 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             string body = "(/)";
             if (large && ctors.Count == 1)
             {
-                // Subsingleton elimination: the one minor premise, at (/) for each field (all proofs).
+                // Subsingleton elimination: the one minor premise, at (/) for each field. That is right only when
+                // every field is a proof. Lean also eliminates into any sort when a data field appears among the
+                // result's indices (inductive Foo : Nat → Prop | mk (n : Nat) : Foo n), and there the minor premise
+                // must get the index, not (/): refused until the model reads such fields back from the indices.
+                {
+                    var csc = NewScope();
+                    Expr cty = ctors[0].Type;
+                    var cfv = new List<Expr>();
+                    Telescope(ref cty, ind.NumParams + ctors[0].NumFields, csc, cfv);
+                    foreach (Expr f in cfv.Skip(ind.NumParams))
+                    {
+                        if (_typing.IsProposition(csc.Types[((FVar)f).Id], csc.Types) != true)
+                        {
+                            throw new Refused($"{n} has a field that is data, and eliminates into any sort; not in the model yet");
+                        }
+                    }
+                }
                 string minor = bs[ind.NumParams + rec.NumMotives].Var;
                 body = Enumerable.Range(0, ctors[0].NumFields).Aggregate(minor, (acc, _) => $"( {acc} ` (/) )");
             }

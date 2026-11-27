@@ -860,7 +860,7 @@ public sealed partial class Model
         Statement st = pr.Database[label];
         (string ante, string concl) = _d.Split(st.Expr);
         string ante2 = RenameApart(ante, clash, avoidText, concl), concl2 = RenameApart(concl, clash, avoidText, ante, ante2);
-        string vlabel = $"{label}-a{_variants++}";
+        string vlabel = $"{label}-s{_variants++}";   // -s: no escaped name has it (NameEscape)
         _variantOf[key] = vlabel;
         Proof orig = ApplyId(label, new Dictionary<string, string>());
         Proof toAnte = ante2 == ante ? pr.Apply("id", S(("ph", ante)))
