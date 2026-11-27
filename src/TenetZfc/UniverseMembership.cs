@@ -34,6 +34,50 @@ public sealed partial class Model
         return _d.Syl(_d.Jca(Hyp(ph, UHyp) ?? throw new Refused("no universe hypothesis"), OrdOm(ph, k)), ApplyId("lean-tw-u", S(("U", "U"), ("K", k))));
     }
 
+    /// <summary>
+    /// In the lowered tower (docs/milestone4.md), the weak universe a parameter-free recursive type's stages are built
+    /// in: ( R1 ` ( ( rank ` (/) ) +o _om ) ), a member of every level (lean-wu-r).
+    /// </summary>
+    private const string SmallWuni = "( R1 ` ( ( rank ` (/) ) +o _om ) )";
+
+    /// <summary>( ph -> G e. WUni ) for G a level of the lowered tower, or <see cref="SmallWuni"/> (wunex3).</summary>
+    private Proof LevelWU(string ph, string g)
+    {
+        if (g == SmallWuni)
+        {
+            Proof w = pr.Apply("wunex3", S(("A", "(/)"), ("U", g), ("V", "_V")), pr.Apply("eqid", S(("A", g))));
+            Proof both = pr.Apply("ax-mp", S(("ph", "(/) e. _V"), ("ps", $"( {g} e. WUni /\\ (/) C_ {g} )")), pr.Apply("0ex", S()), w);
+            return _d.Lift(ph, pr.Apply("simpli", S(("ph", $"{g} e. WUni"), ("ps", $"(/) C_ {g}")), both));
+        }
+        string k = LevelOf(g) ?? throw new Refused($"not a weak universe of the lowered tower: {g}");
+        EnsureTowerLemmas();
+        return _d.Syl(LevelUniv(ph, k), ApplyId("lean-wu-w", S(("W", g))));
+    }
+
+    /// <summary>K for G = ( U ` K ) with K a concrete level, or null.</summary>
+    private string? LevelOf(string g)
+    {
+        SyntaxTree? gn = pr.Parse("class", g.Split(' '));
+        return gn is { Rule.Label: "cfv" } && pr.Render(gn.Children[1]) == "U" && OrdinalIndex(pr.Render(gn.Children[0])) >= 0
+            ? pr.Render(gn.Children[0]) : null;
+    }
+
+    /// <summary>( ph -> Tr ( U ` K ) ) (grutr, or wuntr in the lowered tower).</summary>
+    private Proof LevelTr(string ph, string k)
+    {
+        string g = $"( U ` {k} )";
+        return lowered
+            ? _d.Syl(LevelWU(ph, g), pr.Apply("wuntr", S(("U", g))))
+            : _d.Syl(LevelUniv(ph, k), pr.Apply("grutr", S(("U", g))));
+    }
+
+    /// <summary>( ph -> B e. G ) from ( ph -> A e. G ) and ( ph -> B e. A ), G a weak universe (wunelss).</summary>
+    private Proof WunEl(string ph, string g, string a, string b, Proof aIn, Proof bInA)
+    {
+        Proof ss = pr.Apply("wunelss", S(("ph", ph), ("U", g), ("A", a)), LevelWU(ph, g), aIn);
+        return pr.Apply("sseldd", S(("ph", ph), ("A", a), ("B", g), ("C", b)), ss, bInA);
+    }
+
     /// <summary>( ph -> ( U ` J ) e. ( U ` K ) ) for J below K.</summary>
     private Proof LevelIn(string ph, string j, string k)
     {
@@ -60,6 +104,10 @@ public sealed partial class Model
     private Proof GruEl(string ph, string k, string a, string b, Proof aIn, Proof bInA)
     {
         string g = $"( U ` {k} )";
+        if (lowered)
+        {
+            return WunEl(ph, g, a, b, aIn, bInA);
+        }
         return _d.Syl(pr.Apply("3jca", S(("ph", ph), ("ps", $"{g} e. Univ"), ("ch", $"{a} e. {g}"), ("th", $"{b} e. {a}")), LevelUniv(ph, k), aIn, bInA),
             pr.Apply("gruel", S(("U", g), ("A", a), ("B", b))));
     }
@@ -80,6 +128,10 @@ public sealed partial class Model
         {
             return PropIn2o(d, x);
         }
+        if (lowered && g == SmallWuni)
+        {
+            return SmallMem(d, x);
+        }
         SyntaxTree gn = pr.Parse("class", g.Split(' '))!;
         if (gn.Rule.Label != "cfv" || pr.Render(gn.Children[1]) != "U" || OrdinalIndex(pr.Render(gn.Children[0])) < 0)
         {
@@ -92,6 +144,10 @@ public sealed partial class Model
         }
         SyntaxTree n = pr.Parse("class", x.Split(' ')) ?? throw new Refused($"does not parse: {x}");
         string C(int i) => pr.Render(n.Children[i]);
+        if (lowered && LoweredMem(d, x, g, n) is Proof lp)
+        {
+            return lp;
+        }
         Proof Univ() => LevelUniv(d.Ph, k);
         Proof Three(string label, Dictionary<string, string> sub, string a, string b) =>
             _d.Syl(pr.Apply("3jca", S(("ph", d.Ph), ("ps", $"{g} e. Univ"), ("ch", $"{a} e. {g}"), ("th", $"{b} e. {g}")), Univ(), UnivMem(d, a, g), UnivMem(d, b, g)),
@@ -176,6 +232,162 @@ public sealed partial class Model
             }
         }
         throw new Refused($"no proof yet that {x} is in the universe {g}");
+    }
+
+    /// <summary>
+    /// The lowered tower's closure steps (docs/milestone4.md), or null to fall through to the shared cases (levels,
+    /// constants, members of members). A weak universe is closed under pairs, singletons, unions, products and function
+    /// spaces (wunop, wunsn, wunun, wunxp, wunmap), but not under indexed unions in general: those are bounded instead
+    /// (<see cref="BoundedIun"/>).
+    /// </summary>
+    private Proof? LoweredMem(PCtx d, string x, string g, SyntaxTree n)
+    {
+        string C(int i) => pr.Render(n.Children[i]);
+        Proof Wu() => LevelWU(d.Ph, g);
+        Proof Two(string label, string a, string b) =>
+            pr.Apply(label, S(("ph", d.Ph), ("U", g), ("A", a), ("B", b)), Wu(), UnivMem(d, a, g), UnivMem(d, b, g));
+        switch (n.Rule.Label)
+        {
+            case "c0":
+                return pr.Apply("wun0", S(("ph", d.Ph), ("U", g)), Wu());
+            case "c1o" or "c2o":
+                {
+                    string o = pr.Render(n);
+                    Proof om = pr.Apply("wunom", S(("ph", d.Ph), ("U", g)), Wu());
+                    return pr.Apply("sseldd", S(("ph", d.Ph), ("A", "_om"), ("B", g), ("C", o)), om, _d.Lift(d.Ph, pr.Apply(o == "1o" ? "1onn" : "2onn", S())));
+                }
+            case "csn":
+                return pr.Apply("wunsn", S(("ph", d.Ph), ("U", g), ("A", C(0))), Wu(), UnivMem(d, C(0), g));
+            case "cop":
+                return Two("wunop", C(0), C(1));
+            case "cun":
+                return Two("wunun", C(0), C(1));
+            case "cxp":
+                return Two("wunxp", C(0), C(1));
+            case "co" when C(2) == "^m":
+                return Two("wunmap", C(0), C(1));
+            case "ciun":
+                return BoundedIun(d, x, g, C(0), C(1), C(2));
+        }
+        return null;
+    }
+
+    /// <summary>( d.Ph -> X e. SmallWuni ): the closure steps alone (no levels, constants or omega inside it).</summary>
+    private Proof SmallMem(PCtx d, string x)
+    {
+        if (TryHyp(d, $"{x} e. {SmallWuni}") is Proof direct)
+        {
+            return direct;
+        }
+        SyntaxTree n = pr.Parse("class", x.Split(' ')) ?? throw new Refused($"does not parse: {x}");
+        if (n.Rule.Label == "cfv" && pr.Parse("class", pr.Render(n.Children[1]).Split(' ')) is { Rule.Label: "crdg" } rdg)
+        {
+            return StageIn(d, x, rdg, pr.Render(n.Children[0]), SmallWuni);
+        }
+        if (n.Rule.Label == "cif")
+        {
+            return pr.Apply("ifcld", S(("ph", d.Ph), ("ps", pr.Render(n.Children[0])), ("A", pr.Render(n.Children[1])), ("B", pr.Render(n.Children[2])), ("C", SmallWuni)),
+                SmallMem(d, pr.Render(n.Children[1])), SmallMem(d, pr.Render(n.Children[2])));
+        }
+        return LoweredMem(d, x, SmallWuni, n) ?? throw new Refused($"no proof yet that {x} is in the weak universe {SmallWuni}");
+    }
+
+    /// <summary>
+    /// ( d.Ph -> U_ v e. dom body e. G ) in a weak universe G, which isn't closed under indexed unions. Two shapes, the
+    /// ones the model's types are built from:
+    /// - a union of singletons of tuples, nested: U_ z e. A U_ w e. B { <. c , <. z , w >. >. }. It is a subset of the
+    ///   product of the components' sets, ( { c } X. ( A X. B ) ), a member of G (wunxp, wunsn), so a member (wunss);
+    /// - the union of a recursive type's stages, U_ k e. _om ( rec ( F , (/) ) ` k ). Each stage is in the small weak
+    ///   universe ( R1 ` ( ( rank ` (/) ) +o _om ) ) (by induction over omega), so the union is a subset of it, and it is
+    ///   a member of each level (lean-wu-r): the reflection step. A type with parameters needs a weak universe that
+    ///   contains them, not built yet.
+    /// </summary>
+    private Proof BoundedIun(PCtx d, string x, string g, string v, string dom, string body)
+    {
+        if (d.Ph.Split(' ').Contains(v))
+        {
+            throw new Refused($"the union's variable {v} occurs in the hypotheses");
+        }
+        PCtx e = EnterText(d, v, dom);
+        string bound;
+        Proof sub;   // ( e.Ph -> body C_ bound )
+        Proof boundIn;   // ( d.Ph -> bound e. G )
+        SyntaxTree bn = pr.Parse("class", body.Split(' '))!;
+        if (dom == "_om" && bn.Rule.Label == "cfv" && pr.Parse("class", pr.Render(bn.Children[1]).Split(' ')) is { Rule.Label: "crdg" } rdg
+            && pr.Render(bn.Children[0]) == v)
+        {
+            bound = SmallWuni;
+            Proof stage = StageIn(e, body, rdg, v, SmallWuni);
+            sub = pr.Apply("wunelss", S(("ph", e.Ph), ("U", SmallWuni), ("A", body)), LevelWU(e.Ph, SmallWuni), stage);
+            string k = LevelOf(g) ?? throw new Refused($"a recursive type's stages inside {g}");
+            Proof zeroIn = pr.Apply("wun0", S(("ph", d.Ph), ("U", g)), LevelWU(d.Ph, g));
+            boundIn = _d.Syl(_d.Jca(LevelUniv(d.Ph, k), zeroIn), ApplyId("lean-wu-r", S(("W", g), ("X", "(/)"))));
+        }
+        else
+        {
+            (bound, sub) = SubsetBound(e, body);
+            if (bound.Split(' ').Contains(v))
+            {
+                throw new Refused($"no bound for the union {x} free of {v}");
+            }
+            boundIn = UnivMem(d, bound, g);
+        }
+        Proof iunSub = pr.Apply("iunssd", S(("ph", d.Ph), ("x", v), ("A", dom), ("B", body), ("C", bound)), sub);
+        return pr.Apply("wunss", S(("ph", d.Ph), ("U", g), ("A", bound), ("B", x)), LevelWU(d.Ph, g), boundIn, iunSub);
+    }
+
+    /// <summary>A set S with ( d.Ph -> body C_ S ), for body a singleton of a tuple, or a union of such (nested).</summary>
+    private (string, Proof) SubsetBound(PCtx d, string body)
+    {
+        SyntaxTree n = pr.Parse("class", body.Split(' '))!;
+        if (n.Rule.Label == "csn")
+        {
+            string a = pr.Render(n.Children[0]);
+            (string s, Proof aIn) = ElemBound(d, a);
+            return (s, pr.Apply("snssd", S(("ph", d.Ph), ("A", a), ("B", s)), aIn));
+        }
+        if (n.Rule.Label == "ciun")
+        {
+            string v = pr.Render(n.Children[0]), dom = pr.Render(n.Children[1]), inner = pr.Render(n.Children[2]);
+            if (d.Ph.Split(' ').Contains(v))
+            {
+                throw new Refused($"the union's variable {v} occurs in the hypotheses");
+            }
+            PCtx e = EnterText(d, v, dom);
+            (string s, Proof sub) = SubsetBound(e, inner);
+            if (s.Split(' ').Contains(v))
+            {
+                throw new Refused($"no bound for {body} free of {v}");
+            }
+            return (s, pr.Apply("iunssd", S(("ph", d.Ph), ("x", v), ("A", dom), ("B", inner), ("C", s)), sub));
+        }
+        throw new Refused($"no bound yet for the union body {body} in a weak universe (milestone 4: an indexed union needs reflection)");
+    }
+
+    /// <summary>A set S with ( d.Ph -> a e. S ): a variable's domain, a product for a pair, a singleton for a closed term.</summary>
+    private (string, Proof) ElemBound(PCtx d, string a)
+    {
+        foreach ((Proof p, string h) in Facts(d))
+        {
+            if (h.StartsWith(a + " e. ", StringComparison.Ordinal))
+            {
+                return (h[(a.Length + 4)..], p);
+            }
+        }
+        SyntaxTree n = pr.Parse("class", a.Split(' '))!;
+        if (n.Rule.Label == "cop")
+        {
+            string l = pr.Render(n.Children[0]), r = pr.Render(n.Children[1]);
+            (string sl, Proof pl) = ElemBound(d, l);
+            (string sr, Proof pr2) = ElemBound(d, r);
+            return ($"( {sl} X. {sr} )", pr.Apply("opelxpd", S(("ph", d.Ph), ("A", l), ("B", r), ("C", sl), ("D", sr)), pl, pr2));
+        }
+        if (a.Split(' ').All(tok => pr.Database.FloatOf(tok) is null || pr.Database.FloatOf(tok)!.Expr.Type != "setvar"))
+        {
+            return ($"{{ {a} }}", pr.Apply("snidg", S(("A", a), ("V", "_V"))) is var sn
+                ? _d.Syl(Exists(d.Ph, a), sn) : default);
+        }
+        throw new Refused($"no set yet known to contain {a}");
     }
 
     /// <summary>A constant applied to arguments, ( ( lean.c ` U ) ` a1 ) …, as the constant and the arguments.</summary>

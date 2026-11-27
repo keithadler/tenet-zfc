@@ -1,0 +1,34 @@
+#!/bin/sh
+# Check that theorems of a tenet-zfc output are plain ZFC (docs/milestone4.md): metamath-exe's
+# `show trace_back <label> /axioms` lists every axiom a theorem rests on, through every theorem it uses. A theorem
+# that used ax-groth, or any set.mm theorem proved from it (grothtsk, inaex, ...), would list ax-groth.
+#
+# Also checks that each statement has no universe hypothesis: no lean.-tower, lean.-wtower, Univ or WUni, and no U
+# left (the class variable the model's universe argument is written with).
+#
+# usage: scripts/check-axioms <metamath> <out.mm, next to set.mm> <label>...
+set -eu
+mm="$1"; file="$2"; shift 2
+[ $# -gt 0 ] || { echo "check-axioms: no labels given"; exit 2; }
+dir="$(cd "$(dirname "$file")" && pwd)"; name="$(basename "$file")"
+cd "$dir"
+status=0
+for label in "$@"; do
+  out=$("$mm" "read $name" "show statement $label" "show trace_back $label /axioms" "exit")
+  if echo "$out" | grep -q '?Error\|?There is no statement'; then
+    echo "$out" | grep -A3 '?'
+    echo "check-axioms: $label: metamath-exe reported an error"; status=1; continue
+  fi
+  stmt=$(echo "$out" | awk "/^$label \\\$p/,/\\\$\\./" | tr -s ' \n' ' ')
+  [ -n "$stmt" ] || { echo "check-axioms: $label is not a \$p in $name"; status=1; continue; }
+  axioms=$(echo "$out" | awk '/depends on these axioms|uses these axioms|axioms used/{f=1} f' | grep -o 'ax-[A-Za-z0-9.-]*' | sort -u | tr '\n' ' ')
+  [ -n "$axioms" ] || { echo "$out"; echo "check-axioms: $label: no axiom list from metamath-exe"; status=1; continue; }
+  if echo " $axioms" | grep -q ' ax-groth '; then
+    echo "check-axioms: $label uses ax-groth"; status=1; continue
+  fi
+  if echo "$stmt" | grep -Eq '(^| )(lean\.-tower|lean\.-wtower|Univ|WUni|U)( |$)'; then
+    echo "check-axioms: $label still has a universe hypothesis: $stmt"; status=1; continue
+  fi
+  echo "check-axioms: $label is plain ZFC (axioms: $axioms)"
+done
+exit $status
