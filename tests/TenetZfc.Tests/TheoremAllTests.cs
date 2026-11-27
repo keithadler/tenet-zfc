@@ -61,12 +61,13 @@ public class TheoremAllTests
         Thread.Sleep(300);
         double slept = ThreadCpu.Seconds()!.Value - t0;
         Assert.True(slept < 0.2, $"sleeping used {slept}s of CPU");
-        double x = 0;
+        // Spinning advances it (on a loaded machine slowly: spin until it moves, for at most 20 s).
+        double x = 0, t1 = ThreadCpu.Seconds()!.Value;
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (sw.ElapsedMilliseconds < 300)
+        while (ThreadCpu.Seconds()!.Value - t1 < 0.05 && sw.Elapsed.TotalSeconds < 20)
         {
             x += Math.Sqrt(x + 1);
         }
-        Assert.True(ThreadCpu.Seconds()!.Value - t0 > 0.05, $"spinning used no CPU ({x})");
+        Assert.True(ThreadCpu.Seconds()!.Value - t1 >= 0.05, $"spinning used no CPU ({x})");
     }
 }
