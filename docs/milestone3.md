@@ -863,7 +863,7 @@ Same proofs, same outputs (both checked); measured on an Apple-silicon Mac share
 
 Until now only small fixtures had been emitted and verified; `model-survey` only checks that definitions translate, in dry-run mode. This run emits and verifies everything the model handles in `Init`.
 
-**Universes.** The run below was made in the one-universe model, before the tower became the default. `define-all` now follows the default: each chunk monomorphizes the export afresh, defines each constant's instance with its universe parameters at 0 (`c.{0,…}`), and states its assumptions in its header. `--single-universe` reproduces the run as recorded. The counts below have not yet been remeasured in the tower; `model-survey` in the tower gives 14,105 definitions that translate, against 13,958 in one universe ([above](#model-survey-in-the-tower)).
+**Universes.** The run below was made in the one-universe model, before the tower became the default. `define-all` now follows the default: each chunk monomorphizes the export afresh, defines each constant's instance with its universe parameters at 0 (`c.{0,…}`), and states its assumptions in its header. `--single-universe` reproduces the run as recorded. The counts below have not been remeasured in the tower; [the run below](#the-init-wide-run-again-built) remeasures most of them, with names escaped and `Acc`; `model-survey` in the tower gives 14,105 definitions that translate, against 13,958 in one universe ([above](#model-survey-in-the-tower)).
 
 **The tools.**
 - `tenet-zfc define-all <export> <set.mm> <outdir> [--chunk-size N] [--chunks a,b-c] [--jobs N] [--budget s]` targets every definition, opaque constant, inductive type, constructor and recursor that isn't unsafe, in export order. Each constant gets its definitional equation; each constructor also gets its recursor's computation rule. The output is a chunk per N constants. Each chunk is a standalone `.mm` that includes set.mm and defines everything its constants use (a fresh model and database per chunk), so chunks verify independently. A refusal or failure is recorded per constant in `chunk-NNNN.tsv` with its reason, and the run goes on. `--budget` caps the time per constant; the prover and the type inferencer enforce it.
@@ -1013,3 +1013,38 @@ The run above was made in the one-universe model, before names were escaped and 
 - **Empty types.** A type with no constructors is `(/)`, and its recursor is `(/)`: its major premise ranges over nothing. `Empty.rec`, `PEmpty.rec`, `Empty.elim` and `absurd` translate.
 
 Each of these is checked by a test on `tests/fixtures/rest.ndjson`, through metamath-exe and mmverify.py.
+
+**The result (partial).** `Init` from Lean 4.36.0, in the tower model, with names escaped, `Acc`, and the fixes above. The run was stopped after 34 of its 40 chunks, chunks 0–32 and 34, which hold 17,000 of `Init`'s 19,885 constants. Chunks 33 and 35–39 are a follow-up. 29 chunks come from commit 6af3f87. Chunks 2, 4, 10, 11 and 22 failed the checkers and were translated again after the fix below, at 724b9d4, which also merges quotients and choice in the tower (#12). The 196 refusals for choice in the table therefore come from the other 29 chunks, and translating those again is part of the follow-up.
+
+| | Constants | Translated, equation verified | Refused | Errors (time budget) |
+|---|---|---|---|---|
+| definitions | 14,769 | 14,366 | 391 | 12 |
+| constructors | 794 | 785 | 7 | 2 |
+| recursors | 594 | 590 | 4 | 0 |
+| inductive types | 592 | 588 | 4 | 0 |
+| opaque constants | 251 | 236 | 15 | 0 |
+| **all** | **17,000** | **16,565** | **421** | **14** |
+
+The same 34 chunks of the first run translated 13,553 constants (11,587 definitions). 3,074 more translate now: 2,780 of them were refused before only for their names, and 244 for `Acc`.
+
+- **Equations:** 16,565 emitted, 16,565 checked by metamath-exe and mmverify.py.
+- **Computation rules:** 653 emitted and checked (467 in the same chunks before); 105 need none; 13 refused, 14 over the time budget (`IO.Error`'s and `Lean.ParserDescr`'s).
+- **Checkers:** 33 chunks pass all three. Chunk 31 passes metamath-exe and mmverify.py, but mmj2's `definitionCheck` stops with an internal error ("A-PR-0016 Programmer Error", `convertRPNToFormula`: "proof incomplete" at step 2217 of a justification it builds itself). The chunk's largest definition has 10,079 symbols, well under the limit, so this is not mmj2's size limit; which definition triggers it is a follow-up. 13 computation rules (`Lean.ParserDescr`'s) are too long for mmj2's proof verifier and are checked by the other two, as before.
+- **The run found one more bug,** fixed: a proof field's hypothesis found up to renaming (above) can bind the variable of the ∃ that a proposition's computation rule witnesses with `(/)`, and `rspcedvd` needs them disjoint. All three checkers rejected 11 computation rules in chunks 2, 4, 10, 11 and 22 (`Std.TransCmp.mk`, `LawfulFunctor.mk`, `Equivalence.mk`, …). Those are refused now ("the witness's variable occurs in the hypotheses"); renaming the witness apart would admit them.
+
+**Why the rest don't translate** (in these 34 chunks; refusals, errors, and refused or failed computation rules, 462 in all):
+
+| Reason | Constants |
+|---|---|
+| the definition is too large for mmj2's definition check (over 15,000 symbols), now that their names translate: macro rules, parsers, `stdNext` | 218 |
+| uses `Classical.choice` or `Quot` in a chunk translated before #12 brought them into the tower | 200 |
+| over the time budget of 240 s | 28 |
+| a computation rule whose witness's variable occurs in the hypotheses (above) | 11 |
+| part of a type an earlier refusal stopped (`Std.Packages.PreorderOfLEArgs`) | 3 |
+| `Acc.rec`'s and `Acc.below.rec`'s computation rules (above) | 2 |
+
+**Cost.** 131.9 MiB of compressed output for the 34 chunks. Translation took 9.9 hours summed over constants, at 3 jobs on a machine shared with other sessions at loads up to 900. On a quiet machine the five chunks translated again took 4 minutes together. Checking took metamath-exe 70 s, mmverify.py 294 s and mmj2 48 minutes, summed over chunks.
+
+**To reproduce:** as for the first run, with the default tower model.
+
+**Follow-up:** chunks 33 and 35–39; the 29 chunks from 6af3f87 again, for choice and quotients; chunk 31's mmj2 error; `Acc.rec`'s computation rule.

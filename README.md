@@ -71,7 +71,7 @@ metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `
 | more than 20 arguments | class variables the output declares itself (`AA1`, …) | computation rules |
 | names with `'`, `?`, `₂`, `_@`, `«»` | escaped one-to-one into tokens and labels: `List.map'` is `lean.List.map-q` | |
 
-On Lean 4.36's `Init`, **14,091 of 17,590 definitions (80%)** translate together with everything they use, in the tower model, quotients and choice included, up from 48 when milestone 3 began (13,958 in the one-universe model).
+On Lean 4.36's `Init`, `model-survey` counts **14,091 of 17,590 definitions (80%)** translating together with everything they use, in the tower model with quotients and choice, up from 48 when milestone 3 began. Since names are escaped and `Acc` is in the model, the latest Init-wide run translated, emitted and verified **16,565 of the 17,000 constants** in the 34 of its 40 chunks that finished, up from 13,553 in the same chunks. That includes **14,366 of 14,769 definitions (97%)** and 653 computation rules, and 33 of the 34 chunks pass all three checkers ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-again-built)).
 
 **Theorems.** `tenet-zfc theorem` proves Lean theorems from their own proof terms, through the model. A proof's typing becomes membership, `(/) e. ⟦P⟧`, and each conversion becomes an equation.
 
@@ -97,7 +97,9 @@ v0.1 is the first version someone else can install and use to get independently 
 **Definitions**
 - [x] A generic model for every kind of Lean declaration: definitions, inductive types, recursors, quotients and axioms
 - [x] More set variables than `set.mm`'s 26, declared by the output
-- [ ] Translate the rest of `Init`'s definitions. The blockers left include `Acc`, whose premises are functions into the type, so its stages must go beyond ω.
+- [x] Every Lean name as a `set.mm` token: `'`, `?`, Unicode, `_@` and `«»` escaped one-to-one (3,397 constants were refused for their names alone)
+- [x] `Acc` and well-founded recursion: least fixed points as the intersection of the closed sets, `Acc.rec` by `frecs` over them (its computation rule is not done yet)
+- [ ] Translate the rest of `Init`'s definitions. In the 34 of 40 chunks of the latest run, 14,366 of 14,769 definitions (97%) translate with verified equations. What is left: chunks 33 and 35–39; definitions too large for mmj2's check (218); choice and quotients in chunks translated before they came to the tower (200); time-outs (28) ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-again-built))
 - [x] Verify every translated `Init` definition with all three checkers, and publish the counts: 15,958 equations and 471 computation rules verified, none rejected ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-built))
 
 **Theorems**
