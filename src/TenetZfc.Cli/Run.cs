@@ -31,7 +31,7 @@ public static class RunCommand
           --no-trace         don't use Tenet, even if it is found
           --no-verify        translate only; don't run the checkers
           --uncompressed     flat proofs instead of Metamath's compressed format
-          --single-universe  the one-universe model instead of the tower of universes (quotients and choice need it)
+          --single-universe  the one-universe model instead of the tower of universes (for comparison)
 
         tools (each a flag, else an environment variable, else the PATH):
           --setmm     TENET_ZFC_SETMM      set.mm, or its directory                          (always needed)

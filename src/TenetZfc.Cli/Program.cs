@@ -125,18 +125,20 @@ if (args.Length >= 5 && args[0] == "define")
             var (stmt, proof, distinct) = model.Equation(dt.Of(name));
             proved.Add(($"lean-{Model.LabelPart(name)}-eq", stmt, proof, distinct, $"The definitional equation of {name}."));
             Console.WriteLine($"{name}: {stmt} ({proof.Count} proof steps)");
-            if (name == "Quot.lift")
+            string baseOf = System.Text.RegularExpressions.Regex.Replace(name, @"\.\{[0-9,]+\}$", "");
+            if (baseOf == "Quot.lift" && QuotMkFor(dt, mono, name) is Name mkInst)
             {
-                // The quotient's computation rule: Quot.lift f h (Quot.mk r a) = f a.
-                var (qstmt, qproof, qdistinct) = model.QuotLiftIota();
-                proved.Add(($"lean-{name}-iota", qstmt, qproof, qdistinct, "The computation rule of the quotient: Quot.lift f h (Quot.mk r a) = f a."));
+                // The quotient's computation rule: Quot.lift f h (Quot.mk r a) = f a (in the tower, Quot.lift.{k,l}
+                // with Quot.mk.{k}; at level 0 one of them is a proof and there is nothing to compute).
+                var (qstmt, qproof, qdistinct) = model.QuotLiftIota(dt.Of(name), mkInst);
+                proved.Add(($"lean-{Model.LabelPart(name)}-iota", qstmt, qproof, qdistinct, "The computation rule of the quotient: Quot.lift f h (Quot.mk r a) = f a."));
                 Console.WriteLine($"{name} (computation rule): {qstmt} ({qproof.Count} proof steps)");
             }
-            if (name == "Classical.choice")
+            if (baseOf == "Classical.choice" && name != "Classical.choice.{0}")
             {
-                // Choice picks an element of α, given a well-ordering of the universe.
-                var (cstmt, cproof, cdistinct) = model.ChoiceSpec();
-                proved.Add(($"lean-{name}-spec", cstmt, cproof, cdistinct, "Classical.choice picks an element of a nonempty type, given a well-ordering W of the universe."));
+                // Choice picks an element of α, given a well-ordering of the universe (of the tower's union).
+                var (cstmt, cproof, cdistinct) = model.ChoiceSpec(dt.Of(name));
+                proved.Add(($"lean-{Model.LabelPart(name)}-spec", cstmt, cproof, cdistinct, $"{name} picks an element of a nonempty type, given a well-ordering W of the universe{(singleUniverse ? "" : "s' union")}."));
                 Console.WriteLine($"{name} (picks an element): {cstmt} ({cproof.Count} proof steps)");
             }
             if (denv.Find(dt.Of(name))?.Kind == ConstKind.Constructor)
@@ -224,6 +226,10 @@ if (args.Length >= 5 && args[0] == "theorem")
         {
             // A proof step that doesn't check: a bug in the translator, reported, and the other theorems go on.
             Console.WriteLine($"{name}: failed: {e.Message}");
+            if (System.Environment.GetEnvironmentVariable("TENET_DEBUG") is not null)
+            {
+                Console.Error.WriteLine(e.StackTrace);
+            }
             tstatus = 1;
         }
     }
@@ -671,6 +677,22 @@ static (List<string>, TenetZfc.Metamath.Expr)? TryListInduction(ListInduction li
 
 // The instance of a constant at the levels its name gives (c.{1,0}), or with every universe parameter at 0. A recursor's
 // motive level may be left out: c.rec.{1} is the recursor of c.{1}.
+// The Quot.mk that Quot.lift's computation rule is about: Quot.mk, or in the tower Quot.mk.{k} for Quot.lift.{k,l}; null
+// at level 0, where Quot.mk or Quot.lift is a proof and there is nothing to compute.
+static Name? QuotMkFor(Terms t, Monomorph? mono, string lift)
+{
+    if (mono is null)
+    {
+        return t.Of("Quot.mk");
+    }
+    var m = System.Text.RegularExpressions.Regex.Match(lift, @"\.\{([0-9]+),([0-9]+)\}$");
+    if (!m.Success || m.Groups[1].Value == "0" || m.Groups[2].Value == "0")
+    {
+        return null;
+    }
+    return InstanceOf(t, mono, $"Quot.mk.{{{m.Groups[1].Value}}}");
+}
+
 static Name InstanceOf(Terms t, Monomorph mono, string given)
 {
     var m = System.Text.RegularExpressions.Regex.Match(given, @"^(.*)\.\{([0-9]+(?:,[0-9]+)*)\}$");

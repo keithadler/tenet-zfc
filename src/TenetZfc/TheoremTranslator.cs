@@ -42,12 +42,26 @@ public sealed partial class TheoremTranslator
     /// </summary>
     public (MmExpr Statement, List<string> Proof) Prove(Name theorem)
     {
+        // A name may give the levels, as define's do: Quot.inductionOn.{1} is Quot.inductionOn at Type.
+        var given = System.Text.RegularExpressions.Regex.Match($"{theorem}", @"^(.*)\.\{([0-9]+(?:,[0-9]+)*)\}$");
+        if (given.Success)
+        {
+            theorem = _t.Of(given.Groups[1].Value);
+        }
         ConstInfo c = _mono.Env.Find(theorem) ?? throw new Model.Refused($"{theorem} is not in the export");
         if (c.Kind != ConstKind.Theorem || c.Value is null)
         {
             throw new Model.Refused($"{theorem} is not a theorem");
         }
-        Name inst = _mono.Instance(theorem, c.LevelParams.Select(_ => _t.Zero).ToArray());
+        Level Lv(int k) => k == 0 ? _t.Zero : _t.Succ(Lv(k - 1));
+        Level[] levels = given.Success
+            ? given.Groups[2].Value.Split(',').Select(x => Lv(int.Parse(x, System.Globalization.CultureInfo.InvariantCulture))).ToArray()
+            : c.LevelParams.Select(_ => _t.Zero).ToArray();
+        if (levels.Length != c.LevelParams.Length)
+        {
+            throw new Model.Refused($"{theorem} has {c.LevelParams.Length} universe parameters, given {levels.Length}");
+        }
+        Name inst = _mono.Instance(theorem, levels);
         return _model.ProveTheorem(_mono.Env.Find(inst)!);
     }
 }
@@ -1228,7 +1242,7 @@ public sealed partial class Model
     /// ( d.Ph -> body e. target ) from a lemma |- ( ( ( U e. … /\ A e. D1 ) /\ … ) -> X e. Y ): its class variables
     /// matched against body and target, its hypotheses discharged from the context.
     /// </summary>
-    private Proof UseLemma(PCtx d, string label, string body, string target)
+    private Proof UseLemma(PCtx d, string label, string body, string target, int arity = 0)
     {
         Statement st = pr.Database[label];
         (string ante, string concl) = _d.Split(st.Expr);
@@ -1238,6 +1252,12 @@ public sealed partial class Model
         if (!Match(concl, $"{body} e. {target}", sub))
         {
             throw new Refused($"{label} doesn't match {body} e. {target}");
+        }
+        // A lemma about the value at its first arity arguments, A, B, …, whose conclusion doesn't mention them all (a
+        // hypothesis like Quot.lift's h): those are the binders MapMem entered, the last arity ones.
+        for (int i = 0; i < arity && d.Binders.Count >= arity; i++)
+        {
+            sub.TryAdd(ClassVars[i], d.Binders[d.Binders.Count - arity + i]);
         }
         foreach (Statement h in st.Hyps.Where(h => h.Kind == 'f'))
         {
@@ -1348,6 +1368,12 @@ public sealed partial class Model
         var c = new PCtx { Ph = UHyp };
         Expr self = t.Const(n, ci.LevelParams.Select(p => t.Param(p)).ToArray());
         string text = TrIn(c, self);
+        if (Token(n) is string ctok && _choiceDependent.Contains(ctok))
+        {
+            // Its value takes choice's well-ordering of the tower's union (ModelBuiltins.cs); a theorem would need it,
+            // and W We U. ran U, among its hypotheses.
+            throw new Refused($"{n} depends on Classical.choice; theorems through choice aren't in the translator yet");
+        }
         string ty = TrIn(c, ci.Type);
         Proof p;
         switch (ci.Kind)
@@ -1439,6 +1465,20 @@ public sealed partial class Model
                     string cin = CtorInLemma(ci);
                     Proof unfold = DeltaEq(c.Ph, Token(n)!);
                     Proof inMap = MapMem(c, Rhs(unfold), ci.Type, ty, ci.NumParams + ci.NumFields, (d, body, _, target) => UseLemma(d, cin, body, target));
+                    p = pr.Apply("eqeltrd", S(("ph", c.Ph), ("A", text), ("B", Rhs(unfold)), ("C", ty)), unfold, inMap);
+                    break;
+                }
+            case ConstKind.Quot when text == "(/)":
+                // Quot.ind, and Quot.mk or Quot.lift into a proposition: proofs, whose statements hold in the model (QuotTyping.cs).
+                p = IntroPiProp(c, ci.Type, (d, body) => QuotProofHolds(d, body, BaseName(n)));
+                break;
+            case ConstKind.Quot when text != "(/)":
+                {
+                    // Quot, Quot.mk, Quot.lift: the value at its arguments is in the type (lean-in-c, ModelBuiltins.cs).
+                    string qin = QuotInLemma(ci, ty);
+                    Proof unfold = DeltaEq(c.Ph, Token(n)!);
+                    int depth = BaseName(n) switch { "Quot" => 2, "Quot.mk" => 3, _ => 5 };
+                    Proof inMap = MapMem(c, Rhs(unfold), ci.Type, ty, depth, (d, body, _, target) => UseLemma(d, qin, body, target, depth));
                     p = pr.Apply("eqeltrd", S(("ph", c.Ph), ("A", text), ("B", Rhs(unfold)), ("C", ty)), unfold, inMap);
                     break;
                 }
@@ -1745,6 +1785,8 @@ public sealed partial class Model
                 return IotaStep(c, e, k, rci, args);
             case Proj pj:
                 return ProjStep(c, pj, args);
+            case Const k when args.Count >= 6 && BaseName(k.Name) == "Quot.lift" && env.Find(k.Name) is { Kind: ConstKind.Quot }:
+                return QuotIotaStep(c, k, args);   // QuotTyping.cs
             case Const k when env.Find(k.Name) is { Kind: ConstKind.Definition or ConstKind.Opaque } ci && (ci.Value ?? ci.OpaqueValue) is Expr v:
                 {
                     Define(k.Name);
