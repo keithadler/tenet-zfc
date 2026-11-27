@@ -220,6 +220,13 @@ public sealed partial class Model
                     return pr.Apply(na.Rule.Label == "wral" ? "raleqbidv" : "rexeqbidv",
                         S(("ph", "T."), ("x", x), ("A", KidA(2)), ("B", KidB(2)), ("ps", KidA(0)), ("ch", KidB(0))), pa, pp);
                 }
+            case "wal":
+            case "wex":
+                {
+                    // children: ph, x
+                    Proof pp = Alpha("wff", KidA(0), KidB(0)) ?? _d.BiRefl("T.", KidA(0));
+                    return pr.Apply(na.Rule.Label == "wal" ? "albidv" : "exbidv", S(("ph", "T."), ("x", KidA(1)), ("ps", KidA(0)), ("ch", KidB(0))), pp);
+                }
             case "cif":
                 {
                     Proof pc = Alpha("wff", KidA(0), KidB(0)) ?? _d.BiRefl("T.", KidA(0));
@@ -298,6 +305,7 @@ public sealed partial class Model
         ("cmpt" or "cixp" or "ciun", "B") => true,
         ("wral" or "wrex", "ph") => true,
         ("cab" or "crab", "ph") => true,
+        ("wal" or "wex", "ph") => true,
         _ => false,
     };
 
@@ -323,6 +331,14 @@ public sealed partial class Model
                 ? SubstEq("wff", body, x, $"{x} = {y}")
                 : pr.Apply("a1i", S(("ph", $"( {body} <-> {body} )"), ("ps", $"{x} = {y}")), pr.Apply("biid", S(("ph", body))));
             closed = pr.Apply(label == "wral" ? "cbvralvw" : "cbvrexvw", S(("x", x), ("y", y), ("A", dom), ("ph", body), ("ps", SubstFree(body, x, y))), sub);
+        }
+        else if (label is "wal" or "wex")
+        {
+            string body = pr.Render(n.Children[0]);
+            Proof sub = body.Split(' ').Contains(x)
+                ? SubstEq("wff", body, x, $"{x} = {y}")
+                : pr.Apply("a1i", S(("ph", $"( {body} <-> {body} )"), ("ps", $"{x} = {y}")), pr.Apply("biid", S(("ph", body))));
+            closed = pr.Apply(label == "wal" ? "cbvalvw" : "cbvexvw", S(("x", x), ("y", y), ("ph", body), ("ps", SubstFree(body, x, y))), sub);
         }
         else if (label is "cab" or "crab")
         {

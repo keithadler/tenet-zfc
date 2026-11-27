@@ -13,8 +13,8 @@ The first version meant for someone else to install and use: independently check
 ### Theorems across Init (milestone 3)
 
 - **`theorem-all`**: every theorem of an export, or every Nth, through the model, in chunks with an outcome per theorem, CPU-time budgets and resuming ([docs/milestone3.md](docs/milestone3.md#theorems-across-init-built-theorem-all-measured-on-a-sample)).
-- Fixes for the first blockers of the Init sample: Nat literals as arguments and of any size (`lean-litnat`); constructors of recursive propositions (`Nat.le.refl`, `Nat.le.step`); `Decidable`'s proof field in its recursor's typing; `$d` traps under binders in congruence and in instantiating a Π-proposition. Computation rules and equations declare every `$d` pair their proofs need.
-- CI: `tests/fixtures/blockers.ndjson`, 32 theorems that must all prove.
+- Fixes for the first blockers of the Init sample: Nat literals as arguments and of any size (`lean-litnat`); constructors of recursive propositions (`Nat.le.refl`, `Nat.le.step`) and induction on them (`lean-ind-Nat.le`); `Decidable`'s proof field in its recursor's typing; eliminating `Exists` and `Nonempty`; `$d` traps under binders in congruence and in instantiating a Π-proposition. Computation rules and equations declare every `$d` pair their proofs need.
+- CI: `tests/fixtures/blockers.ndjson`, 39 theorems that must all prove.
 
 ### Universe elimination (milestone 4, started)
 

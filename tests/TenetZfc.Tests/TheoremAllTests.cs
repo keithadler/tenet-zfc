@@ -41,7 +41,8 @@ public class TheoremAllTests
         var outcomes = run.Chunk(2, picked, outDir);
         Assert.Equal("proved", outcomes.Single(o => o.Name == "Eq.symm").Status);
         Assert.Equal("proved", outcomes.Single(o => o.Name == "And.symm").Status);
-        Assert.Equal("refused", outcomes.Single(o => o.Name == "Nat.le_of_succ_le_succ").Status);
+        // Refused until induction on Nat.le came to the model (RecPropInduction.cs).
+        Assert.Equal("proved", outcomes.Single(o => o.Name == "Nat.le_of_succ_le_succ").Status);
         Assert.Equal("crash", outcomes.Single(o => o.Name == "Iff.symm").Status);
         string mm = File.ReadAllText(Path.Combine(outDir, "chunk-0002.mm"));
         Assert.Contains("lean-thm-Eq.symm $p", mm);

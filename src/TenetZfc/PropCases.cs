@@ -67,16 +67,34 @@ public sealed partial class Model
                 string minor = vs[np + 1 + j];
                 string ty = Ty(minor);
                 Proof m = WeakenTo(ctx, HypIn(d, $"(/) e. {ty}"));
+                var asProof = new HashSet<string>();
                 foreach (string f in fields)
                 {
                     string fdom = Conjuncts(ctx).First(x => x.StartsWith($"{f} e. ", StringComparison.Ordinal))[(f.Length + 4)..];
-                    if (fields.Any(g => fdom.Split(' ').Contains(g)))
+                    if (fields.Any(g => asProof.Contains(g) && fdom.Split(' ').Contains(g)))
                     {
-                        throw new Refused($"{iname}'s case {j} has a field whose proposition mentions another field: {fdom}");
+                        throw new Refused($"{iname}'s case {j} has a field whose proposition mentions a proof field: {fdom}");
                     }
-                    (m, string inst) = TextApplyProp(ctx, m, ty, "(/)", dom => dom == fdom
-                        ? Inhabited(ctx, f, fdom)
-                        : pr.Apply("eleqtrd", S(("ph", ctx), ("A", "(/)"), ("B", fdom), ("C", dom)), Inhabited(ctx, f, fdom), AlphaIn(ctx, fdom, dom)));
+                    // A proof field is applied as (/), which its proposition holds at; a data field (Exists.intro's
+                    // witness) as itself, so the fields after it may mention it.
+                    Proof? inh;
+                    try
+                    {
+                        inh = Inhabited(ctx, f, fdom);
+                    }
+                    catch (Refused)
+                    {
+                        inh = null;
+                    }
+                    string arg = inh is null ? f : "(/)";
+                    Proof argIn = inh ?? HypIn(new PCtx { Ph = ctx }, $"{f} e. {fdom}");
+                    if (inh is not null)
+                    {
+                        asProof.Add(f);
+                    }
+                    (m, string inst) = TextApplyProp(ctx, m, ty, arg, dom => dom == fdom
+                        ? argIn
+                        : pr.Apply("eleqtrd", S(("ph", ctx), ("A", arg), ("B", fdom), ("C", dom)), argIn, AlphaIn(ctx, fdom, dom)));
                     ty = inst[7..];
                 }
                 string got = $"(/) e. {ty}";
@@ -138,6 +156,41 @@ public sealed partial class Model
             return _d.Syl(_d.Jca(isProp, aIn), pr.Apply("lean-pf", S(("A", dom), ("B", a))));
         }
         SyntaxTree dn = pr.Parse("class", dom.Split(' '))!;
+        if (ConstApp(dom) is (Name, List<string> cargs) && cargs.Count > 0)
+        {
+            // An applied proposition former (Nat.le n m): a proposition by its typing lemma.
+            Proof? isProp2;
+            try
+            {
+                isProp2 = PropIn2o(new PCtx { Ph = ctx }, dom);
+            }
+            catch (Refused)
+            {
+                isProp2 = null;
+            }
+            if (isProp2 is Proof ip)
+            {
+                EnsurePf();
+                return _d.Syl(_d.Jca(ip, aIn), pr.Apply("lean-pf", S(("A", dom), ("B", a))));
+            }
+        }
+        if (dn.Rule.Label == "cfv")
+        {
+            // A predicate's value, ( P ` b ) with P e. ( 2o ^m D ) and b e. D: a proposition (elmapi, ffvelcdm).
+            string pf = pr.Render(dn.Children[1]), b = pr.Render(dn.Children[0]);
+            string? ph = Conjuncts(ctx).FirstOrDefault(x => x.StartsWith($"{pf} e. ( 2o ^m ", StringComparison.Ordinal));
+            if (ph is not null)
+            {
+                string dd = ph[$"{pf} e. ( 2o ^m ".Length..^2];
+                if (Hyp(ctx, $"{b} e. {dd}") is Proof bIn)
+                {
+                    Proof fm = _d.Syl(Hyp(ctx, ph)!.Value, pr.Apply("elmapi", S(("A", pf), ("B", "2o"), ("C", dd))));
+                    Proof isProp2 = _d.Syl(_d.Jca(fm, bIn), pr.Apply("ffvelcdm", S(("F", pf), ("A", dd), ("B", "2o"), ("C", b))));
+                    EnsurePf();
+                    return _d.Syl(_d.Jca(isProp2, aIn), pr.Apply("lean-pf", S(("A", dom), ("B", a))));
+                }
+            }
+        }
         if (dn.Rule.Label == "cif" && pr.Render(dn.Children[1]) == "1o" && pr.Render(dn.Children[2]) == "(/)")
         {
             string chi = pr.Render(dn.Children[0]);

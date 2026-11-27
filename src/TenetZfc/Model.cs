@@ -44,6 +44,8 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     /// <summary>The deduction kit, with the model's alpha-renaming installed for Congruence (Deduction.RenameApart).</summary>
     private Deduction _d => _deduction.RenameApart is null ? Hook(_deduction) : _deduction;
     private readonly HashSet<Name> _defined = new(ReferenceEqualityComparer.Instance);
+    /// <summary>Recursive propositions built in stages (DefineRecursiveProposition), whose induction RecPropRecLemma types.</summary>
+    private readonly HashSet<Name> _recursiveProps = new(ReferenceEqualityComparer.Instance);
     private readonly StringBuilder _out = new();
     private ulong _fresh = 1UL << 58;
 
@@ -787,6 +789,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             DefineLeastProposition(ind, itok, ctors, rec);   // Model.Least.cs: Acc, and recursors into any sort
             return;
         }
+        _recursiveProps.Add(n);
         string steptok = itok + ".-step";
         bool Mentions(Expr e) => e switch
         {

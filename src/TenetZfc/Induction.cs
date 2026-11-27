@@ -27,11 +27,24 @@ public sealed partial class Model
         Define(k.Name);
         if (IsProposition(ind) && !ind.IsRec && ind.Ctors.Length == 1)
         {
-            return _propRec[k.Name] = SubstRecLemma(k, rec, ind, iname);
+            try
+            {
+                return _propRec[k.Name] = SubstRecLemma(k, rec, ind, iname);
+            }
+            catch (Refused e) when (e.Message.Contains("condition isn't equalities") && ind.NumIndices == 0)
+            {
+                // Not an equality (Exists, Nonempty): its condition is the constructor's one case, E. z e. D … ψ, so
+                // eliminate it as a case analysis with one case (PropCasesRecLemma: rexlimdva over the fields).
+                return _propRec[k.Name] = PropCasesRecLemma(k, rec, ind, iname);
+            }
         }
         if (IsProposition(ind) && ind.Ctors.Length >= 2 && !ind.IsRec && ind.NumIndices == 0)
         {
             return PropCasesRecLemma(k, rec, ind, iname);
+        }
+        if (IsProposition(ind) && ind.IsRec && _recursiveProps.Contains(iname))
+        {
+            return RecPropRecLemma(k, rec, ind, iname);   // RecPropInduction.cs: Nat.le
         }
         if (IsProposition(ind) && ind.Ctors.Length >= 2)
         {
