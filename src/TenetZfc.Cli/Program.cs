@@ -35,6 +35,11 @@ const string Usage = """
                                                          with Nat.add (docs/bridges.md); each theorem named (such as
                                                          Nat.add_zero) is proved through the model and restated in
                                                          set.mm's arithmetic
+      tenet-zfc list-bridge <export.ndjson> <set.mm> <out.mm> [<theorem>...] [--bridge-only]
+                                                         prove that the model's List A is Word A (nil, cons, length,
+                                                         append), with the Nat bridge; each theorem named (such as
+                                                         List.length_append) is proved through the model and restated
+                                                         in set.mm's words (docs/bridges.md, docs/demo.md)
       tenet-zfc survey <export.ndjson>                   how many theorem statements the translator covers, and
                                                          which constants block the rest
 
@@ -254,6 +259,27 @@ if (args.Length >= 4 && args[0] == "nat-bridge")
             return 2;
         }
         var (text, proved) = NatBridge.Emit(args[1], args[2], numerals, compress: !uncompressed, tower: !singleUniverse, restate: restate);
+        foreach (var th in proved)
+        {
+            Console.WriteLine($"{th.Label}: {th.Statement} ({th.Proof.Count} proof steps)");
+        }
+        File.WriteAllText(args[3], text);
+    }
+    catch (Model.Refused e)
+    {
+        Console.Error.WriteLine($"refused: {e.Message}");
+        return 1;
+    }
+    return 0;
+}
+if (args.Length >= 4 && args[0] == "list-bridge")
+{
+    // The List/Word bridge, and Lean theorems about List restated in set.mm's words (docs/bridges.md, docs/demo.md).
+    try
+    {
+        bool bridgeOnly = args.Contains("--bridge-only");
+        var names = args[4..].Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
+        var (text, proved) = ListBridge.Emit(args[1], args[2], names, compress: !uncompressed, bridgeOnly: bridgeOnly, log: m => Console.Error.WriteLine(m));
         foreach (var th in proved)
         {
             Console.WriteLine($"{th.Label}: {th.Statement} ({th.Proof.Count} proof steps)");
