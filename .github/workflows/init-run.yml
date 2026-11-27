@@ -24,6 +24,14 @@ on:
         description: Use the old one-universe model instead of the tower
         type: boolean
         default: false
+      mode:
+        description: definitions (define-all) or theorems (theorem-all)
+        type: choice
+        options: [definitions, theorems]
+        default: definitions
+      every:
+        description: For theorems, every Nth theorem (1 for all)
+        default: '1'
   pull_request:
     paths:
       - .github/workflows/init-run.yml
@@ -79,6 +87,8 @@ jobs:
           EVENT: ${{ github.event_name }}
           IN_CHUNK_SIZE: ${{ inputs.chunk_size }}
           IN_PER_JOB: ${{ inputs.chunks_per_job }}
+          MODE: ${{ inputs.mode || 'definitions' }}
+          EVERY: ${{ inputs.every || '1' }}
         run: |
           if [ "$EVENT" = pull_request ]; then
             size=$SMOKE_CHUNK_SIZE; per=$SMOKE_CHUNKS_PER_JOB
@@ -88,7 +98,11 @@ jobs:
           gunzip -k "$RUNNER_TEMP/init.ndjson.gz"
           : > "$RUNNER_TEMP/empty.mm"
           # A chunk number past the end selects nothing: define-all only reads the export and reports the count.
-          line=$(dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll define-all "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/empty.mm" "$RUNNER_TEMP/plan" --chunk-size "$size" --chunks 999999 | grep -m1 'constants to translate')
+          if [ "$MODE" = theorems ]; then
+            line=$(dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll theorem-all "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/empty.mm" "$RUNNER_TEMP/plan" --every "$EVERY" --chunk-size "$size" --chunks 999999 | grep -m1 'theorems in')
+          else
+            line=$(dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll define-all "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/empty.mm" "$RUNNER_TEMP/plan" --chunk-size "$size" --chunks 999999 | grep -m1 'constants to translate')
+          fi
           echo "$line"
           chunks=$(echo "$line" | sed -n 's/.* in \([0-9][0-9]*\) chunks.*/\1/p')
           [ -n "$chunks" ] || { echo "couldn't read the chunk count"; exit 1; }
@@ -144,9 +158,22 @@ jobs:
           CHUNK_SIZE: ${{ needs.plan.outputs.chunk_size }}
           BUDGET: ${{ inputs.budget || '600' }}
           SINGLE: ${{ inputs.single_universe }}
+          MODE: ${{ inputs.mode || 'definitions' }}
+          EVERY: ${{ inputs.every || '1' }}
         run: |
           gunzip "$RUNNER_TEMP/init.ndjson.gz"
           flags=""; [ "$SINGLE" = true ] && flags="--single-universe"
+          if [ "$MODE" = theorems ]; then
+            # One process per chunk, two at a time: in one process the chunk threads share a GC that stops them all,
+            # and a chunk's lemmas accumulate, so small chunks in their own processes keep memory bounded
+            # (docs/milestone3.md, "Running it on a 16 GB machine").
+            first=${RANGE%-*}; last=${RANGE#*-}
+            seq "$first" "$last" | xargs -P 2 -I{} dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll theorem-all $flags \
+              "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/out" --every "$EVERY" --chunk-size "$CHUNK_SIZE" --chunks {} --budget "$BUDGET" \
+              | grep -E '^chunk-|Unhandled|overflow' || true
+            ls "$RUNNER_TEMP"/out/chunk-*.mm > /dev/null
+            exit 0
+          fi
           dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll define-all $flags "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/out" \
             --chunk-size "$CHUNK_SIZE" --chunks "$RANGE" --jobs 4 --budget "$BUDGET"
           ls "$RUNNER_TEMP"/out/chunk-*.mm > /dev/null   # at least one chunk was written

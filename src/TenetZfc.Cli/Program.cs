@@ -25,6 +25,11 @@ const string Usage = """
                                                          equations and computation rules, as chunk-NNNN.mm files that
                                                          verify independently (scripts/verify-all); refusals are listed
                                                          per constant in chunk-NNNN.tsv
+      tenet-zfc theorem-all <export.ndjson> <set.mm> <outdir> [--every N] [--chunk-size N] [--chunks a,b-c,…] [--jobs N] [--budget seconds] [--redo]
+                                                         every theorem (or every Nth) proved through the model, as
+                                                         chunk-NNNN.mm files that share lemmas within a chunk and verify
+                                                         independently; outcomes per theorem in chunk-NNNN.tsv; resumes
+                                                         where it stopped (scripts/summarize-all for the totals)
       tenet-zfc bridge <set.mm> <out.mm>                 milestone 3: the bridge lemmas recursive types rest on
       tenet-zfc theorem <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: prove Lean theorems through the generic model
@@ -182,6 +187,10 @@ if (args.Length >= 5 && args[0] == "define")
 if (args.Length >= 4 && args[0] == "define-all")
 {
     return DefineAllCommand(args[1], args[2], args[3], args[4..], uncompressed, singleUniverse);
+}
+if (args.Length >= 4 && args[0] == "theorem-all")
+{
+    return TheoremAllCommand(args[1], args[2], args[3], args[4..], uncompressed);
 }
 if (args.Length >= 5 && args[0] == "theorem")
 {
@@ -512,6 +521,78 @@ static int DefineAllCommand(string export, string setmm, string outDir, string[]
     }
     Console.Write(s);
     File.WriteAllText(Path.Combine(outDir, "define-all.txt"), s.ToString());
+    return 0;
+}
+
+// Theorems at scale: every theorem (or every Nth) through the model, in chunks that verify independently.
+static int TheoremAllCommand(string export, string setmm, string outDir, string[] opts, bool uncompressed)
+{
+    int chunkSize = 50, jobs = 1, budget = 120, every = 1;
+    string? only = null;
+    bool redo = false;
+    for (int i = 0; i < opts.Length; i++)
+    {
+        switch (opts[i])
+        {
+            case "--chunk-size" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int n) && n > 0:
+                chunkSize = n; i++; break;
+            case "--budget" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int b) && b > 0:
+                budget = b; i++; break;
+            case "--jobs" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int j) && j > 0:
+                jobs = j; i++; break;
+            case "--every" when i + 1 < opts.Length && int.TryParse(opts[i + 1], out int e) && e > 0:
+                // a sample: every Nth theorem in export order
+                every = e; i++; break;
+            case "--chunks" when i + 1 < opts.Length:
+                only = opts[++i];
+                break;
+            case "--redo":
+                // prove chunks again even if their .tsv is there
+                redo = true;
+                break;
+            default:
+                Console.Error.WriteLine($"tenet-zfc theorem-all: unknown option {opts[i]}");
+                return 2;
+        }
+    }
+    var sw = Stopwatch.StartNew();
+    var terms = new Terms();
+    TenetZfc.Environment env = Reader.ReadExport(terms, export);
+    Directory.CreateDirectory(outDir);
+    var run = new TheoremAll(terms, env, setmm, compress: !uncompressed) { BudgetSeconds = budget };
+    List<ConstInfo> targets = run.Targets(every);
+    int chunks = (targets.Count + chunkSize - 1) / chunkSize;
+    // The run's parameters, so that a resumed run can't silently mix chunks of different shapes.
+    string shape = $"export {Path.GetFileName(export)}, every {every}, chunk size {chunkSize}: {targets.Count} theorems in {chunks} chunks";
+    string shapeFile = Path.Combine(outDir, "theorem-all.shape");
+    if (File.Exists(shapeFile) && File.ReadAllText(shapeFile).Trim() != shape)
+    {
+        Console.Error.WriteLine($"tenet-zfc theorem-all: {outDir} holds a run of another shape ({File.ReadAllText(shapeFile).Trim()}); use another folder");
+        return 2;
+    }
+    File.WriteAllText(shapeFile, shape + "\n");
+    List<int> todo = (only is null ? Enumerable.Range(0, chunks)
+        : only.Split(',').SelectMany(part => part.Split('-') is [string a, string b]
+            ? Enumerable.Range(int.Parse(a), int.Parse(b) - int.Parse(a) + 1) : [int.Parse(part)]).Where(k => k >= 0 && k < chunks).Distinct())
+        .Where(k => redo || !File.Exists(Path.Combine(outDir, $"chunk-{k:D4}.tsv"))).ToList();
+    Console.WriteLine($"read {export} in {sw.Elapsed.TotalSeconds:F0}s: {shape}; {todo.Count} chunks to prove, {jobs} at a time, {budget}s per theorem");
+    int next = 0;
+    var workers = Enumerable.Range(0, Math.Min(jobs, todo.Count)).Select(_ => new Thread(() =>
+    {
+        for (int i; (i = Interlocked.Increment(ref next) - 1) < todo.Count;)
+        {
+            int k = todo[i];
+            var csw = Stopwatch.StartNew();
+            List<TheoremAll.Outcome> outcomes = run.Chunk(k, targets.Skip(k * chunkSize).Take(chunkSize).ToList(), outDir);
+            long size = new FileInfo(Path.Combine(outDir, $"chunk-{k:D4}.mm")).Length;
+            Console.WriteLine($"chunk-{k:D4}: {outcomes.Count(o => o.Status == "proved")} of {outcomes.Count} proved, "
+                + string.Join(", ", outcomes.Where(o => o.Status != "proved").GroupBy(o => o.Status).Select(g => $"{g.Count()} {g.Key}"))
+                + $"; {size / 1024} KiB, {csw.Elapsed.TotalSeconds:F0}s");
+        }
+    }, 256 * 1024 * 1024)).ToList();
+    workers.ForEach(w => w.Start());
+    workers.ForEach(w => w.Join());
+    Console.WriteLine($"done in {sw.Elapsed.TotalSeconds:F0}s; totals over every chunk so far: scripts/summarize-all {outDir}");
     return 0;
 }
 

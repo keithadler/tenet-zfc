@@ -593,7 +593,9 @@ public sealed partial class Model
         string x = pr.Render(all.Children[1]), dom = pr.Render(all.Children[2]), psi = pr.Render(all.Children[0]);
         EnsureTowerLemmas();
         Proof holds = _d.Syl(m, Bi1(ApplyId("lean-prop", S(("ph", allText)))));
-        if (aText.Split(' ').Contains(x) || ph.Split(' ').Contains(x))
+        // rspcdv needs x out of ph, A and the instance: rename the binder when one has it, or when the body binds the
+        // same letter again inside (a shadowing binder survives into the instance).
+        if (aText.Split(' ').Contains(x) || ph.Split(' ').Contains(x) || BoundIn(psi).Contains(x))
         {
             string y = FreshFor(aText, psi, dom, ph);
             string psiY = SubstFree(psi, x, y);
@@ -606,7 +608,8 @@ public sealed partial class Model
         }
         if (BoundIn(psi).Overlaps(ArgVars(aText)))
         {
-            string psi2 = RenameApart(psi, ArgVars(aText), ph);
+            // Fresh names that avoid the binder's own letter too, or the renamed body binds it again.
+            string psi2 = RenameApart(psi, ArgVars(aText), ph, x, aText, dom);
             string all3 = $"A. {x} e. {dom} {psi2}";
             Proof ren = pr.Apply("mptru", S(("ph", $"( {allText} <-> {all3} )")), Alpha("wff", allText, all3)!.Value);
             holds = pr.Apply("sylib", S(("ph", ph), ("ps", allText), ("ch", all3)), holds, ren);
@@ -860,7 +863,7 @@ public sealed partial class Model
         Statement st = pr.Database[label];
         (string ante, string concl) = _d.Split(st.Expr);
         string ante2 = RenameApart(ante, clash, avoidText, concl), concl2 = RenameApart(concl, clash, avoidText, ante, ante2);
-        string vlabel = $"{label}-a{_variants++}";
+        string vlabel = $"{label}-s{_variants++}";   // -s: no escaped name has it (NameEscape)
         _variantOf[key] = vlabel;
         Proof orig = ApplyId(label, new Dictionary<string, string>());
         Proof toAnte = ante2 == ante ? pr.Apply("id", S(("ph", ante)))
@@ -901,6 +904,11 @@ public sealed partial class Model
         (Proof eqT, _, _) = Unfold(small, itok, ps, (k, dom) => Hyp(small, $"{ps[k]} e. {dom}") ?? throw new Refused($"no hypothesis {ps[k]} e. {dom}"));
         string set = Rhs(eqT);
         Proof xIn = pr.Apply("eleqtrd", S(("ph", small), ("A", x), ("B", iapp), ("C", set)), Hyp(small, $"{x} e. {iapp}")!.Value, eqT);
+        SyntaxTree setNode = pr.Parse("class", set.Split(' '))!;
+        if (setNode.Rule.Label == "cif" && pr.Render(setNode.Children[1]) == "1o" && pr.Render(setNode.Children[2]) == "(/)")
+        {
+            return PropProjLemma(label, ind, i, small, x, ctok, ps, xIn, pr.Render(setNode.Children[0]));
+        }
         var fieldOf = Enumerable.Range(0, nf).Select(j => Field($"( 2nd ` {x} )", j)).ToList();
         List<string> cdoms = Domains(ctok, ps.Concat(fieldOf).ToList(), np + nf);
         string goalTy = cdoms[np + i];
@@ -916,7 +924,12 @@ public sealed partial class Model
                 string a = pr.Render(n.Children[0]), dom = pr.Render(n.Children[1]), body = pr.Render(n.Children[2]);
                 if (ctx.Split(' ').Contains(a))
                 {
-                    throw new Refused($"{ind.Name}'s field variable {a} occurs in the hypotheses");
+                    // A parameter's type binds the same letter: rename the union's variable apart (cbviunv), and
+                    // descend the renamed union.
+                    string a2 = FreshFor(ctx, node, goal);
+                    string node2 = $"U_ {a2} e. {dom} {SubstFree(body, a, a2)}";
+                    Proof bi = pr.Apply("eleq2d", S(("ph", ctx), ("A", node), ("B", node2), ("C", x)), AlphaIn(ctx, node, node2));
+                    return pr.Apply("sylbid", S(("ph", ctx), ("ps", $"{x} e. {node}"), ("ch", $"{x} e. {node2}"), ("th", goal)), bi, Descend(ctx, node2));
                 }
                 vars.Add(a);
                 string ctx2 = $"( {ctx} /\\ {a} e. {dom} )";
@@ -965,6 +978,84 @@ public sealed partial class Model
         return label;
     }
 
+
+    /// <summary>
+    /// lean-proj-S-i for a structure S in Prop (And, Iff): its set is if ( E. a1 e. D1 … E. an e. Dn T. , 1o , (/) ), and
+    /// field i of a proof is a proof, (/). A member X of the set makes the condition hold (elif0), so D_i has a member,
+    /// and D_i is a proposition (a hypothesis D_i e. 2o, lean-pf; or itself if ( χ , 1o , (/) ), elif0 and lean-prop),
+    /// so it holds: |- ( ( ( U e. lean.-tower /\ A e. D1 ) … /\ X e. ⟦S A …⟧ ) -> (/) e. T_i ).
+    /// Only for a field whose proposition doesn't mention the fields before it.
+    /// </summary>
+    private string PropProjLemma(string label, ConstInfo ind, int i, string small, string x, string ctok, List<string> ps, Proof xIn, string psi)
+    {
+        int np = ind.NumParams, nf = env.Find(ind.Ctors[0])!.NumFields;
+        string goalTy = Domains(ctok, ps.Concat(Enumerable.Repeat("(/)", nf)).ToList(), np + nf)[np + i];
+        string goal = $"(/) e. {goalTy}";
+        Proof both = _d.Syl(xIn, Bi1(pr.Apply("elif0", S(("A", x), ("ph", psi), ("B", "1o")))));
+        Proof holds = pr.Apply("simpld", S(("ph", small), ("ps", psi), ("ch", $"{x} e. 1o")), both);
+        var vars = new List<string>();
+        // ( ctx -> ( w -> goal ) ), down the condition's E. (rexlimdva) to field i.
+        Proof Descend(string ctx, string w)
+        {
+            SyntaxTree n = pr.Parse("wff", w.Split(' '))!;
+            if (n.Rule.Label != "wrex")
+            {
+                throw new Refused($"{ind.Name}'s condition has no field {i}: {psi}");
+            }
+            string body = pr.Render(n.Children[0]), a = pr.Render(n.Children[1]), dom = pr.Render(n.Children[2]);
+            if (ctx.Split(' ').Contains(a) || goal.Split(' ').Contains(a))
+            {
+                // Renamed apart, as in ProjLemma.
+                string a2 = FreshFor(ctx, w, goal);
+                string w2 = $"E. {a2} e. {dom} {SubstFree(body, a, a2)}";
+                Proof eqv = _d.Lift(ctx, pr.Apply("mptru", S(("ph", $"( {w} <-> {w2} )")), Alpha("wff", w, w2)!.Value));
+                return pr.Apply("sylbid", S(("ph", ctx), ("ps", w), ("ch", w2), ("th", goal)), eqv, Descend(ctx, w2));
+            }
+            string ctx2 = $"( {ctx} /\\ {a} e. {dom} )";
+            Proof inner;
+            if (vars.Count == i)
+            {
+                if (vars.Any(v => dom.Split(' ').Contains(v)))
+                {
+                    throw new Refused($"{ind.Name}'s field {i} is a proposition about the fields before it: {dom}");
+                }
+                if (dom != goalTy)
+                {
+                    throw new Refused($"{ind.Name}'s field {i} type came out as {dom}, not {goalTy}");
+                }
+                Proof aIn = Hyp(ctx2, $"{a} e. {dom}")!.Value;
+                Proof g;
+                SyntaxTree dn = pr.Parse("class", dom.Split(' '))!;
+                if (Hyp(ctx2, $"{dom} e. 2o") is Proof isProp)
+                {
+                    EnsurePf();
+                    g = _d.Syl(_d.Jca(isProp, aIn), pr.Apply("lean-pf", S(("A", dom), ("B", a))));
+                }
+                else if (dn.Rule.Label == "cif" && pr.Render(dn.Children[1]) == "1o" && pr.Render(dn.Children[2]) == "(/)")
+                {
+                    string chi = pr.Render(dn.Children[0]);
+                    Proof c2 = _d.Syl(aIn, Bi1(pr.Apply("elif0", S(("A", a), ("ph", chi), ("B", "1o")))));
+                    Proof chiP = pr.Apply("simpld", S(("ph", ctx2), ("ps", chi), ("ch", $"{a} e. 1o")), c2);
+                    EnsureTowerLemmas();
+                    g = _d.Syl(chiP, Bi2(ApplyId("lean-prop", S(("ph", chi)))));
+                }
+                else
+                {
+                    throw new Refused($"{ind.Name}'s field {i} is a proposition the translator can't show is one: {dom}");
+                }
+                inner = pr.Apply("a1d", S(("ph", ctx2), ("ps", goal), ("ch", body)), g);
+            }
+            else
+            {
+                vars.Add(a);
+                inner = Descend(ctx2, body);
+            }
+            return pr.Apply("rexlimdva", S(("ph", ctx), ("x", a), ("A", dom), ("ps", body), ("ch", goal)), inner);
+        }
+        Proof r = pr.Apply("mpd", S(("ph", small), ("ps", psi), ("ch", goal)), holds, Descend(small, psi));
+        EmitLemma(label, $"Field {i} of a proof of the proposition {ind.Name} holds.", r);
+        return label;
+    }
 
     // ---- maps and Π-propositions, binder by binder ---------------------------------------------------------------
 
@@ -1114,7 +1205,11 @@ public sealed partial class Model
         var need = d.Mems.Where(kv => d.Vars.TryGetValue(kv.Key, out string? v) && v == "(/)").Select(kv => kv.Value).ToList();
         var facts = need.Select(m => _d.Split(m.P.Proves).X).Distinct().ToList();
         Proof holds;
-        if (facts.Count == 0)
+        if (LeastCond(cond) is not null)
+        {
+            holds = HoldsRecursiveCtor(d, ind, j, cond, need.Select(m => m.P).ToList());
+        }
+        else if (facts.Count == 0)
         {
             holds = _d.Lift(d.Ph, pr.Apply("mptru", S(("ph", cond)), ProveCase("T.", cond, j, ind.Ctors.Length)));
         }
@@ -1130,6 +1225,177 @@ public sealed partial class Model
         Proof inOne = _d.Lift(d.Ph, pr.Apply("0lt1o", S()));
         Proof bi = pr.Apply("eleq2d", S(("ph", d.Ph), ("A", Lhs(eqT)), ("B", "1o"), ("C", "(/)")), toOne);
         return pr.Apply("mpbird", S(("ph", d.Ph), ("ps", $"(/) e. {Lhs(eqT)}"), ("ch", "(/) e. 1o")), inOne, bi);
+    }
+
+    /// <summary>For a recursive proposition's condition, tuple e. U_ k e. _om ( rec ( F , (/) ) ` k ): the tuple and the union.</summary>
+    private (string Member, string Least)? LeastCond(string cond)
+    {
+        SyntaxTree c = pr.Parse("wff", cond.Split(' '))!;
+        if (c.Rule.Label != "wcel")
+        {
+            return null;
+        }
+        SyntaxTree u = c.Children[1];
+        if (u.Rule.Label != "ciun" || pr.Render(u.Children[1]) != "_om" || u.Children[2].Rule.Label != "cfv" || u.Children[2].Children[1].Rule.Label != "crdg")
+        {
+            return null;
+        }
+        return (pr.Render(c.Children[0]), pr.Render(u));
+    }
+
+    /// <summary>
+    /// ( d.Ph -> cond ) for constructor j of a recursive proposition (Nat.le.refl, Nat.le.step): its index tuple is in
+    /// the least set U_ k e. _om stage k. A recursive premise's proof makes its own tuple hold, so that tuple is in some
+    /// stage m (eliun); the constructor's tuple over the fields is then in the step's part for j at stage m (each
+    /// recursive premise's field, (/), is in if ( idx e. stage m , 1o , (/) ) by lean-prop), so in stage suc m (rdgsuc),
+    /// so in the union (ssiun2s). With no recursive premise, m is (/). One recursive premise at most, for now.
+    /// </summary>
+    private Proof HoldsRecursiveCtor(PCtx d, ConstInfo ind, int j, string cond, List<Proof> proofFacts)
+    {
+        var (member, least) = LeastCond(cond)!.Value;
+        string tok = Token(ind.Name)!, steptok = tok + ".-step";
+        string k = Part(least, "x"), stageBody = Part(least, "B");
+        string Stage(string b) => Subst(stageBody, k, b);
+        string stepApp = Part(Part(Stage("(/)"), "F"), "F");
+        string sx = Part(stepApp, "x"), sBody = Part(stepApp, "B");
+        ConstInfo ctor = env.Find(ind.Ctors[j])!;
+        var texts = d.Vars.Values.ToHashSet();
+        var fieldTexts = d.Binders.TakeLast(ctor.NumFields).Select(v => texts.Contains(v) ? v : "(/)").ToList();
+        EnsureTowerLemmas();
+
+        // The recursive premises: facts (/) e. ⟦I ps idx⟧, unfolded to idx e. least.
+        var recIdx = new List<(string Idx, Proof InLeast)>();
+        foreach (Proof f in proofFacts)
+        {
+            string prop = _d.Split(f.Proves).X[7..];
+            if (ConstApp(prop) is not (Name h, List<string> cargs) || !ReferenceEquals(h, ind.Name))
+            {
+                continue;
+            }
+            (Proof eqP, _, _) = Unfold(d.Ph, tok, cargs, (i, dom) => TryHyp(d, $"{cargs[i]} e. {dom}") ?? TextMem(d, cargs[i], dom));
+            if (LeastCond(Part(Rhs(eqP), "ph")) is not (string idx, string lst) || lst != least)
+            {
+                throw new Refused($"{ind.Name}'s premise unfolds to {Rhs(eqP)}");
+            }
+            Proof inIf = pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", "(/)"), ("B", prop), ("C", Rhs(eqP))), f, eqP);
+            recIdx.Add((idx, _d.Syl(inIf, Bi1(ApplyId("lean-prop", S(("ph", $"{idx} e. {least}")))))));
+        }
+        if (recIdx.Select(r => r.Idx).Distinct().Count() > 1)
+        {
+            throw new Refused($"a constructor of {ind.Name} with several recursive premises; not in the model yet");
+        }
+
+        // ( ctx -> member e. least ), given b e. _om and, for a recursive premise, idx e. stage b in ctx.
+        Proof InSuc(string ctx, string b, Proof bOm)
+        {
+            string sb = Stage(b);
+            string y = FirstVar(x => x != sx && !sb.Split(' ').Contains(x) && !sBody.Split(' ').Contains(x) && !ctx.Split(' ').Contains(x) && !member.Split(' ').Contains(x));
+            string bodyY = Subst(sBody, sx, y), stepY = $"( {y} e. _V |-> {bodyY} )";
+            Proof ren = pr.Apply("cbvmptv", S(("x", sx), ("y", y), ("A", "_V"), ("B", sBody), ("C", bodyY)),
+                _d.Congruence("class", Subst(sBody, sx, "Z"), "Z", pr.Apply("id", S(("ph", $"{sx} = {y}")))));
+            Proof e1 = pr.Apply("fveq1d", S(("ph", ctx), ("A", sb), ("F", stepApp), ("G", stepY)), _d.Lift(ctx, ren));
+            Proof e2 = Beta(ctx, pr.Apply("eqid", S(("A", stepY))), y, "_V", bodyY, sb, Exists(ctx, sb), stepY);
+            string arg = Subst(bodyY, y, sb);
+            Proof e3 = UnfoldRaw(ctx, steptok, Part(arg, "A"));
+            Proof eqStep = _d.Trans(_d.Trans(e1, e2), e3);
+            // The parts bind letters of their own, which the context may have free (a proof field's z): rename them apart
+            // first, or a congruence under them can't take the context as its hypothesis.
+            var free = Conjuncts(ctx).Select(c => c.Split(' ')[0]).Where(v => SetVarSet.Contains(v)).ToHashSet();
+            string r0 = Rhs(eqStep), r1 = RenameApart(r0, free, ctx, member);
+            if (r1 != r0)
+            {
+                eqStep = _d.Trans(eqStep, AlphaIn(ctx, r0, r1));
+            }
+            if (Simp(ctx, Rhs(eqStep)) is Proof sp)
+            {
+                eqStep = _d.Trans(eqStep, sp);
+            }
+            string un = Rhs(eqStep);
+            SyntaxTree unN = pr.Parse("class", un.Split(' '))!;
+            if (unN.Rule.Label != "cun" || pr.Render(unN.Children[0]) != sb)
+            {
+                throw new Refused($"{ind.Name}'s step came out as {un}");
+            }
+            string parts = pr.Render(unN.Children[1]);
+            Proof Pick(int kk, string h)
+            {
+                if (Hyp(ctx, h) is Proof p)
+                {
+                    return p;
+                }
+                // A recursive premise's field: (/) e. if ( idx e. stage b , 1o , (/) ), as idx is in the stage.
+                SyntaxTree hn = pr.Parse("wff", h.Split(' '))!;
+                if (hn.Rule.Label == "wcel" && pr.Render(hn.Children[0]) == "(/)" && hn.Children[1].Rule.Label == "cif")
+                {
+                    // The step's domains still read the stage through the packed argument: idx e. ( 2nd ` <. P , S >. ).
+                    string c2 = pr.Render(hn.Children[1].Children[0]);
+                    SyntaxTree cn = pr.Parse("wff", c2.Split(' '))!;
+                    if (cn.Rule.Label == "wcel")
+                    {
+                        string idx = pr.Render(cn.Children[0]), bcls = pr.Render(cn.Children[1]);
+                        Proof? inB = Hyp(ctx, c2);
+                        if (inB is null && Simp(ctx, bcls) is Proof spB && Hyp(ctx, $"{idx} e. {Rhs(spB)}") is Proof inS)
+                        {
+                            inB = pr.Apply("eleqtrrd", S(("ph", ctx), ("A", idx), ("B", Rhs(spB)), ("C", bcls)), inS, spB);
+                        }
+                        if (inB is Proof ib)
+                        {
+                            return _d.Syl(ib, Bi2(ApplyId("lean-prop", S(("ph", c2)))));
+                        }
+                    }
+                }
+                if (h.StartsWith("(/) e. ", StringComparison.Ordinal))
+                {
+                    // Another proof field: its proposition holds by the context.
+                    foreach (Proof f in proofFacts)
+                    {
+                        string have = _d.Split(f.Proves).X;
+                        if (have == h)
+                        {
+                            return _d.Syl(Restrict(ctx, d.Ph), f);
+                        }
+                        try
+                        {
+                            return pr.Apply("eleqtrd", S(("ph", ctx), ("A", "(/)"), ("B", have[7..]), ("C", h[7..])), _d.Syl(Restrict(ctx, d.Ph), f), AlphaIn(ctx, have[7..], h[7..]));
+                        }
+                        catch (Refused)
+                        {
+                        }
+                    }
+                }
+                return TextMem(new PCtx { Ph = ctx }, h.Split(" e. ", 2)[0], h.Split(" e. ", 2)[1]);
+            }
+            Proof inParts = MemberUnion(ctx, member, parts, ind.Ctors.Length, j, fieldTexts, Pick);
+            Proof inUn = _d.Syl(inParts, pr.Apply("elun2", S(("A", member), ("B", parts), ("C", sb))));
+            Proof inStep = pr.Apply("eleqtrrd", S(("ph", ctx), ("A", member), ("B", un), ("C", Lhs(eqStep))), inUn, eqStep);
+            Proof rdg = _d.Syl(_d.Syl(bOm, pr.Apply("nnon", S(("A", b)))), pr.Apply("rdgsuc", S(("B", b), ("F", stepApp), ("A", "(/)"))));
+            string sucStage = Stage($"suc {b}");
+            Proof inSuc = pr.Apply("eleqtrrd", S(("ph", ctx), ("A", member), ("B", Lhs(eqStep)), ("C", sucStage)), inStep, rdg);
+            Proof sub = _d.Congruence("class", Subst(stageBody, k, "Z"), "Z", pr.Apply("id", S(("ph", $"{k} = suc {b}"))));
+            Proof incl = pr.Apply("ssiun2s", S(("x", k), ("A", "_om"), ("B", stageBody), ("C", $"suc {b}"), ("D", sucStage)), sub);
+            Proof sub2 = _d.Syl(_d.Syl(bOm, pr.Apply("peano2", S(("A", b)))), incl);
+            Proof imp = pr.Apply("sseld", S(("ph", ctx), ("A", sucStage), ("B", least), ("C", member)), sub2);
+            return pr.Apply("mpd", S(("ph", ctx), ("ps", $"{member} e. {sucStage}"), ("ch", cond)), inSuc, imp);
+        }
+
+        if (recIdx.Count == 0)
+        {
+            return InSuc(d.Ph, "(/)", _d.Lift(d.Ph, pr.Apply("peano1", S())));
+        }
+        // The premise's tuple is in some stage m: under ( ( ph /\ m e. _om ) /\ idx e. stage m ), then rexlimdva.
+        var (pidx, pIn) = recIdx[0];
+        string m = FirstVar(x => !(d.Ph + " " + least + " " + member + " " + sBody).Split(' ').Contains(x) && x != k && x != sx);
+        string setM = $"U_ {m} e. _om {Stage(m)}";
+        Proof renU = pr.Apply("cbviunv", S(("x", k), ("y", m), ("A", "_om"), ("B", stageBody), ("C", Stage(m))),
+            _d.Congruence("class", Subst(stageBody, k, "Z"), "Z", pr.Apply("id", S(("ph", $"{k} = {m}")))));
+        Proof inM = pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", pidx), ("B", least), ("C", setM)), pIn, _d.Lift(d.Ph, renU));
+        Proof some = pr.Apply("sylib", S(("ph", d.Ph), ("ps", $"{pidx} e. {setM}"), ("ch", $"E. {m} e. _om {pidx} e. {Stage(m)}")),
+            inM, pr.Apply("eliun", S(("A", pidx), ("x", m), ("B", "_om"), ("C", Stage(m)))));
+        string ctxM = $"( ( {d.Ph} /\\ {m} e. _om ) /\\ {pidx} e. {Stage(m)} )";
+        Proof goalM = InSuc(ctxM, m, Hyp(ctxM, $"{m} e. _om")!.Value);
+        Proof exd = pr.Apply("ex", S(("ph", $"( {d.Ph} /\\ {m} e. _om )"), ("ps", $"{pidx} e. {Stage(m)}"), ("ch", cond)), goalM);
+        Proof lim = pr.Apply("rexlimdva", S(("ph", d.Ph), ("x", m), ("A", "_om"), ("ps", $"{pidx} e. {Stage(m)}"), ("ch", cond)), exd);
+        return pr.Apply("mpd", S(("ph", d.Ph), ("ps", $"E. {m} e. _om {pidx} e. {Stage(m)}"), ("ch", cond)), some, lim);
     }
 
     /// <summary>The domains of a Π-type's binders, each instantiated with the arguments before it.</summary>
@@ -1165,7 +1431,7 @@ public sealed partial class Model
         if (_recursive.ContainsKey(itok))
         {
             _ctorIn = null;
-            Iota(ctor.Name);
+            IotaCore(ctor.Name);
             tagIn = _ctorIn?.TagIn ?? throw new Refused($"no membership proof for {ctor.Name}");
         }
         else
@@ -1274,9 +1540,10 @@ public sealed partial class Model
     private Typed ConstMem(PCtx c, Const k)
     {
         using var prof = Prof.Time("ConstMem");
-        if (env.Find(k.Name) is { Kind: ConstKind.Recursor } rk && rk.LevelParams.Length > 0 && TrIn(c, k) == "(/)")
+        if (env.Find(k.Name) is { Kind: ConstKind.Recursor } rk && TrIn(c, k) == "(/)")
         {
-            // A recursor into Prop: induction (lean-ind-I).
+            // A recursor into Prop: induction (lean-ind-I). That includes the recursors of propositions that eliminate
+            // only into Prop (Or.rec), which have no universe parameter for the motive.
             (string il, string ity) = PropRecLemma(k);
             Proof ir = _d.Syl(Hyp(c.Ph, UHyp) ?? throw new Refused("no universe hypothesis"), ApplyId(il, S(("U", "U"))));
             return new Typed(ir, ity, _ops.InstantiateLevels(rk.Type, rk.LevelParams, k.Levels));
@@ -1431,6 +1698,10 @@ public sealed partial class Model
                     p = pr.Apply("eqeltrd", S(("ph", c.Ph), ("A", text), ("B", Rhs(unfold)), ("C", ty)), unfold, inMap);
                     break;
                 }
+            case ConstKind.Axiom when BaseName(n) == "Quot.sound":
+                // A proof: under its binders, the two classes are equal (QuotTyping.cs).
+                p = IntroPiProp(c, ci.Type, (d, body) => QuotSoundHolds(d, body));
+                break;
             case ConstKind.Axiom when $"{n}" == "propext":
                 p = PropextTyping(c, ci.Type);
                 break;
@@ -1486,7 +1757,7 @@ public sealed partial class Model
     private Proof ConvText(PCtx c, Expr a, string at, Expr b, string bt)
     {
         using var prof = Prof.Time("ConvText");
-        Proof p1 = AlphaTo(c, at, TrIn(c, a));
+        Proof p1 = TextAlpha(c, at, TrIn(c, a));
         // Each conversion the typing asks for gets its own fuel (conversions nest through the typing of binders).
         if (_convDepth == 0)
         {
@@ -1502,8 +1773,51 @@ public sealed partial class Model
         {
             _convDepth--;
         }
-        Proof p3 = AlphaTo(c, TrIn(c, b), bt);
+        Proof p3 = TextAlpha(c, TrIn(c, b), bt);
         return _d.Trans(_d.Trans(p1, p2), p3);
+    }
+
+    /// <summary>
+    /// ( ph -> x = y ) for texts equal up to bound names after beta steps on either side's head: a membership's type
+    /// text may be a motive applied, ( ( y e. ( lean.Bool ` U ) |-> 2o ) ` X ), where the Lean type is already reduced
+    /// (Nat.succ_ne_zero). The argument's membership in the map's domain is shown from the text (TextMem).
+    /// </summary>
+    private Proof TextAlpha(PCtx c, string x, string y)
+    {
+        try
+        {
+            return AlphaTo(c, x, y);
+        }
+        catch (Refused) when (TextBeta(c, x) is Proof bx)
+        {
+            return _d.Trans(bx, TextAlpha(c, Rhs(bx), y));
+        }
+        catch (Refused) when (TextBeta(c, y) is Proof by)
+        {
+            return _d.Trans(TextAlpha(c, x, Rhs(by)), _d.Symm(by));
+        }
+    }
+
+    /// <summary>( ph -> ( ( v e. D |-> B ) ` X ) = B[X/v] ), or null when the text isn't such a redex or X's membership can't be shown.</summary>
+    private Proof? TextBeta(PCtx c, string text)
+    {
+        SyntaxTree? n = pr.Parse("class", text.Split(' '));
+        if (n is not { Rule.Label: "cfv" } || n.Children[1].Rule.Label != "cmpt")
+        {
+            return null;
+        }
+        string f = pr.Render(n.Children[1]), arg = pr.Render(n.Children[0]);
+        SyntaxTree m = n.Children[1];
+        string v = pr.Render(m.Children[0]), dom = pr.Render(m.Children[1]), body = pr.Render(m.Children[2]);
+        try
+        {
+            Proof argIn = TryHyp(c, $"{arg} e. {dom}") ?? HypAlpha(c, arg, dom) ?? TextMem(c, arg, dom);
+            return BetaShadowed(c.Ph, pr.Apply("eqid", S(("A", f))), v, dom, body, arg, argIn, f);
+        }
+        catch (Refused)
+        {
+            return null;
+        }
     }
 
     /// <summary>( ph -> x = y ) for texts equal up to the names of bound variables.</summary>

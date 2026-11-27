@@ -12,6 +12,13 @@ namespace TenetZfc;
 /// </summary>
 public sealed class Deduction(Prover pr)
 {
+    /// <summary>
+    /// An alpha-variant h' of a hypothesis whose binders avoid the given letters (and every letter of the extra text),
+    /// with |- ( h -> h' ) and |- ( h' -> h ); null when there is nothing to rename. The model supplies it (Alpha.cs):
+    /// Congruence needs it when a hypothesis binds a letter that a binder of the rewritten text binds as well.
+    /// </summary>
+    public Func<string, ISet<string>, string, (string Renamed, Proof There, Proof Back)?>? RenameApart { get; set; }
+
     private static Dictionary<string, string> S(params (string Var, string Value)[] xs) => xs.ToDictionary(x => x.Var, x => x.Value);
 
     /// <summary>The two sides of |- ( H -> X ).</summary>
@@ -98,6 +105,23 @@ public sealed class Deduction(Prover pr)
         SyntaxTree c = pr.Parse(type, context.Split(' ')) ?? throw new InvalidOperationException($"does not parse: {context}");
         (string h, string x) = Split(ab.Proves);
         (string a, string b, _) = Sides(x);
+        // A binder of the context (A. w e. …, raleqbidv) must be distinct from the hypothesis, which may bind the same
+        // letter itself. Then prove the congruence under the equation alone, ( a = b -> … ), and chain it (syl).
+        var ctxTokens = context.Split(' ').ToHashSet();
+        var clash = h.Split(' ').Where(ctxTokens.Contains).Where(tok => tok.Length > 0 && char.IsLower(tok[0]) && pr.Parse("setvar", [tok]) is not null).ToHashSet();
+        if (clash.Count > 0 && !x.Split(' ').Any(clash.Contains))
+        {
+            Proof inner = Go(c, hole, x, a, b, pr.Apply("id", S(("ph", x)))) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
+            return Syl(ab, inner);
+        }
+        // The equation mentions the binder's letter too (the rewrite is under the binder), so it can't be split off. The
+        // hypothesis only binds that letter, so an alpha-variant of it avoids it: prove the congruence under that
+        // variant h', and go there and back by the alpha-equivalence ( h <-> h' ).
+        if (clash.Count > 0 && RenameApart?.Invoke(h, clash, $"{context} {x}") is var (h2, there, back))
+        {
+            Proof inner = Go(c, hole, h2, a, b, Syl(back, ab)) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
+            return Syl(there, inner);
+        }
         return Go(c, hole, h, a, b, ab) ?? throw new InvalidOperationException($"the hole {hole} does not occur in {context}");
     }
 
@@ -266,6 +290,10 @@ public sealed class Deduction(Prover pr)
             case "wral": // A. x e. A ph ($d x ph)
                 return pr.Apply("raleqbidv", S(("ph", h), ("x", L("x")), ("A", L("A")), ("B", R("A")), ("ps", L("ph")), ("ch", R("ph"))),
                     Sub("A") ?? Refl(h, L("A")), Sub("ph") ?? BiRefl(h, L("ph")));
+            case "wal":  // A. x ph ($d x ph)
+                return pr.Apply("albidv", S(("ph", h), ("x", L("x")), ("ps", L("ph")), ("ch", R("ph"))), Sub("ph")!.Value);
+            case "wex":  // E. x ph ($d x ph)
+                return pr.Apply("exbidv", S(("ph", h), ("x", L("x")), ("ps", L("ph")), ("ch", R("ph"))), Sub("ph")!.Value);
             case "wn":   // -. ph
                 return pr.Apply("notbid", S(("ph", h), ("ps", L("ph")), ("ch", R("ph"))), Sub("ph")!.Value);
             case "wceq": // A = B

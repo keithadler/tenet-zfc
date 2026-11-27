@@ -248,9 +248,26 @@ public sealed class Prover
     /// </summary>
     public DateTime? Deadline { get; set; }
 
+    /// <summary>
+    /// When set, a budget in CPU time rather than wall time: once <see cref="Deadline"/> passes, this is asked how many
+    /// seconds of budget are left, and while some are, the deadline moves forward by that much. On a loaded machine a
+    /// wall-clock budget times out proofs that a quiet one finishes (theorem-all; see ThreadCpu).
+    /// </summary>
+    public Func<double>? BudgetLeft { get; set; }
+
+    /// <summary>The deadline in force now, moved forward first if <see cref="BudgetLeft"/> says budget is left.</summary>
+    public DateTime? CurrentDeadline()
+    {
+        if (Deadline is DateTime d && DateTime.UtcNow > d && BudgetLeft is { } left && left() is double r && r > 0)
+        {
+            Deadline = DateTime.UtcNow.AddSeconds(Math.Max(r, 0.25));
+        }
+        return Deadline;
+    }
+
     private void CheckDeadline()
     {
-        if (Deadline is DateTime d && DateTime.UtcNow > d)
+        if (CurrentDeadline() is DateTime d && DateTime.UtcNow > d)
         {
             throw new TimeoutException("over its time budget");
         }

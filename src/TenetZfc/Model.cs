@@ -39,9 +39,13 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     private static readonly string[] ExtraClassVars = Enumerable.Range(1, 80).Select(i => $"AA{i}").ToArray();
 
     private readonly Ops _ops = new(t);
-    private readonly Typing _typing = new(t, env) { Deadline = () => pr.Deadline };   // define-all's time budget
-    private readonly Deduction _d = new(pr);
+    private readonly Typing _typing = new(t, env) { Deadline = () => pr.CurrentDeadline() };   // define-all's time budget
+    private readonly Deduction _deduction = new(pr);
+    /// <summary>The deduction kit, with the model's alpha-renaming installed for Congruence (Deduction.RenameApart).</summary>
+    private Deduction _d => _deduction.RenameApart is null ? Hook(_deduction) : _deduction;
     private readonly HashSet<Name> _defined = new(ReferenceEqualityComparer.Instance);
+    /// <summary>Recursive propositions built in stages (DefineRecursiveProposition), whose induction RecPropRecLemma types.</summary>
+    private readonly HashSet<Name> _recursiveProps = new(ReferenceEqualityComparer.Instance);
     private readonly StringBuilder _out = new();
     private ulong _fresh = 1UL << 58;
 
@@ -578,7 +582,23 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             string body = "(/)";
             if (large && ctors.Count == 1)
             {
-                // Subsingleton elimination: the one minor premise, at (/) for each field (all proofs).
+                // Subsingleton elimination: the one minor premise, at (/) for each field. That is right only when
+                // every field is a proof. Lean also eliminates into any sort when a data field appears among the
+                // result's indices (inductive Foo : Nat → Prop | mk (n : Nat) : Foo n), and there the minor premise
+                // must get the index, not (/): refused until the model reads such fields back from the indices.
+                {
+                    var csc = NewScope();
+                    Expr cty = ctors[0].Type;
+                    var cfv = new List<Expr>();
+                    Telescope(ref cty, ind.NumParams + ctors[0].NumFields, csc, cfv);
+                    foreach (Expr f in cfv.Skip(ind.NumParams))
+                    {
+                        if (_typing.IsProposition(csc.Types[((FVar)f).Id], csc.Types) != true)
+                        {
+                            throw new Refused($"{n} has a field that is data, and eliminates into any sort; not in the model yet");
+                        }
+                    }
+                }
                 string minor = bs[ind.NumParams + rec.NumMotives].Var;
                 body = Enumerable.Range(0, ctors[0].NumFields).Aggregate(minor, (acc, _) => $"( {acc} ` (/) )");
             }
@@ -795,6 +815,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             DefineLeastProposition(ind, itok, ctors, rec);   // Model.Least.cs: Acc, and recursors into any sort
             return;
         }
+        _recursiveProps.Add(n);
         string steptok = itok + ".-step";
         bool Mentions(Expr e) => e switch
         {
@@ -1132,7 +1153,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         hyps.AddRange(args.Select((a, i) => $"{a} e. {doms[i]}"));
         string ph = Conj(hyps);
         (Proof eq, _, _) = Unfold(ph, tok, args, (i, dom) => Hyp(ph, $"{args[i]} e. {dom}") ?? throw new Refused($"no hypothesis {args[i]} e. {dom}"));
-        return (eq.Proves, eq.Proof, DistinctFor([tok], args));
+        return (eq.Proves, eq.Proof, WithRequired(DistinctFor([tok], args), eq.Proof));
     }
 
     /// <summary>
@@ -1140,6 +1161,14 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     /// I.rec params motive minors (c params fields) = minor_c fields, for arguments of the right types.
     /// </summary>
     public (MmExpr Statement, List<string> Proof, string[] Distinct) Iota(Name ctorName)
+    {
+        var (stmt, proof, dv) = IotaCore(ctorName);
+        return (stmt, proof, WithRequired(dv, proof));
+    }
+
+    // The $d conditions above are written by hand per kind of rule; WithRequired adds any pair the proof's steps need
+    // beyond them (a binder renamed apart for a congruence, Deduction.RenameApart), so an output never lacks one.
+    private (MmExpr Statement, List<string> Proof, string[] Distinct) IotaCore(Name ctorName)
     {
         Define(ctorName);
         ConstInfo ctor = env.Find(ctorName)!;
@@ -1820,7 +1849,10 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         string x = pr.Render(n.Children[0]), dom = pr.Render(n.Children[1]), body = pr.Render(n.Children[2]);
         string inner = Subst(body, x, fields[k]);
         Proof pin = MemberPart(ph, tag, inner, fields, k + 1, pick);
-        Proof sub = _d.Congruence("class", Subst(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {fields[k]}"))));
+        // A field the tuple doesn't mention (a recursive proposition's premise, a proof): the body is constant in it.
+        Proof sub = body.Split(' ').Contains(x)
+            ? _d.Congruence("class", Subst(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {fields[k]}"))))
+            : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", $"{x} = {fields[k]}")), pr.Apply("eqid", S(("A", body))));
         Proof incl = pr.Apply("ssiun2s", S(("x", x), ("A", dom), ("B", body), ("C", fields[k]), ("D", inner)), sub);
         Proof sub2 = _d.Syl(pick(k, $"{fields[k]} e. {dom}"), incl);
         Proof imp = pr.Apply("sseld", S(("ph", ph), ("A", inner), ("B", part), ("C", tag)), sub2);

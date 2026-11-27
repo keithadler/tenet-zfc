@@ -5,11 +5,18 @@ All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://
 ## Unreleased
 
 - **Init-wide run, complete**: all 40 chunks on GitHub's runners. 17,329 of 17,590 definitions (98.5%) translate with verified equations, and no theorem is rejected by a checker. Outputs declare spare set variables, so mmj2's `definitionCheck` can rename a definition's dummies apart; this fixes chunk 31's mmj2 error, on `Lean.Grind.Config.noConfusionType`, which uses 149 of 150 declared set variables ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-on-githubs-runners-built)).
+- **`Nat.mul` is `x.`** (`nat-bridge`, tower mode, when the export has `Nat.mul`): any function with `Nat.mul`'s computation rules is `x.` through `F`. The model's `Nat.mul` satisfies them, proved from its definition. `Nat.mul_zero`, `Nat.zero_mul` and `Nat.mul_succ` are restated in `NN0` from Lean's proofs, and set.mm's `2t2e4` proves `2 * 2 = 4` in the model ([docs/bridges.md](docs/bridges.md)).
 - **Init-wide run on GitHub's runners** (`.github/workflows/init-run.yml`, run by hand from the Actions tab): exports Lean's `Init`, translates every constant the model handles with `define-all` across parallel jobs, checks every chunk with all three checkers, and totals the results in the run's summary. A pull request that changes the workflow runs a small smoke version.
 
 ## [0.1.0] - 2026-11-27
 
 The first version meant for someone else to install and use: independently checked ZFC proofs from their own Lean code, on a stated, tested fragment.
+
+### Theorems across Init (milestone 3)
+
+- **`theorem-all`**: every theorem of an export, or every Nth, through the model, in chunks with an outcome per theorem, CPU-time budgets and resuming ([docs/milestone3.md](docs/milestone3.md#theorems-across-init-built-theorem-all-measured-on-a-sample)).
+- Fixes for the first blockers of the Init sample: Nat literals as arguments and of any size (`lean-litnat`); constructors of recursive propositions (`Nat.le.refl`, `Nat.le.step`) and induction on them (`lean-ind-Nat.le`); `Decidable`'s proof field in its recursor's typing; eliminating `Exists` and `Nonempty`; `$d` traps under binders in congruence and in instantiating a Π-proposition. Computation rules and equations declare every `$d` pair their proofs need.
+- CI: `tests/fixtures/blockers.ndjson`, 39 theorems that must all prove.
 
 ### Universe elimination (milestone 4, started)
 

@@ -17,19 +17,24 @@ cd "$dir"
 [ -e macros ] || ln -s "$mmj2/macros" macros
 params="tenet-zfc-runparams-$$.txt"
 log="tenet-zfc-mmj2-$$.log"
-printf 'LoadFile,%s\nSetParser,mmj.verify.LRParser\nVerifyProof,*\nParse,*\nRunMacro,definitionCheck,ax-*,df-bi,df-clab,df-cleq,df-clel\n' "$name" > "$params"
+printf 'LoadFile,%s\nSetParser,mmj.verify.LRParser\nVerifyProof,*\nParse,*\nRunMacro,definitionCheck,ax-*,df-bi,df-clab,df-cleq,df-clel\nMaxErrorMessages,15000\n' "$name" > "$params"
 # Without mmj2's failure popup (its second argument, n): on a crash the popup would wait forever.
-"$java" -Xms512M -Xmx2048M -jar "$mmj2/mmj2.jar" "$params" n > "$log" 2>&1 || true
+# The command after RunMacro changes nothing: mmj2 echoes each command as it starts it, so its echo in the log shows
+# that definitionCheck returned (the echo of RunMacro itself only shows that it started).
+status=0
+"$java" -Xms512M -Xmx2048M -jar "$mmj2/mmj2.jar" "$params" n > "$log" 2>&1 || status=$?
 rm -f "$params"
+# 126 and above: java couldn't start, or was killed. mmj2's own failures are read from its log, below.
+[ "$status" -lt 126 ] || { echo "check-definitions: java ended with status $status on $file"; tail -5 "$log"; rm -f "$log"; exit 1; }
 skip='I-UT-0015|I-MA-0001'
 if [ "$longok" = "--long-proofs-ok" ]; then
   grep 'A-PR-0002' "$log" | sed 's/^/check-definitions: too long for mmj2, checked by the other verifiers: /' | cut -c1-200 || true
   skip="$skip|A-PR-0002 Theorem [^ ]*: VerifyProofs wExpr array overflow"
 fi
-if grep -E 'Exception|.-..-[0-9]{4}' "$log" | grep -Ev "$skip"; then
+if grep -E 'Exception|OutOfMemoryError|.-..-[0-9]{4}' "$log" | grep -Ev "$skip"; then
   echo "check-definitions: mmj2 reported the problems above in $file"
   rm -f "$log"; exit 1
 fi
-grep -q 'RunMacro,definitionCheck' "$log" || { echo "check-definitions: mmj2 didn't run definitionCheck"; cat "$log"; rm -f "$log"; exit 1; }
+grep -q 'RunMacro,definitionCheck' "$log" && grep -q 'MaxErrorMessages,15000' "$log" || { echo "check-definitions: mmj2 didn't finish definitionCheck"; cat "$log"; rm -f "$log"; exit 1; }
 rm -f "$log"
 echo "check-definitions: every definition in $name passes mmj2's definitionCheck"

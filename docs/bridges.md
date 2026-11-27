@@ -105,6 +105,28 @@ The steps from the first to the last:
 
 So `( A + 0 ) = A` here comes from Lean's proof of `Nat.add_zero`, through the model and the bridge, not from `set.mm`'s `addrid`. `Nat.zero_add` gives `( 0 + A ) = A` the same way. The restatement takes theorems of the form `∀ (a b … : Nat), l = r` with `l` and `r` built from `+`, literals, `Nat.succ` and the variables. CI proves both theorems and their restatements into one output, with the bridge and the literals 2, 4 and 256: 122 theorems, 1.29 MB compressed, about 15 CPU minutes. The three checkers accept it.
 
+## `Nat.mul` and `x.` (tower mode)
+
+When the export has `Nat.mul`, `nat-bridge` also proves the multiplication bridge, on top of addition's:
+
+| Label | Statement |
+|---|---|
+| `lean-nat-mul` | any `G` with `Nat.mul`'s computation rules (`a * 0 = 0`, `a * succ b = a * b + a`, with the model's `Nat.add`) is `x.` through `F`: `( F ` ( ( G ` A ) ` B ) ) = ( ( F ` A ) x. ( F ` B ) )` |
+| `lean-nat-mulel` | such a `G` stays in the model's `Nat` |
+| `lean-nat-natmul-zero`, `lean-nat-natmul-succ` | `Nat.mul`'s two rules, proved from its definition (`ProveDefEq`), so they hold in tower mode |
+| `lean-nat-natmul` | the model's `Nat.mul` is `x.` through `F`, with no hypotheses but the tower's |
+| `lean-nat-natmul-2t2e4` | cross-check: set.mm's `2t2e4` proves `2 * 2 = 4` for the model's `Nat.mul` (through `lean-nat-2t2e4-iff`) |
+
+`lean-nat-mulind` proves it by induction on the second argument, as `lean-nat-addind` does for addition. The step is `F ( A * j + A ) = F A x. j + F A` by `lean-nat-natadd`, and that is `F A x. ( j + 1 )` by `adddi` and `mulrid`. The restatement understands `Nat.mul` and `HMul.hMul` too, so Lean's own proofs come out in `NN0`:
+
+| Lean | Restated (`lean-nn0-…`) |
+|---|---|
+| `Nat.mul_zero` | `( A x. 0 ) = 0` |
+| `Nat.zero_mul` | `( 0 x. A ) = 0` |
+| `Nat.mul_succ` | `( A x. ( B + 1 ) ) = ( ( A x. B ) + A )` |
+
+CI proves these with the bridge, from `tests/fixtures/library.ndjson`, and checks the output with all three checkers. Still missing from the multiplication bridge: `Nat.sub`, `Nat.le`/`Nat.lt` as `<_`/`<`, and `Int` as `ZZ` (tasks2.md, task 4).
+
 ## In the one-universe model, the rules are false
 
 `--single-universe` builds the bridge over the old model, with one universe `U e. Univ` for every level. There `Nat.add`'s computation rules are false, so `lean-nat-natadd` takes them as hypotheses. The reason:
