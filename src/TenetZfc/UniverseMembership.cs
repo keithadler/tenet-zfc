@@ -178,6 +178,27 @@ public sealed partial class Model
         throw new Refused($"no proof yet that {x} is in the universe {g}");
     }
 
+    /// <summary>( d.Ph -> ( ( lean.c ` U ) ` a1 ) … e. dom ), by c's typing lemma and each argument's membership.</summary>
+    private Proof ConstAppMem(PCtx d, Name head, List<string> cargs, string dom)
+    {
+        (string label, string cty) = ConstTyLemma(head);
+        Proof cur = _d.Syl(Hyp(d.Ph, UHyp) ?? throw new Refused("no universe hypothesis"), ApplyId(label, S(("U", "U"))));
+        string f = $"( {Token(head)} ` U )", ty = cty;
+        foreach (string a in cargs)
+        {
+            SyntaxTree tn = pr.Parse("class", ty.Split(' '))!;
+            if (tn.Rule.Label is not ("co" or "cixp"))
+            {
+                throw new Refused($"applying {head}, whose type {ty} isn't a function type");
+            }
+            string adom = pr.Render(tn.Children[1]);
+            Proof aIn = TryHyp(d, $"{a} e. {adom}") ?? HypAlpha(d, a, adom) ?? TextMem(d, a, adom);
+            (cur, ty) = ApplyText(d.Ph, cur, f, ty, a, aIn);
+            f = $"( {f} ` {a} )";
+        }
+        return ty == dom ? cur : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", f), ("B", ty), ("C", dom)), cur, AlphaIn(d.Ph, ty, dom));
+    }
+
     /// <summary>A constant applied to arguments, ( ( lean.c ` U ) ` a1 ) …, as the constant and the arguments.</summary>
     private (Name, List<string>)? ConstApp(string x)
     {
@@ -227,6 +248,13 @@ public sealed partial class Model
         SyntaxTree xn = pr.Parse("class", x.Split(' '))!;
         if (xn.Rule.Label != "cmpt" || dn.Rule.Label is not ("co" or "cixp"))
         {
+            bool level = dom == "2o" || dn.Rule.Label == "cfv" && pr.Render(dn.Children[1]) == "U" && OrdinalIndex(pr.Render(dn.Children[0])) >= 0;
+            if (!level && ConstApp(x) is (Name head, List<string> cargs))
+            {
+                // Not a type in a universe but a term of an ordinary type (an instance, instLTNat : LT Nat): typed
+                // through its constant's typing lemma, argument by argument.
+                return ConstAppMem(d, head, cargs, dom);
+            }
             return UnivMem(d, x, dom);
         }
         string v = pr.Render(xn.Children[0]), vd = pr.Render(xn.Children[1]), body = pr.Render(xn.Children[2]);
