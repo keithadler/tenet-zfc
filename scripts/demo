@@ -14,6 +14,7 @@
 #   TENET_ZFC_MMJ2      mmj2's directory (mmj2.jar, macros/)
 # Optional:
 #   TENET_ZFC           the tenet-zfc command (default: dotnet run on src/TenetZfc.Cli)
+#   TENET_ZFC_LEAN      lean, to print List.length_append's source from your toolchain (default: lean on the PATH)
 #   TENET_ZFC_LEANOUT   leanout, to export List.length_append from Lean's Init yourself; without it the demo uses
 #                       tests/fixtures/library.ndjson, the same export (leanout Init, Lean 4.36.0)
 #
@@ -69,12 +70,21 @@ status=0
 t_all=$(now)
 
 banner "1. Lean's theorem"
-echo "Lean 4.36.0, Init (src/Init/Data/List/Basic.lean):"
-echo
-echo "  @[simp] theorem length_append {as bs : List α} : (as ++ bs).length = as.length + bs.length := by"
-echo "    induction as with"
-echo "    | nil => simp"
-echo "    | cons _ as ih => simp [ih, Nat.succ_add]"
+lean="${TENET_ZFC_LEAN:-$(command -v lean || true)}"
+src=""
+[ -n "$lean" ] && src="$("$lean" --print-prefix 2>/dev/null)/src/lean/Init/Data/List/Basic.lean"
+if [ -n "$src" ] && [ -f "$src" ]; then
+  echo "$("$lean" --version | head -1), $src:"
+  echo
+  grep -A3 'theorem length_append ' "$src" | sed 's/^/  /'
+else
+  echo "Lean 4.36.0, src/lean/Init/Data/List/Basic.lean:"
+  echo
+  echo "  @[simp, grind =] theorem length_append {as bs : List α} : (as ++ bs).length = as.length + bs.length := by"
+  echo "    induction as with"
+  echo "    | nil => simp"
+  echo "    | cons _ as ih => simp [ih, Nat.succ_add]"
+fi
 echo
 if [ -n "${TENET_ZFC_LEANOUT:-}" ]; then
   t0=$(now)

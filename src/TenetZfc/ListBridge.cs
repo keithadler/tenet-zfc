@@ -236,14 +236,10 @@ public sealed class ListBridge
                 SubEq("w", x, $"( {stepF} ` <. <. U , <. A , (/) >. >. , w >. )"), UseS("eqid", [("A", gw)]), Fvex(stepF, p));
             Proof e3 = Use("ax-mp", UseG("fvex", $"{x} e. _V"), fv3);
             string body(string y) => $"( ( 2nd ` {y} ) u. ( {{ {Nil} }} u. U_ y e. ( 1st ` ( 2nd ` ( 1st ` {y} ) ) ) U_ z e. ( 2nd ` {y} ) {{ {Cons("y", "z")} }} ) )";
-            Proof iunIn = UseS("iunex", [("x", "z")], Fvex("2nd", "w"), UseS("snex", [("A", Cons("y", "z"))]));
-            Proof iunOut = UseS("iunex", [("x", "y")], Fvex("1st", "( 2nd ` ( 1st ` w ) )"), iunIn);
-            Proof cexw = Use("unex", Fvex("2nd", "w"), Use("unex", UseS("snex", [("A", Nil)]), iunOut));
-            // The step's value at p, a set (by the same union, written at p).
+            // The step's value at p is a set: a union of sets.
             Proof iunInP = UseS("iunex", [("x", "z")], Fvex("2nd", p), UseS("snex", [("A", Cons("y", "z"))]));
             Proof iunOutP = UseS("iunex", [("x", "y")], Fvex("1st", $"( 2nd ` ( 1st ` {p} ) )"), iunInP);
             Proof cex = Use("unex", Fvex("2nd", p), Use("unex", UseS("snex", [("A", Nil)]), iunOutP));
-            _ = cexw;
             Proof fv4 = Use("fvmpt", SubEq("w", p, body("w")), Ax("df-lean.List.u0.-step"), cex);
             Proof e4 = Use("ax-mp", Opex("<. U , <. A , (/) >. >.", x), fv4);
             Proof e = Trans(e1, Lift(h, e2), Lift(h, e3), Lift(h, e4));
@@ -283,12 +279,10 @@ public sealed class ListBridge
         // The step's domain is a set.
         {
             const string h = "( A e. _V /\\ S e. _V )";
-            string inner = $"U_ z e. S {{ {Cons("y", "z")} }}";
             Proof pin = Imp(h, "iunexg", [Hyp(h, "S e. _V"), Lift(h, UseS("rgen", [("x", "z"), ("A", "S")], Lift("z e. S", UseS("snex", [("A", Cons("y", "z"))]))))], s: [("V", "_V"), ("W", "_V")]);
             Proof all = UseS("ralrimivw", [("x", "y"), ("A", "A")], pin);
             Proof pout = Imp(h, "iunexg", [Hyp(h, "A e. _V"), all], s: [("V", "_V"), ("W", "_V")]);
             Proof u = Imp(h, "unexg", [Lift(h, UseS("snex", [("A", Nil)])), pout], s: [("V", "_V"), ("W", "_V")]);
-            _ = inner;
             Thm("lean-list-xsex", "nil and the conses over a set form a set.", u);
         }
         // nil, and conses over a bigger set, are a bigger set.
@@ -305,13 +299,11 @@ public sealed class ListBridge
             Proof c1 = Use("op2nd", Use("1oex"), Opex("(/)", "<. B , <. C , (/) >. >."));
             Proof c2 = Use("op2nd", Use("0ex"), Opex("B", "<. C , (/) >."));
             Proof hdb = Imp(h, "op1stg", [Hyp(h, "B e. _V"), Lift(h, Opex("C", "(/)"))]);
-            string cbc = Cons("B", "C");
             Proof hd = Trans(Ce("( 1st ` ( 2nd ` Y ) )", Lift(h, c1)), Ce("( 1st ` Y )", Lift(h, c2)), hdb);
             Thm("lean-list-hd", "The head of a cons.", hd);
             Proof c3 = Imp(h, "op2ndg", [Hyp(h, "B e. _V"), Lift(h, Opex("C", "(/)"))]);
             Proof c4 = Imp(h, "op1stg", [Hyp(h, "C e. _V"), Lift(h, Use("0ex"))]);
             Proof tl = Trans(Ce("( 1st ` ( 2nd ` ( 2nd ` Y ) ) )", Lift(h, c1)), Ce("( 1st ` ( 2nd ` Y ) )", Lift(h, c2)), Ce("( 1st ` Y )", c3), c4);
-            _ = cbc;
             Thm("lean-list-tl", "The tail of a cons.", tl);
             Proof o = UseS("opth1", [("C", "(/)"), ("D", "(/)")], Use("1oex"), Opex("(/)", "<. B , <. C , (/) >. >."));
             Thm("lean-list-consnnil", "A cons is not nil.", Use("mto", Use("neii", Use("1n0")), o));
@@ -329,7 +321,6 @@ public sealed class ListBridge
             Proof ex0 = Use("sylib", inIu, UseS("eliun", [("A", "x"), ("x", "y"), ("B", "A"), ("C", iuz)]));
             // Rename the witnesses to g and h: the context binds y and z (in Dm), so they can't be the rexlim variables.
             Proof ex1 = Use("sylib", ex0, UseS("cbvrexvw", [("A", "A")], SubBi("y", "g", $"x e. {iuz}")));
-            string iug = $"U_ z e. dom R {{ {Cons("g", "z")} }}";
             Proof inner = Use("bitri", UseS("eliun", [("A", "x"), ("x", "z"), ("B", "dom R"), ("C", $"{{ {Cons("g", "z")} }}")]),
                 UseS("cbvrexvw", [("A", "dom R")], SubBi("z", "h", $"x e. {{ {Cons("g", "z")} }}")));
             string d = $"( ( ( {c} /\\ g e. A ) /\\ h e. dom R ) /\\ x e. {{ {Cons("g", "h")} }} )";
@@ -345,7 +336,6 @@ public sealed class ListBridge
             Proof i2 = Use("rexlimdva", Use("ex", goal));
             Proof i3 = Use("sylbid", Lift($"( {c} /\\ g e. A )", inner), i2);
             Proof i4 = Use("rexlimdva", i3);
-            _ = iug;
             Proof r = Use("mpd", ex1, i4);
             if (Cons_(r) != g)
             {
@@ -412,7 +402,6 @@ public sealed class ListBridge
 
         // It is one-to-one: nil goes to (/), a cons to a nonempty word, and a cons's word determines its head and tail.
         string c2 = $"( ( {f1} /\\ x e. {dm} ) /\\ w e. {dm} )";
-        string goalT = $"( {Val("R", "x")} = {Val("R", "w")} -> x = w )";
         string xN = $"( {c2} /\\ x = {Nil} )", xC = $"( {c2} /\\ -. x = {Nil} )";
         Proof nn;
         {
@@ -435,8 +424,8 @@ public sealed class ListBridge
         Proof cc;
         {
             string k = $"( {xC} /\\ -. w = {Nil} )";
-            var (hx, tx, dx) = DmFacts(k, "x", "R");
-            var (hw, tw, dw) = DmFacts(k, "w", "R");
+            var (hx, tx, _) = DmFacts(k, "x", "R");
+            var (hw, tw, _) = DmFacts(k, "w", "R");
             Proof bi1 = Use("eqeq12d", ValC(k, "x"), ValC(k, "w"));
             Proof len = Use("eqtr4i", UseS("s1len", [("A", Hd("x"))]), UseS("s1len", [("A", Hd("w"))]));
             Proof bi2 = Imp(k, "ccatopth", [Use("jca", S1(k, "x"), Rv(k, "x")), Use("jca", S1(k, "w"), Rv(k, "w")), Lift(k, len)]);
@@ -449,12 +438,10 @@ public sealed class ListBridge
             Proof e1 = Ce(Cons("Y", Tl("x")), Hyp(k2, $"{Hd("x")} = {Hd("w")}"));
             Proof e2 = Ce(Cons(Hd("w"), "Y"), Hyp(k2, $"{Tl("x")} = {Tl("w")}"));
             Proof xw = Trans(dx2, e1, e2, Symm(dw2));
-            _ = (dx, dw);
             cc = Use("sylbid", biv, Use("ex", xw));
         }
         Proof inj = Use("pm2.61dan", Use("pm2.61dan", nn, nc), Use("pm2.61dan", cn, cc));
         Proof injAll = Use("ralrimiva", Use("ralrimiva", inj));
-        _ = goalT;
         Proof bi = UseS("f1mpt", [("B", "Word A")], UseS("eqid", [("A", Mp("R"))]), SubEq("x", "w", Val("R", "x")));
         Thm("lean-list-mpf1", "W's step takes a one-to-one map into Word A to a one-to-one map into Word A.",
             Use("mpbird", Use("jca", memAll, injAll), Lift(f1, bi)));
@@ -881,10 +868,8 @@ public sealed class ListBridge
             }
             Proof r = ListInd(H0, P, nilP, ConsP, "B");
             Thm("lean-list-len", "List.length through W, by induction over the model's List.", r);
-            string h = $"( {H0} /\\ B e. {L} )";
             Thm("lean-list-lenel", "List.length stays in the model's Nat.", Use("simpld", Use("lean-list-len")));
             Thm("lean-list-flen", "Bridge: F ( List.length B ) = # ( W ( B ) ): List.length is #.", Use("simprd", Use("lean-list-len")));
-            _ = h;
         }
         // Append: W ( List.append l C ) = ( W ( l ) ++ W ( C ) ), carrying List.append l C e. L.
         {
@@ -899,7 +884,6 @@ public sealed class ListBridge
                 string pz = ProofKit.Replace(P, "p", "z");
                 Proof xL = Use("simpld", Hyp(cs, pz));
                 Proof wx = Use("simprd", Hyp(cs, pz));
-                string x = App("z", "C");
                 Proof ac = Imp(cs, "lean-list-app-cons", [Use("jca", Use("jca", Use("jca", Hyp(cs, H0), Hyp(cs, "y e. A")), Hyp(cs, $"z e. {L}")), Hyp(cs, $"C e. {L}"))]);
                 Proof prem = Use("jca", Use("jca", Hyp(cs, H0), Hyp(cs, "y e. A")), xL);
                 Proof ce = Imp(cs, "lean-list-conseq", [prem]);
@@ -912,7 +896,6 @@ public sealed class ListBridge
                 Proof ass = Symm(Imp(cs, "ccatass", [s1, wz, wc]));
                 Proof wcz = Imp(cs, "lean-list-wcons", [Use("jca", Use("jca", Hyp(cs, H0), Hyp(cs, "y e. A")), Hyp(cs, $"z e. {L}"))]);
                 Proof back = Ce($"( Y ++ {Wv("C")} )", Symm(wcz));
-                _ = x;
                 return Use("jca", mem, Trans(w1, ass, back));
             }
             Proof r0 = ListInd(ph, P, nilP, ConsP, "B");
@@ -935,10 +918,8 @@ public sealed class ListBridge
             _nat.Add("lean-list-happ", "HAppend.hAppend at List's instances is List.append (its instances unfolded).", st, pf, Required(pf));
             Proof ha = Use("lean-list-happ");
             string h = Ante(ha);
-            string hl = Lhs(ha);
             Proof wa = Imp(h, "lean-list-wapp", [Hyp(h, $"( ( {H0} /\\ B e. {L} ) /\\ C e. {L} )")]);
             Thm("lean-list-whapp", "Bridge: W takes HAppend.hAppend on lists (Lean's ++) to set.mm's ++.", Trans(Ce(Wv("Y"), ha), wa));
-            _ = hl;
         }
     }
 

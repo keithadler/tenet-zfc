@@ -52,10 +52,60 @@ CI runs the demo weekly and by hand (the `demo` job in `.github/workflows/ci.yml
 
 ## Output
 
-From a run on an Apple M-series Mac (a shared machine, so the times vary):
+From a run on an Apple-silicon Mac shared with other jobs, so the times are high; an earlier run on a quieter machine took 495 s to translate, 63 s to check and 636 s in all:
 
 ```
-OUTPUT
+$ scripts/demo /tmp/demo
+
+== 1. Lean's theorem
+Lean 4.36.0, src/lean/Init/Data/List/Basic.lean:
+
+  @[simp, grind =] theorem length_append {as bs : List α} : (as ++ bs).length = as.length + bs.length := by
+    induction as with
+    | nil => simp
+    | cons _ as ih => simp [ih, Nat.succ_add]
+
+export: tests/fixtures/library.ndjson (leanout Init, Lean 4.36.0), 230622 bytes
+
+== 2. Translate: Lean's proof term -> ZFC, through the model and the List/Word bridge
+  [   2.9s] read the export and set.mm
+  [   5.4s] the bijection W from the model's List onto Word
+  [   6.1s] the Nat bridge F
+  [  16.8s] Nat.add's computation rules, so F takes Nat.add to +
+  [  57.4s] List.length, List.append and HAppend.hAppend through W
+  [ 600.2s] List.length_append through the model, restated in set.mm's words
+  [ 651.2s] written
+  output: demo.mm, 6928689 bytes, 247 theorems, 652.2 s
+
+== 3. The restated theorem, next to set.mm's own
+  lean-ccatlen        (from Lean's proof)    |- ( ( U e. lean.-tower /\ ( A e. ( U ` (/) ) /\ B e. ( U ` (/) ) ) ) -> ( ( S e. Word A /\ T e. Word B ) -> ( # ` ( S ++ T ) ) = ( ( # ` S ) + ( # ` T ) ) ) )
+  lean-ccatlen-setmm  (from set.mm's proof)  |- ( ( U e. lean.-tower /\ ( A e. ( U ` (/) ) /\ B e. ( U ` (/) ) ) ) -> ( ( S e. Word A /\ T e. Word B ) -> ( # ` ( S ++ T ) ) = ( ( # ` S ) + ( # ` T ) ) ) )
+  ccatlen             (set.mm)               |- ( ( S e. Word A /\ T e. Word B ) -> ( # ` ( S ++ T ) ) = ( ( # ` S ) + ( # ` T ) ) )
+  -> one statement, two proofs; its consequent is ccatlen's statement, token for token
+
+== 4. Check: metamath-exe, mmverify.py, mmj2 definitionCheck
+  demo.mm: metamath-exe: ok: every proof verified (247 theorems) (31s)
+  demo.mm: mmverify.py: ok: exit status 0 (131s)
+  demo.mm: mmj2 definitionCheck: ok: every definition passes (279s)
+  (279.4 s)
+
+== 5. Sabotage: each must be rejected
+(a) one proof step of lean-ccatlen changed
+  metamath-exe: REJECTED: "lean-ccatlen": The hypotheses of statement "syl" at proof step 197 cannot be unified.
+  mmverify.py:  REJECTED: MMError: Proof stack entry does not match essential hypothesis.
+  -> rejected
+(b) lean-ccatlen's statement changed from + to x.
+  metamath-exe: REJECTED: "lean-ccatlen": The result of the proof (step 246) does not match the statement being proved.
+  mmverify.py:  REJECTED: MMError: Stack entry does not match proved assertion.
+  -> rejected
+(c) List.length_append's proof term replaced by List.append_nil's
+  tenet-zfc: List.length_append: refused: applying something whose type isn't a function type: ( ( ( ( lean.Eq.{1} ` U ) ` ( ( lean.List.{0} ` U ) ` A ) ) ` ( ( ( ( ( ( ( le
+  -> rejected: no proof is produced, so there is nothing for the checkers to accept
+
+== Summary
+  translate: 652.2 s; check (three checkers): 279.4 s; demo total: 1101.4 s
+  demo.mm: 6928689 bytes
+  PASS: the real proof is accepted by all three checkers, and each sabotage is rejected
 ```
 
 ## What each part shows
@@ -87,8 +137,9 @@ The theorems and how each is proved are in [bridges.md](bridges.md#list-and-word
 
 | | |
 |---|---|
-| Lean export (`library.ndjson`) | SIZE_EXPORT |
-| `demo.mm` | SIZE_MM, THEOREMS theorems |
-| translate (`list-bridge`) | T_TRANSLATE |
-| check (three checkers, at once) | T_CHECK |
-| the whole demo, sabotage included | T_TOTAL |
+| Lean export (`library.ndjson`) | 230,622 bytes |
+| `demo.mm` | 6,928,689 bytes, 247 theorems |
+| translate (`list-bridge`) | 495–652 s; about 85% of it is `List.length_append`'s own proof through the model |
+| check (three checkers, at once) | 63–279 s; mmj2 is the slowest |
+| the whole demo, sabotage included | 636–1,101 s |
+| the bijection alone (`--bridge-only`) | 5 s to prove, 33 theorems, 61 KB |
