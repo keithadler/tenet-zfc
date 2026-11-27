@@ -4,6 +4,12 @@ All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://
 
 ## Unreleased (after 0.1.0)
 
+### Theorems across Init (milestone 3)
+
+- **`theorem-all`**: every theorem of an export, or every Nth, through the model, in chunks with an outcome per theorem, CPU-time budgets and resuming ([docs/milestone3.md](docs/milestone3.md#theorems-across-init-built-theorem-all-measured-on-a-sample)).
+- Fixes for the first blockers of the Init sample: Nat literals as arguments and of any size (`lean-litnat`); constructors of recursive propositions (`Nat.le.refl`, `Nat.le.step`); `Decidable`'s proof field in its recursor's typing; `$d` traps under binders in congruence and in instantiating a Π-proposition. Computation rules and equations declare every `$d` pair their proofs need.
+- CI: `tests/fixtures/blockers.ndjson`, 32 theorems that must all prove.
+
 ### Universe elimination (milestone 4, started)
 
 - **`--lowered`** (for `nat-bridge`): the model's universe tower is `lean.-wtower`, an increasing ω-sequence of reflecting weak universes (`lean.-wuni`), instead of Grothendieck universes. Indexed unions, which weak universes aren't closed under, are bounded: by a product for tuples, and by the reflection step `lean-wu-r` for a recursive type's stages.

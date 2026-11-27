@@ -1062,3 +1062,25 @@ Until now 28 hand-picked theorems went through the model. This section measures 
 - `scripts/verify-all` and `scripts/summarize-all` work on its folders unchanged; `summarize-all` reports theorems proved, refused, over budget and failed, ranks the blockers by construct, and gives the size and time distributions.
 - `scripts/subset-export <export> <out> <names>… [--theorems-every N]` cuts the named constants and everything they use out of an export, renumbered: what `leanout Init -- <names>` writes, without Lean. The fixtures below were cut from the `Init` export this way.
 - CI runs `theorem-all` and `verify-all` on `tests/fixtures/theoremall.ndjson` (23 theorems, two chunks, about a minute of proving): it fails on any `error`, `crash` or `timeout`, or if fewer than 18 are proved.
+- CI also runs `theorem-all` on `tests/fixtures/blockers.ndjson` (32 theorems: the ones the first blockers below stopped, with the theorems they use) and fails unless every one proves and passes all three checkers.
+
+**Running it on a 16 GB machine.** One process with several chunk threads gets about one core: the proofs allocate heavily, and the workstation GC stops every thread while it collects. Server GC (`DOTNET_gcServer=1`) uses all the cores but lets the heap grow past physical memory (29 GB on a 16 GB Mac). What works is one process per chunk, a few at a time, each with the default GC and `DOTNET_GCConserveMemory=7`. Don't cap the heap (`DOTNET_GCHeapHardLimit`): a chunk's lemmas accumulate, so a capped chunk runs out at whichever theorem is in hand, and each resumed run records that theorem as a `crash` and fails at the next one.
+
+### The first blockers, and their fixes
+
+The first 150 theorems of the every-10th sample (chunks 0, 1, 3, 4, 6 and 7, from `Init.Prelude` to the `Nat` lemmas): 41 proved (27%), 104 refused and 5 errors. Five constructs stopped most of the rest, and each now has a fix:
+
+| Blocker | Theorems of the 150 | Fix |
+|---|---|---|
+| A Nat literal as an argument (`OfNat.ofNat Nat 2 _`), sent to the universe prover: "not a level of the tower: `( lean.Nat ` U )`" | 28 | `TextMem` reads a literal's text back to its value and types it as a literal |
+| A constructor of a recursive proposition (`Nat.le.refl`, `Nat.le.step`), tried as a disjunction of cases | 27 | The constructor's index tuple is in the least set. A recursive premise's tuple is in some stage `m`, so the constructor's is in stage `suc m`. |
+| `Decidable`'s proof field (`reflects_decide : Bool.Reflects decide p`) in `Decidable.rec`'s typing: "can't discharge" | 22 | A field the computation rule doesn't mention is a proof field: it is applied as `(/)`, which holds by `lean-pf`, and the stage's variable is `(/)` by `lean-pf0` |
+| Nat literals past 10, which were typed one `Nat.succ` at a time | (behind the first) | `lean-litnat`: every value of the literal map on ω is in Nat, by induction on ω; a numeral's position in ω comes from set.mm's isomorphism with `NN0` (`deccl`) |
+| `$d` violations caught before writing (errors): a hypothesis that binds the binder's own letter (`raleqbidv`), and an instance that keeps it (`rspcdv`) | 4 | Congruence proves under an alpha-variant of the hypothesis and comes back by `( h <-> h' )` (`Deduction.RenameApart`). The instance's binders avoid the quantifier's letter. |
+
+After the fixes, `Nat.succ_mul`, `maxOn_eq_minOn`, `decide_false`, `eq_true_of_decide`, `dite_congr`, `Char.ext`, `Nat.le_refl` (refused in the starter library), `Nat.le_succ`, `Nat.lt_succ_self` and `Nat.zero_le` prove, and pass all three checkers. Theorems behind the `Nat.le` constructors now mostly stop at the next construct: induction on `Nat.le` (`Nat.le.rec` into Prop, "a proposition with 2 constructors, recursive, isn't typed yet").
+
+One fix needed a fix of its own. The renamed hypothesis brings in a `cbvmptv` step, and the computation rules declared their `$d` conditions by hand, so metamath-exe rejected `Rose.node`'s rule in `mutual.ndjson`. `Iota`, `RecursorIotas` and `Equation` now add every pair their proof's steps need (`DistinctVars.Required`).
+
+The measured totals over the whole sample, the ranking and the forecast follow in the next section, once the run is done.
+
