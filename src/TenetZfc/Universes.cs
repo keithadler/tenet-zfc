@@ -18,11 +18,32 @@ public sealed partial class Model
 {
     public const string TowerToken = "lean.-tower";
 
+    /// <summary>
+    /// The lowered tower (docs/milestone4.md): an increasing ω-sequence of reflecting weak universes, the first containing
+    /// ω. ZFC proves one exists (lean-wit-tw), so a theorem whose statement doesn't mention U holds outright.
+    /// </summary>
+    public const string LoweredTowerToken = "lean.-wtower";
+
+    /// <summary>Reflecting weak universes: weak universes W with ( R1 ` ( ( rank ` x ) +o _om ) ) e. W for each x e. W.</summary>
+    public const string WuniToken = "lean.-wuni";
+
+    /// <summary>The token of the tower in use: lean.-tower, or lean.-wtower when lowered.</summary>
+    public string Tower => lowered ? LoweredTowerToken : TowerToken;
+
+    /// <summary>What each level of the tower is: Univ (Grothendieck universes), or lean.-wuni when lowered.</summary>
+    public string UClass => lowered ? WuniToken : "Univ";
+
+    /// <summary>Theorems proved with no universe hypothesis (lowered tower, discharged), for the header.</summary>
+    public List<string> PlainZfc { get; } = new();
+
+    /// <summary>Whether the tower is lowered to weak universes (docs/milestone4.md).</summary>
+    public bool Lowered => lowered;
+
     /// <summary>Each defined constant by its token.</summary>
     private readonly Dictionary<string, Name> _tokenNames = new();
 
     /// <summary>The class the universe argument ranges over: Univ, or the towers.</summary>
-    private string UniverseDomain => tower ? TowerToken : "Univ";
+    private string UniverseDomain => tower ? Tower : "Univ";
 
     /// <summary>The hypothesis on the universe argument U.</summary>
     private string UHyp => $"U e. {UniverseDomain}";
@@ -99,14 +120,39 @@ public sealed partial class Model
     /// <summary>In tower mode, define lean.-tower once, before the first constant.</summary>
     private void EnsureTower()
     {
-        if (!tower || _values.ContainsKey(TowerToken))
+        if (!tower || _values.ContainsKey(Tower))
         {
             return;
         }
-        EmitRaw(t.Of("-tower"), TowerToken,
-            "{ f | ( ( f : _om --> Univ /\\ _om e. ( f ` (/) ) ) /\\ A. n e. _om ( f ` n ) e. ( f ` suc n ) ) }",
+        if (lowered)
+        {
+            EmitRaw(t.Of("-wuni"), WuniToken, "{ w e. WUni | A. x e. w ( R1 ` ( ( rank ` x ) +o _om ) ) e. w }",
+                ["w", "x"], "reflecting weak universes: weak universes that contain, with each member x, the weak universe R1 at rank x plus omega");
+            EmitRaw(t.Of("-wtower"), LoweredTowerToken, TowerBody("f"),
+                ["f", "n"], "lowered universe towers: increasing omega-sequences of reflecting weak universes, the first containing omega (ZFC proves one exists)");
+            return;
+        }
+        EmitRaw(t.Of("-tower"), TowerToken, TowerBody("f"),
             ["f", "n"], "universe towers: increasing omega-sequences of Grothendieck universes, the first containing omega");
     }
+
+    /// <summary>In the lowered tower, define the witness lean.-wit once (<see cref="TowerWitness"/>).</summary>
+    public void EnsureWitness()
+    {
+        EnsureTower();
+        if (lowered && !_values.ContainsKey(TowerWitness.Wit))
+        {
+            EmitRaw(t.Of("-wit"), TowerWitness.Wit, TowerWitness.Definiens, ["n"],
+                "witness that ZFC proves a lowered tower exists: R1 at the limit ordinals omega^2 (n + 1)");
+        }
+    }
+
+    /// <summary>The class lean.-tower (or lean.-wtower) abbreviates, with its bound variable named f.</summary>
+    public string TowerBody(string f) => $"{{ {f} | {TowerCondition(f)} }}";
+
+    /// <summary>What f e. lean.-tower says: ( ( f : _om --> Univ /\ _om e. ( f ` (/) ) ) /\ A. n e. _om ( f ` n ) e. ( f ` suc n ) ).</summary>
+    public string TowerCondition(string f) =>
+        $"( ( {f} : _om --> {UClass} /\\ _om e. ( {f} ` (/) ) ) /\\ A. n e. _om ( {f} ` n ) e. ( {f} ` suc n ) )";
 
     /// <summary>
     /// The universe analysis of docs/spec.md, for an output's header: which universes the definitions written so far
@@ -159,10 +205,30 @@ public sealed partial class Model
                 (tok == QuotEqv ? helpers : env.Find(n)?.Kind == ConstKind.Recursor ? whole : open).Add($"{n}");
             }
         }
-        sb.AppendLine("Universes: a tower U of Grothendieck universes. Each theorem has the hypothesis U e. lean.-tower: U is");
-        sb.AppendLine("an increasing omega-sequence of Grothendieck universes, the first containing omega, and Lean's Sort (k+1)");
-        sb.AppendLine("is ( U ` k ). ZFC does not prove that such a tower exists (that needs inaccessible cardinals), so each");
-        sb.AppendLine("theorem holds in every model of ZFC that has one. No axiom is added.");
+        if (lowered)
+        {
+            sb.AppendLine("Universes: lowered (docs/milestone4.md). Lemmas have the hypothesis U e. lean.-wtower: U is an increasing");
+            sb.AppendLine("omega-sequence of reflecting weak universes (lean.-wuni: weak universes containing, with each member x, the");
+            sb.AppendLine("weak universe R1 at rank x + omega), the first containing omega, and Lean's Sort (k+1) is ( U ` k ). ZFC");
+            sb.AppendLine("proves such a tower exists: lean-wit-tw, for lean.-wit = R1 at the limit ordinals omega^2 (n + 1). So a");
+            sb.AppendLine("theorem whose statement doesn't mention U holds outright: the universe hypothesis is discharged.");
+            sb.AppendLine("No ax-groth: weak universes are closed under pairs, unions, power sets and function spaces, which ZF proves;");
+            sb.AppendLine("indexed unions, which they lack, were bounded (by a product of the components' sets, or, for a recursive");
+            sb.AppendLine("type's stages, by R1 at rank 0 + omega, a member of every level: the reflection step).");
+            if (PlainZfc.Count > 0)
+            {
+                Wrap(sb, "Plain ZFC (no universe hypothesis, no ax-groth; scripts/check-axioms checks both): ", PlainZfc);
+            }
+        }
+        else
+        {
+            sb.AppendLine("Universes: a tower U of Grothendieck universes. Each theorem has the hypothesis U e. lean.-tower: U is");
+            sb.AppendLine("an increasing omega-sequence of Grothendieck universes, the first containing omega, and Lean's Sort (k+1)");
+            sb.AppendLine("is ( U ` k ). ZFC does not prove that such a tower exists (that needs inaccessible cardinals), so each");
+            sb.AppendLine("theorem holds in every model of ZFC that has one. No axiom is added.");
+            sb.AppendLine("Plain ZFC: no theorem here; each needs the tower hypothesis. The universe elimination of docs/milestone4.md");
+            sb.AppendLine("(--lowered) discharges it where every universe fact the proof uses holds in weak universes.");
+        }
         if (byLevel.Count == 0)
         {
             sb.AppendLine("Levels used: none (Prop only" + (whole.Count > 0 ? ", apart from recursors' motives" : "") + ").");

@@ -554,6 +554,10 @@ public sealed partial class Model
                     var e = Eqv(ph, doms[0], body, H);
                     string rel = Kid("class", body, "R"), level = doms[0];
                     Proof sub = pr.Apply("qsss", S(("ph", ph), ("A", "A"), ("R", rel)), e.ErR);
+                    if (lowered)
+                    {
+                        throw new Refused("quotients in the lowered tower are not built yet (docs/milestone4.md)");
+                    }
                     Proof univ = LevelUniv(ph, level.Split(' ')[3]);
                     Proof pwIn = _d.Syl(_d.Jca(univ, H(ph, $"A e. {level}")), pr.Apply("grupw", S(("U", level), ("A", "A"))));
                     r = _d.Syl(pr.Apply("3jca", S(("ph", ph), ("ps", $"{level} e. Univ"), ("ch", $"~P A e. {level}"), ("th", $"{body} C_ ~P A")), univ, pwIn, sub),
@@ -675,6 +679,10 @@ public sealed partial class Model
         Proof nonempty = _d.Syl(holds, pr.Apply("rexn0", S(("x", Kid("wff", cond, "x")), ("A", "A"), ("ph", Kid("wff", cond, "ph")))));
 
         // α is inside its universe, and so inside what W orders.
+        if (lowered)
+        {
+            throw new Refused("quotients and choice in the lowered tower are not built yet (docs/milestone4.md)");
+        }
         Proof univ = tower ? LevelUniv(ph, lev.Split(' ')[3]) : H("U e. Univ");
         Proof tr = _d.Syl(univ, pr.Apply("grutr", S(("U", lev))));
         Proof sub = pr.Apply("mpd", S(("ph", ph), ("ps", $"A e. {lev}"), ("ch", $"A C_ {lev}")), H($"A e. {lev}"),
