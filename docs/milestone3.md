@@ -1049,6 +1049,35 @@ The same 34 chunks of the first run translated 13,553 constants (11,587 definiti
 
 **Follow-up:** chunks 33 and 35–39; the 29 chunks from 6af3f87 again, for choice and quotients; chunk 31's mmj2 error; `Acc.rec`'s computation rule.
 
+## The Init-wide run on GitHub's runners (built)
+
+The whole run again, on `main` at `6203d88`, on GitHub's runners (`.github/workflows/init-run.yml`, [run 46067008499](https://github.com/keithadler/tenet-zfc/actions/runs/46067008499)). Chunks of 500 constants, four chunks per job, ten jobs, a budget of 600 s per constant. Every chunk finished, so this replaces the partial runs above.
+
+| | Count |
+|---|---|
+| Chunks translated and checked | 40 of 40 |
+| Chunks passing all three checkers | 39 at the run; 40 with the fix below |
+| Definitions translated with verified equations | **17,329 of 17,590 (98.5%)** |
+| Constructors, recursors, inductive types, opaque constants | 824 of 828, 607 of 608, 605 of 606, 253 of 253 |
+| Equations emitted and verified | 19,618 |
+| Computation rules verified | 670; 134 need none (into Prop); 17 refused; 3 errors |
+| Theorems a checker rejected | 0 |
+| Output | 161.0 MiB compressed. Checking took metamath-exe 127 s, mmverify.py 642 s and mmj2 7,340 s, summed over chunks; translation took 2,843 s, summed over constants. |
+
+**Why the rest aren't translated:**
+
+| Reason | Constants |
+|---|---|
+| The definition has more symbols than mmj2's definition check can hold | 256 |
+| A computation rule whose witness's variable occurs in the hypotheses (`LawfulApplicative.mk`, `Equivalence.mk`, `LawfulFunctor.mk`) | 11 |
+| Depends on `Classical.choice` in a computation rule or a packed helper | 5 |
+| Out of memory (`Lean.Grind.Semiring.mk` and two others) | 3 |
+| `Acc.rec`'s and `Acc.below.rec`'s computation rules | 2 |
+| `simproc` macro rules (`Lean.Parser._aux_Init_Simproc…`), one each | 10 |
+
+**Chunk 31's mmj2 error, found and fixed.** metamath-exe and mmverify.py accepted chunk 31; mmj2's `definitionCheck` stopped with "A-PR-0016 Programmer Error! … convertRPNToFormula() failed … proof incomplete". The macro was checking `df-lean.Lean.Grind.Config.noConfusionType.u0`, whose definiens uses 149 distinct set variables. To show a dummy variable is bound, the macro builds a justification theorem with every dummy renamed to an unused set variable (`getUnusedDummyVar`). The file declared 150 set variables (set.mm's 26 and 124 of its own), so the renaming ran out and passed mmj2 an incomplete formula. Now the output declares spares: when it first uses `xxN`, it declares up to `xx(2N+26)`, each a `$v` and a `$f`, which add no axiom. Chunk 31, translated again on this machine, passes all three checkers: 516 theorems; mmj2 took 67 s.
+
+**Follow-up:** the 256 definitions too large for mmj2, by splitting long steps into lemmas; the witness `$d` refusals; `Acc.rec`'s computation rule.
 ## Theorems across Init (built: `theorem-all`; measured on a sample)
 
 Until now 28 hand-picked theorems went through the model. This section measures how many of `Init`'s 45,588 theorems do, ranks what stops the others, and fixes the cheapest blockers.
