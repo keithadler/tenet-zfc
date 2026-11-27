@@ -915,7 +915,9 @@ public sealed class ListBridge
                 _ = x;
                 return Use("jca", mem, Trans(w1, ass, back));
             }
-            Proof r = ListInd(ph, P, nilP, ConsP, "B");
+            Proof r0 = ListInd(ph, P, nilP, ConsP, "B");
+            string hn = $"( ( {H0} /\\ B e. {L} ) /\\ C e. {L} )";
+            Proof r = Use("syl", Use("jca", Use("jca", Hyp(hn, H0), Hyp(hn, $"C e. {L}")), Hyp(hn, $"B e. {L}")), r0);
             Thm("lean-list-app", "List.append through W, by induction over the model's List.", r);
             Thm("lean-list-appel", "List.append stays in the model's List.", Use("simpld", Use("lean-list-app")));
             Thm("lean-list-wapp", "Bridge: W ( List.append B C ) = ( W ( B ) ++ W ( C ) ): List.append is ++.", Use("simprd", Use("lean-list-app")));

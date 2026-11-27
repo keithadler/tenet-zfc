@@ -143,36 +143,34 @@ s = s[:i] + stmt.replace('( ( # ` S ) + ( # ` T ) )', '( ( # ` S ) x. ( # ` T ) 
 open(sys.argv[2], 'w').write(s)
 EOF
 reject "(b) lean-ccatlen's statement changed from + to x." bad-stmt.mm
-# (c) A broken Lean proof: List.length_append's proof term replaced by List.append_nil's.
+# (c) A broken Lean proof: List.length_append's proof term replaced by List.append_nil's. The translator types the
+# proof term against the theorem's statement (tenet-zfc theorem, the same code list-bridge runs), so it is the step
+# that meets it.
 python3 - "$export" bad-export.ndjson <<'EOF'
 import json, sys
 lines = open(sys.argv[1]).read().splitlines()
-names = {}
-for l in lines:
-    o = json.loads(l)
-    if 'in' in o and 'str' in o:
-        names[o['in']] = o['str']
+objs = [json.loads(l) for l in lines]
+names = {o['in']: o for o in objs if 'in' in o}
 def full(i):
     parts = []
     while i:
-        n = names[i]; parts.append(n['str']); i = n['pre']
+        n = names[i]
+        k = 'str' if 'str' in n else 'num'
+        parts.append(str(n[k].get('str', n[k].get('i'))))
+        i = n[k]['pre']
     return '.'.join(reversed(parts))
-thms = {}
-for k, l in enumerate(lines):
-    o = json.loads(l)
-    if 'thm' in o:
-        thms[full(o['thm']['name'])] = (k, o)
-k, target = thms['List.length_append']
-_, donor = thms['List.append_nil']
-target['thm']['value'] = donor['thm']['value']
-lines[k] = json.dumps(target, separators=(',', ':'))
+thms = {full(o['thm']['name']): k for k, o in enumerate(objs) if 'thm' in o}
+target, donor = thms['List.length_append'], thms['List.append_nil']
+objs[target]['thm']['value'] = objs[donor]['thm']['value']
+lines[target] = json.dumps(objs[target], separators=(',', ':'))
 open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
 EOF
 echo "(c) List.length_append's proof term replaced by List.append_nil's"
-if "${tz[@]}" list-bridge bad-export.ndjson set.mm bad-proof.mm List.length_append > bad-proof.out 2> bad-proof.log; then
+"${tz[@]}" theorem bad-export.ndjson set.mm bad-proof.mm List.length_append > bad-proof.out 2>&1 || true
+if grep -q '^List.length_append: |-' bad-proof.out; then
   if proofcheck bad-proof.mm; then echo "  -> NOT rejected: the demo fails"; status=1; else echo "  -> rejected by the checkers"; fi
 else
-  echo "  tenet-zfc: $(grep -m1 -E 'refused|Exception' bad-proof.log | cut -c1-150)"
+  echo "  tenet-zfc: $(grep -m1 -E 'refused|Exception' bad-proof.out | cut -c1-160)"
   echo "  -> rejected: no proof is produced, so there is nothing for the checkers to accept"
 fi
 
