@@ -850,6 +850,11 @@ public sealed partial class Model
         (Proof eqT, _, _) = Unfold(small, itok, ps, (k, dom) => Hyp(small, $"{ps[k]} e. {dom}") ?? throw new Refused($"no hypothesis {ps[k]} e. {dom}"));
         string set = Rhs(eqT);
         Proof xIn = pr.Apply("eleqtrd", S(("ph", small), ("A", x), ("B", iapp), ("C", set)), Hyp(small, $"{x} e. {iapp}")!.Value, eqT);
+        SyntaxTree setNode = pr.Parse("class", set.Split(' '))!;
+        if (setNode.Rule.Label == "cif" && pr.Render(setNode.Children[1]) == "1o" && pr.Render(setNode.Children[2]) == "(/)")
+        {
+            return PropProjLemma(label, ind, i, small, x, ctok, ps, xIn, pr.Render(setNode.Children[0]));
+        }
         var fieldOf = Enumerable.Range(0, nf).Select(j => Field($"( 2nd ` {x} )", j)).ToList();
         List<string> cdoms = Domains(ctok, ps.Concat(fieldOf).ToList(), np + nf);
         string goalTy = cdoms[np + i];
@@ -914,6 +919,80 @@ public sealed partial class Model
         return label;
     }
 
+
+    /// <summary>
+    /// lean-proj-S-i for a structure S in Prop (And, Iff): its set is if ( E. a1 e. D1 … E. an e. Dn T. , 1o , (/) ), and
+    /// field i of a proof is a proof, (/). A member X of the set makes the condition hold (elif0), so D_i has a member,
+    /// and D_i is a proposition (a hypothesis D_i e. 2o, lean-pf; or itself if ( χ , 1o , (/) ), elif0 and lean-prop),
+    /// so it holds: |- ( ( ( U e. lean.-tower /\ A e. D1 ) … /\ X e. ⟦S A …⟧ ) -> (/) e. T_i ).
+    /// Only for a field whose proposition doesn't mention the fields before it.
+    /// </summary>
+    private string PropProjLemma(string label, ConstInfo ind, int i, string small, string x, string ctok, List<string> ps, Proof xIn, string psi)
+    {
+        int np = ind.NumParams, nf = env.Find(ind.Ctors[0])!.NumFields;
+        string goalTy = Domains(ctok, ps.Concat(Enumerable.Repeat("(/)", nf)).ToList(), np + nf)[np + i];
+        string goal = $"(/) e. {goalTy}";
+        Proof both = _d.Syl(xIn, Bi1(pr.Apply("elif0", S(("A", x), ("ph", psi), ("B", "1o")))));
+        Proof holds = pr.Apply("simpld", S(("ph", small), ("ps", psi), ("ch", $"{x} e. 1o")), both);
+        var vars = new List<string>();
+        // ( ctx -> ( w -> goal ) ), down the condition's E. (rexlimdva) to field i.
+        Proof Descend(string ctx, string w)
+        {
+            SyntaxTree n = pr.Parse("wff", w.Split(' '))!;
+            if (n.Rule.Label != "wrex")
+            {
+                throw new Refused($"{ind.Name}'s condition has no field {i}: {psi}");
+            }
+            string body = pr.Render(n.Children[0]), a = pr.Render(n.Children[1]), dom = pr.Render(n.Children[2]);
+            if (ctx.Split(' ').Contains(a) || goal.Split(' ').Contains(a))
+            {
+                throw new Refused($"{ind.Name}'s field variable {a} occurs in the hypotheses");
+            }
+            string ctx2 = $"( {ctx} /\\ {a} e. {dom} )";
+            Proof inner;
+            if (vars.Count == i)
+            {
+                if (vars.Any(v => dom.Split(' ').Contains(v)))
+                {
+                    throw new Refused($"{ind.Name}'s field {i} is a proposition about the fields before it: {dom}");
+                }
+                if (dom != goalTy)
+                {
+                    throw new Refused($"{ind.Name}'s field {i} type came out as {dom}, not {goalTy}");
+                }
+                Proof aIn = Hyp(ctx2, $"{a} e. {dom}")!.Value;
+                Proof g;
+                SyntaxTree dn = pr.Parse("class", dom.Split(' '))!;
+                if (Hyp(ctx2, $"{dom} e. 2o") is Proof isProp)
+                {
+                    EnsurePf();
+                    g = _d.Syl(_d.Jca(isProp, aIn), pr.Apply("lean-pf", S(("A", dom), ("B", a))));
+                }
+                else if (dn.Rule.Label == "cif" && pr.Render(dn.Children[1]) == "1o" && pr.Render(dn.Children[2]) == "(/)")
+                {
+                    string chi = pr.Render(dn.Children[0]);
+                    Proof c2 = _d.Syl(aIn, Bi1(pr.Apply("elif0", S(("A", a), ("ph", chi), ("B", "1o")))));
+                    Proof chiP = pr.Apply("simpld", S(("ph", ctx2), ("ps", chi), ("ch", $"{a} e. 1o")), c2);
+                    EnsureTowerLemmas();
+                    g = _d.Syl(chiP, Bi2(ApplyId("lean-prop", S(("ph", chi)))));
+                }
+                else
+                {
+                    throw new Refused($"{ind.Name}'s field {i} is a proposition the translator can't show is one: {dom}");
+                }
+                inner = pr.Apply("a1d", S(("ph", ctx2), ("ps", goal), ("ch", body)), g);
+            }
+            else
+            {
+                vars.Add(a);
+                inner = Descend(ctx2, body);
+            }
+            return pr.Apply("rexlimdva", S(("ph", ctx), ("x", a), ("A", dom), ("ps", body), ("ch", goal)), inner);
+        }
+        Proof r = pr.Apply("mpd", S(("ph", small), ("ps", psi), ("ch", goal)), holds, Descend(small, psi));
+        EmitLemma(label, $"Field {i} of a proof of the proposition {ind.Name} holds.", r);
+        return label;
+    }
 
     // ---- maps and Π-propositions, binder by binder ---------------------------------------------------------------
 
