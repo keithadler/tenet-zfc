@@ -32,7 +32,7 @@ namespace TenetZfc;
 ///
 /// The codes avoid the letters that would make an escaped name collide with the model's own tokens and labels: no code
 /// starts with <c>s</c>, <c>c</c>, <c>l</c>, <c>o</c> or <c>t</c> (the components <c>-step</c>, <c>-case</c>, <c>-lit</c>,
-/// <c>-ofnum</c> and <c>lean.-tower</c>), nor with <c>e</c>, <c>i</c> or a digit (the label suffixes <c>-eq</c>,
+/// <c>-least</c>, <c>-ofnum</c> and <c>lean.-tower</c>), nor with <c>e</c>, <c>i</c> or a digit (the label suffixes <c>-eq</c>,
 /// <c>-iota</c>, and <c>-N</c> of a projection), and <c>--</c> never occurs. <see cref="Unescape"/> inverts it.
 /// </summary>
 public static class NameEscape

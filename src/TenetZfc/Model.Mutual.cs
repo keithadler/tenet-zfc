@@ -362,12 +362,9 @@ public sealed partial class Model
         string ctok = Token(ctor.Name) ?? throw new Refused($"{ctor.Name}: the name has characters a set.mm token can't");
         string rtok = Token(rec.Name)!;
         int np = blk.NumParams, nb = np + blk.NumMotives + blk.NumMinors, nf = bc.NumFields;
-        if (nb + nf > ClassVars.Length)
-        {
-            throw new Refused("more arguments than class variables");
-        }
-        List<string> recArgs = ClassVars.Take(nb).ToList(), ps = recArgs.Take(np).ToList();
-        List<string> fields = ClassVars.Skip(nb).Take(nf).ToList();
+        List<string> cv = ClassVarsFor(nb + nf, "more arguments than class variables");
+        List<string> recArgs = cv.Take(nb).ToList(), ps = recArgs.Take(np).ToList();
+        List<string> fields = cv.Skip(nb).Take(nf).ToList();
         // An auxiliary type's constructors are the nested type's own (List.cons), at the nested occurrence's parameters.
         List<string> ctorParams = ti.Original is null ? NestedParams(blk, ti, ps) : ps;
         List<string> ctorArgs = ctorParams.Concat(fields).ToList();

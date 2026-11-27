@@ -28,6 +28,9 @@ The first version meant for someone else to install and use: independently check
 - Recursive propositions (`Nat.le`) as least sets of index tuples.
 - `Nat` literals as decimal numerals, through `_om`; string literals as lists of characters.
 - Quotients as equivalence classes, with `Quot.lift`'s computation rule; `propext` as a proof; `Classical.choice` from `set.mm`'s choice.
+- Every Lean name as a token and a label: `'`, `?`, `!`, `@`, Unicode, numeric parts and `«»` are escaped one-to-one (`List.map'` → `lean.List.map-q`, `a₂` → `lean.a-u2082`); `define` takes escaped names too.
+- `Acc` and other propositions whose premises are functions into them, as least fixed points (the intersection of the closed sets), with recursors into any sort by well-founded recursion over them: `WellFounded.fix` and well-founded definitions translate.
+- More than 20 arguments: class variables the output declares itself (`AA1`, `AA2`, …), like the extra set variables.
 - More than 26 bound variables: set variables each output declares itself (`$v`, `$f setvar`), which add no axiom.
 - Proofs in Metamath's compressed format, sharing every repeated subproof: the largest outputs shrink by up to about 40 times (`--uncompressed` keeps flat proofs).
 - **Universes: a tower by default.** With one universe `Nat.below` is empty, and structurally recursive functions such as `Nat.add` collapse. The model's default is an increasing sequence of Grothendieck universes, one per level, under the hypothesis `U e. lean.-tower`; no axiom is added. Each output's header states this, how many levels it uses and which declarations use each. `--single-universe` keeps the one-universe model, which quotients and choice still need.

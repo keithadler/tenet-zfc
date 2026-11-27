@@ -51,7 +51,7 @@ public class NameEscapeTests
     {
         string[] comps = ["a", "A", "a'", "a-q", "a?", "a!", "_@", "@", "-", "--", ".", "a.b", "a-db", "", "0", "00", "12",
             "u", "u1", "u0_1", "u0_", "u_1", "u1a", "{0}", "{0,1}", "{01}", "{", "}", ",", "{a}", "-z", "-n0", "-step",
-            "step", "-case", "-lit", "-ofnum", "-tower", "eq", "-eq", "iota", "₂", "a₂", "α", "a-u2082", "\U0001D4D0",
+            "step", "-case", "-least", "-lit", "-ofnum", "-tower", "eq", "-eq", "iota", "₂", "a₂", "α", "a-u2082", "\U0001D4D0",
             "\uD800", "x\uDC00y", "$", "term_$__", " ", "a b", "«»", "q", "Q", "B", "d", "m", "n"];
         var names = new List<Name>();
         foreach (string a in comps)
@@ -117,7 +117,7 @@ public class NameEscapeTests
             Assert.DoesNotContain("--", esc);
             foreach (string part in esc.Split('.'))
             {
-                Assert.DoesNotContain(part, new[] { "-step", "-case", "-lit", "-ofnum", "-tower" });
+                Assert.DoesNotContain(part, new[] { "-step", "-case", "-lit", "-least", "-ofnum", "-tower" });
             }
             Assert.DoesNotMatch(@"-[ei0-9]", esc);
             Assert.True(byToken.TryAdd(tok, n), $"{n} and {(byToken.TryGetValue(tok, out var o1) ? o1 : null)} share the token {tok}");

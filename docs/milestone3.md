@@ -883,3 +883,60 @@ scripts/summarize-all out
 - **Names:** 3,397 constants, 17% of `Init`, have names a set.mm token can't hold. An escaping scheme in `Model.Token` would admit most of them.
 - **Model features still missing:** `Acc` and well-founded recursion (389), proof fields of ∀-statements in computation rules (71), fields whose types bind variables (60), empty types (24).
 - **Tool limits:** mmj2's 32,000 symbols (76 definitions), and set.mm's 20 class variables (54).
+
+## Names: every Lean name as a token and a label (built)
+
+The Init-wide run refused 3,397 constants, 17% of `Init`, only for their names. A set.mm math token may hold any printable ASCII character but `$`; a label only letters, digits, `-`, `_` and `.`. Lean names hold `'`, `?`, `!`, subscripts and other Unicode, the hygienic `_@`, numeric parts (`_private.Init.Data.0.…`, `_hyg.3`), and anything at all inside `«»` (parsers are named `«term_<|>_»`).
+
+`NameEscape.Escape` (`src/TenetZfc/NameEscape.cs`) writes a name as its components joined by `.`. A numeric component is its digits. A string component keeps ASCII letters, digits and `_`, and writes every other character as `-` and a code:
+
+| Character | Code | Example |
+|---|---|---|
+| `'` | `-q` | `List.map'` → `lean.List.map-q` |
+| `?` | `-Q` | `GetElem?` → `lean.GetElem-Q` |
+| `!` | `-B` | `Array.get!` → `lean.Array.get-B` |
+| `@` | `-a` | `foo._@.Init.Core._hyg.3` → `lean.foo._-a.Init.Core._hyg.3` |
+| `.` inside a component | `-d` | `«a.b»` → `lean.a-db` |
+| `-` | `-m` | |
+| any other UTF-16 unit | `-u` and 4 hex digits | `a₂` → `lean.a-u2082`, `«term_<|>_»` → `lean.term_-u003c-u007c-u003e_` |
+| beyond U+FFFF | `-U` and 6 hex digits | |
+
+Three kinds of string component are written whole, because something else prints the same way: the empty string is `-z`; a string that a numeric part or a level suffix would also print as (`0`, `u1`, `u0_1`) is `-n` and the string; and `Monomorph`'s level suffix stays `{0,1}` in tokens (`lean.Prod.{0,1}`, as before). Braces and commas occur in a token only there, so `Model.LabelPart` can turn the suffix into `u0_1` in labels (`df-lean.Prod.u0_1`, as before), and no real component prints as `u0_1`. A token is `lean.` and the escaped name; the labels are `c`, `df-` and the model's `lean-…-eq`, `lean-…-iota`, `lean-ind-…` and so on, around `Model.LabelOf(name)`.
+
+**Why nothing collides.**
+- Escaping is one-to-one: `NameEscape.Unescape` reads every output back to the name, and refuses anything `Escape` never writes. The tests check this on hand-picked hard names, on 20,000 random names over an alphabet of the special characters, and on every name in five fixture exports.
+- No code starts with `s`, `c`, `l`, `o` or `t`, so no escaped component is `-step`, `-case`, `-lit`, `-ofnum` or `-least`, nor `lean.-tower`, the model's own tokens.
+- No code starts with `e`, `i` or a digit, so an escaped name never ends in `-eq` or `-iota`, nor takes a projection's `-N`. The label families (`lean-X-eq`, `lean-ind-X`, …) therefore can't meet.
+- `--` never occurs, so `define`'s labels for a nested block's auxiliary recursor, `lean-R--C-iota`, can't meet a constructor's `lean-C-iota`.
+- The set variables `xxN` and their labels `vxxN` start differently from everything else.
+- A Lean constant could, in principle, be named like an instance (`c.«{0}»`). `Monomorph` refuses to make an instance whose name the export already has, so that case is refused rather than merged.
+
+**Comments.** metamath-exe accepts only printable ASCII, and a comment can't contain `$(` or `$)`. Comments now show a Lean name as Lean prints it, with any other character written `\u{…}` (`a\u{2082}`, `term_\u{24}__`).
+
+**The CLI** takes a name as Lean prints it or as its escaped form (`'lean.List.map-q'`, `hint._-a.Init.Hints.1215944719._hygCtx._hyg.3`). Names with numeric parts can't be typed the first way, since `Terms.Of` reads every part as a string.
+
+## `Acc` and other non-finitary propositions (built: types, constructors, recursors; not yet computation rules)
+
+`Acc` is the second-largest blocker in the table above: 379 constants, `WellFounded.fix` and everything defined by well-founded recursion.
+
+```lean
+inductive Acc {α : Sort u} (r : α → α → Prop) : α → Prop where
+  | intro (x : α) (h : (y : α) → r y x → Acc r y) : Acc r x
+```
+
+Its premise `h` is a function into `Acc`. With ω stages, `x` enters `Acc` one stage after all of its predecessors, so a relation of height ω + 1 or more, such as `<` on ω + 1, needs stages beyond ω. Iterating to a regular cardinal would work, but there is a shorter definition of the same set: the least fixed point is the intersection of every closed set (`Model.Least.cs`).
+
+- **The step** is the one ω stages use, except that a premise mentioning the type under binders is translated with each `I params e⃗` read as `if ( <. e⃗ >. e. s , 1o , (/) )`, through a hole `( i e. _V |-> if ( <. i , (/) >. e. s , 1o , (/) ) )` applied to the indices. For `Acc`, `s` grows by every `<. x , (/) >.` with `A. y e. α ( (/) e. ( ( r ` y ) ` x ) -> <. y , (/) >. e. s )`.
+- **The least set** is a constant of its own, so definitions substitute only into its application and never under its class abstraction:
+  `lean.Acc.{1}.-least = ( x e. _V |-> |^| { y | ( lean.Acc.{1}.-step ` <. x , y >. ) C_ y } )`.
+  Every occurrence of the type in the step is positive, so the step is monotone, and the set of all index tuples of the right types is closed. The intersection is therefore a set, and the least fixed point (Knaster–Tarski).
+- **The proposition** is `if ( <. x , (/) >. e. ( lean.Acc.{1}.-least ` <. u , <. α , <. r , (/) >. >. >. ) , 1o , (/) )`, and the constructor is `(/)`.
+- **The recursor.** Lean lets `Acc.rec` eliminate into any sort, because `Acc` has one constructor whose only data field, `x`, is its index. `Acc.rec` is `frecs` over the least set, along the relation from each recursive premise's indices to the constructor's:
+  `R = U_ x e. α U_ y e. α U_ h e. ( ( r ` y ) ` x ) { <. <. y , (/) >. , <. x , (/) >. >. }`.
+  The case analysis (`lean.Acc.{1}.-case`) reads `x` back from the index tuple, gives `(/)` for `h`, and gives the induction hypothesis `( y e. α |-> ( h e. ( ( r ` y ) ` x ) |-> ( f ` <. y , (/) >. ) ) )`. On the least set, every predecessor of a member is a member, so `R` is well-founded there and set-like (`R` is a set), and `frecs` computes `Acc.rec` on accessible elements, which are the only ones Lean can apply it to.
+
+This covers any recursive proposition with a premise under binders, and any recursive proposition whose recursor eliminates into any sort. Finitary propositions with recursors into `Prop` (`Nat.le`) keep their ω stages, which the theorem library's proofs use.
+
+**Verified.** The definitional equations of `Acc`, `Acc.intro`, `Acc.rec`, `WellFounded.fix`, `Nat.lt_wfRel` and `Nat.strongRecOn` (at `Type`) pass metamath-exe, mmverify.py and mmj2's definition check, and a test on the `acc436.ndjson` fixture checks them.
+
+**Not yet: `Acc.rec`'s computation rule.** `Acc.rec F (Acc.intro x h) = F x h (fun y hy => Acc.rec F (h y hy))` follows from `frr2` once `R Fr L` and `R Se L` are proved for the least set `L`. `R Se L` holds because `R` is a set. `R Fr L` is the real lemma: if `B ⊆ L` is nonempty with no `R`-minimal element, then `L \ B` is closed under the step, so `L ⊆ L \ B` and `B` is empty. Proving it means unfolding the step inside a `Deduction` proof, which is the next piece of work. Until then `Acc.intro`'s computation rule is refused with that reason. `Lean.Order.iterates`, the other non-finitary proposition in `Init`, takes the same path, but its `sup` constructor's index is `CCPO.csup c`, which uses `Classical.choice`, and the tower model doesn't cover choice yet.

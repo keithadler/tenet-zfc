@@ -31,6 +31,12 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     private static readonly string[] SetVars = [.. Letters, .. ExtraSetVars];
     private static readonly HashSet<string> SetVarSet = [.. SetVars];
     private static readonly string[] ClassVars = "A B C D E F G H I J K L M N O P Q R S T".Split(' ');   // U is the universe, Z a hole
+    /// <summary>
+    /// Class variables of our own, for statements with more than set.mm's 20 arguments (IO.Error's constructors): AA1, AA2, …
+    /// (set.mm has no token AA followed by digits). Each is declared ($v, and $f class with label cAAN) the first time
+    /// a statement uses it, like the extra set variables; a $f adds no axiom.
+    /// </summary>
+    private static readonly string[] ExtraClassVars = Enumerable.Range(1, 80).Select(i => $"AA{i}").ToArray();
 
     private readonly Ops _ops = new(t);
     private readonly Typing _typing = new(t, env) { Deadline = () => pr.Deadline };   // define-all's time budget
@@ -157,6 +163,31 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
 
     private readonly HashSet<string> _declaredVars = new();
 
+    /// <summary>The first count class variables: set.mm's, then ours (declared here when first used).</summary>
+    private List<string> ClassVarsFor(int count, string why)
+    {
+        if (count > ClassVars.Length + ExtraClassVars.Length)
+        {
+            throw new Refused(why);
+        }
+        var r = ClassVars.Concat(ExtraClassVars).Take(count).ToList();
+        foreach (string x in r.Skip(ClassVars.Length).Where(_declaredVars.Add))
+        {
+            string text = $"""
+                $( A class variable of tenet-zfc's own: set.mm's are used up. $)
+                $v {x} $.
+                c{x} $f class {x} $.
+
+                """;
+            _out.AppendLine(text);
+            if (!dryRun)
+            {
+                pr.Database.Extend(text);
+            }
+        }
+        return r;
+    }
+
     /// <summary>The set variable, declared first in the output when it is one of ours rather than set.mm's.</summary>
     private string Declare(string x)
     {
@@ -256,7 +287,9 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     private Expr? Unwrapped(App a)
     {
         Expr head = Ops.Spine(a, out List<Expr> args);
-        string n = head is Const c ? $"{c.Name}" : "";
+        // In tower mode the head is an instance, outParam.{2}: its name is the original's with a level suffix.
+        Name? hn = head is Const c ? c.Name is StrName { Value: var lv } inst && NameEscape.IsLevelSuffix(lv) ? inst.Prefix : c.Name : null;
+        string n = hn is null ? "" : $"{hn}";
         int arity = n is "optParam" or "autoParam" ? 2 : n is "outParam" or "semiOutParam" ? 1 : 0;
         if (arity == 0 || args.Count != arity || env.Find(((Const)head).Name) is not { Kind: ConstKind.Definition, Value: Expr v })
         {
@@ -1056,11 +1089,8 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         Define(n);
         string tok = Token(n)!;
         int arity = Arity(pr, _values[tok]);
-        if (arity > ClassVars.Length)
-        {
-            throw new Refused("more parameters than class variables");
-        }
-        var args = _choiceDependent.Contains(tok) ? ClassVars.Take(arity - 1).Prepend("W").ToList() : ClassVars.Take(arity).ToList();
+        List<string> cv = ClassVarsFor(arity, "more parameters than class variables");
+        var args = _choiceDependent.Contains(tok) ? cv.Take(arity - 1).Prepend("W").ToList() : cv;
         List<string> doms = Domains(tok, args, arity);
         var hyps = new List<string> { UHyp };
         hyps.AddRange(args.Select((a, i) => $"{a} e. {doms[i]}"));
@@ -1102,12 +1132,9 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         }
         int j = Array.FindIndex(ind.Ctors, c => ReferenceEquals(c, ctorName));
         int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors, nf = ctor.NumFields;
-        if (nrec + nf > ClassVars.Length)
-        {
-            throw new Refused("more arguments than class variables");
-        }
-        List<string> recArgs = ClassVars.Take(nrec).ToList();
-        List<string> fields = ClassVars.Skip(nrec).Take(nf).ToList();
+        List<string> cv = ClassVarsFor(nrec + nf, "more arguments than class variables");
+        List<string> recArgs = cv.Take(nrec).ToList();
+        List<string> fields = cv.Skip(nrec).Take(nf).ToList();
         List<string> ctorArgs = recArgs.Take(np).Concat(fields).ToList();
         string v = ctorArgs.Aggregate($"( {ctok} ` U )", (acc, a) => $"( {acc} ` {a} )");
 
@@ -1116,10 +1143,9 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         List<string> rdoms = Domains(rtok, recArgs, nrec);
         hyps.AddRange(recArgs.Select((a, i) => $"{a} e. {rdoms[i]}"));
         List<string> cdoms = Domains(ctok, ctorArgs, np + nf);
-        RefuseBinders(cdoms.Skip(np).Select(d => ("", d)).ToList(), ctorName);
         hyps.AddRange(fields.Select((a, i) => $"{a} e. {cdoms[np + i]}"));
         string ph = Conj(hyps);
-        Proof Pick(int _, string h) => Hyp(ph, h) ?? throw new Refused($"no hypothesis {h}");
+        Proof Pick(int _, string h) => Hyp(ph, h) ?? HypUpToRenaming(ph, h, hyps) ?? throw new Refused($"no hypothesis {h}");
 
         // The constructor's value, and the type at the parameters.
         (Proof eqV, _, _) = Unfold(ph, ctok, ctorArgs, (i, dom) => Pick(i, $"{ctorArgs[i]} e. {dom}"));
@@ -1170,12 +1196,9 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         int j = Array.FindIndex(ind.Ctors, c => ReferenceEquals(c, ctor.Name));
         int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors, nf = ctor.NumFields;
         List<int> rf = info.RecFields[j];
-        if (nrec + nf > ClassVars.Length)
-        {
-            throw new Refused("more arguments than class variables");
-        }
-        List<string> recArgs = ClassVars.Take(nrec).ToList(), ps = recArgs.Take(np).ToList();
-        List<string> fields = ClassVars.Skip(nrec).Take(nf).ToList();
+        List<string> cv = ClassVarsFor(nrec + nf, "more arguments than class variables");
+        List<string> recArgs = cv.Take(nrec).ToList(), ps = recArgs.Take(np).ToList();
+        List<string> fields = cv.Skip(nrec).Take(nf).ToList();
         List<string> ctorArgs = ps.Concat(fields).ToList();
         string v = ctorArgs.Aggregate($"( {ctok} ` U )", (acc, a) => $"( {acc} ` {a} )");
 
@@ -1598,7 +1621,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             throw new Refused($"{rec.Name} is well-founded recursion on a least fixed point; its computation rule is not in the model yet");
         }
         int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors;
-        List<string> recArgs = ClassVars.Take(nrec).ToList();
+        List<string> recArgs = ClassVarsFor(nrec, "more arguments than class variables");
 
         // The constructor's indices, with the parameters as the class variables and every field (a proof) as (/).
         var vars = new Dictionary<ulong, string>();
