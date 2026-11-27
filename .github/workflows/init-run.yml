@@ -1,0 +1,223 @@
+name: Init-wide run
+
+# The Init-wide run of the generic model (docs/milestone3.md, "The Init-wide run"), on GitHub's runners instead of a
+# laptop: export Lean's Init with leanout, translate every constant the model handles (tenet-zfc define-all), and check
+# every chunk with metamath-exe, mmverify.py and mmj2's definitionCheck (scripts/verify-all). The chunks are split
+# across parallel jobs; the last job totals them (scripts/summarize-all) into the run's summary.
+#
+# Run it by hand: Actions → Init-wide run → Run workflow. A pull request that changes this file runs a small smoke
+# version (a few small chunks), so the workflow itself is tested before it is merged.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chunk_size:
+        description: Constants per chunk
+        default: '500'
+      chunks_per_job:
+        description: Chunks per parallel job
+        default: '4'
+      budget:
+        description: Seconds allowed per constant
+        default: '600'
+      single_universe:
+        description: Use the old one-universe model instead of the tower
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - .github/workflows/init-run.yml
+
+permissions:
+  contents: read
+
+env:
+  SETMM_COMMIT: 6315535f37e5e58d14ece8c34ddb204926446264
+  METAMATH_EXE_COMMIT: 580b4bd5ae6f2a0d746398b0033cddccba1b418b
+  MMVERIFY_COMMIT: 63a2aa3815cd5bf67892dbfc7f2048cbb177524c
+  MMJ2_COMMIT: c8dd05548139c7003220caedde65a7abe44a00bf
+  LEANOUT_COMMIT: 0562d84c5bad6e94f6c330754d61e51324fc905e
+  # A pull request runs the smoke version: SMOKE_CHUNKS chunks of SMOKE_CHUNK_SIZE constants.
+  SMOKE_CHUNK_SIZE: 25
+  SMOKE_CHUNKS: 4
+  SMOKE_CHUNKS_PER_JOB: 2
+
+jobs:
+  # Export Init once, and split its chunks into jobs.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      chunks: ${{ steps.plan.outputs.chunks }}
+      chunk_size: ${{ steps.plan.outputs.chunk_size }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build leanout and export Init
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          export PATH="$HOME/.elan/bin:$PATH"
+          git clone -q https://github.com/keithadler/leanout "$RUNNER_TEMP/leanout"
+          git -C "$RUNNER_TEMP/leanout" checkout -q "$LEANOUT_COMMIT"
+          cd "$RUNNER_TEMP/leanout"
+          lake build leanout
+          .lake/build/bin/leanout Init -o "$RUNNER_TEMP/init.ndjson"
+          ls -l "$RUNNER_TEMP/init.ndjson"
+          gzip -1 "$RUNNER_TEMP/init.ndjson"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: init-export
+          path: ${{ runner.temp }}/init.ndjson.gz
+          retention-days: 7
+      - run: dotnet build src/TenetZfc.Cli -c Release -f net10.0
+      - name: Count the chunks and split them into jobs
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_CHUNK_SIZE: ${{ inputs.chunk_size }}
+          IN_PER_JOB: ${{ inputs.chunks_per_job }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            size=$SMOKE_CHUNK_SIZE; per=$SMOKE_CHUNKS_PER_JOB
+          else
+            size=$IN_CHUNK_SIZE; per=$IN_PER_JOB
+          fi
+          gunzip -k "$RUNNER_TEMP/init.ndjson.gz"
+          : > "$RUNNER_TEMP/empty.mm"
+          # A chunk number past the end selects nothing: define-all only reads the export and reports the count.
+          line=$(dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll define-all "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/empty.mm" "$RUNNER_TEMP/plan" --chunk-size "$size" --chunks 999999 | grep -m1 'constants to translate')
+          echo "$line"
+          chunks=$(echo "$line" | sed -n 's/.* in \([0-9][0-9]*\) chunks.*/\1/p')
+          [ -n "$chunks" ] || { echo "couldn't read the chunk count"; exit 1; }
+          if [ "$EVENT" = pull_request ] && [ "$chunks" -gt "$SMOKE_CHUNKS" ]; then chunks=$SMOKE_CHUNKS; fi
+          matrix=$(python3 -c "
+          import json, sys
+          chunks, per = int(sys.argv[1]), int(sys.argv[2])
+          print(json.dumps({'include': [{'shard': i // per, 'range': f'{i}-{min(i + per, chunks) - 1}'} for i in range(0, chunks, per)]}))
+          " "$chunks" "$per")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "chunks=$chunks" >> "$GITHUB_OUTPUT"
+          echo "chunk_size=$size" >> "$GITHUB_OUTPUT"
+          echo "$chunks chunks of $size constants, $per per job" >> "$GITHUB_STEP_SUMMARY"
+
+  # Translate and verify one range of chunks.
+  run:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      # mmj2's definitionCheck macro needs a JDK with Nashorn: Java 11, as set.mm's own CI uses.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '11'
+      - name: Fetch set.mm and the checkers
+        run: |
+          mkdir -p "$RUNNER_TEMP/mm/setmm" "$RUNNER_TEMP/mm/mmj2/macros"
+          curl -fsSL -o "$RUNNER_TEMP/mm/setmm/set.mm" "https://raw.githubusercontent.com/metamath/set.mm/$SETMM_COMMIT/set.mm"
+          git clone -q https://github.com/metamath/metamath-exe "$RUNNER_TEMP/mm/metamath-exe"
+          git -C "$RUNNER_TEMP/mm/metamath-exe" checkout -q "$METAMATH_EXE_COMMIT"
+          cc -O2 -w -o "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP"/mm/metamath-exe/src/*.c
+          git clone -q https://github.com/david-a-wheeler/mmverify.py "$RUNNER_TEMP/mm/mmverify"
+          git -C "$RUNNER_TEMP/mm/mmverify" checkout -q "$MMVERIFY_COMMIT"
+          raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
+          curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
+          for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
+      - uses: actions/download-artifact@v4
+        with:
+          name: init-export
+          path: ${{ runner.temp }}
+      - run: dotnet build src/TenetZfc.Cli -c Release -f net10.0
+      - name: Translate chunks ${{ matrix.range }}
+        env:
+          RANGE: ${{ matrix.range }}
+          CHUNK_SIZE: ${{ needs.plan.outputs.chunk_size }}
+          BUDGET: ${{ inputs.budget || '600' }}
+          SINGLE: ${{ inputs.single_universe }}
+        run: |
+          gunzip "$RUNNER_TEMP/init.ndjson.gz"
+          flags=""; [ "$SINGLE" = true ] && flags="--single-universe"
+          dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll define-all $flags "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/out" \
+            --chunk-size "$CHUNK_SIZE" --chunks "$RANGE" --jobs 4 --budget "$BUDGET"
+          ls "$RUNNER_TEMP"/out/chunk-*.mm > /dev/null   # at least one chunk was written
+      - name: Check them with metamath-exe, mmverify.py and mmj2's definitionCheck
+        env:
+          TENET_ZFC_SETMM: ${{ runner.temp }}/mm/setmm
+          TENET_ZFC_METAMATH: ${{ runner.temp }}/mm/metamath
+          TENET_ZFC_MMVERIFY: ${{ runner.temp }}/mm/mmverify/mmverify.py
+          TENET_ZFC_JAVA: java
+          TENET_ZFC_MMJ2: ${{ runner.temp }}/mm/mmj2
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # A failed chunk is recorded, not fatal here: the totals job reports every failure, and fails the run.
+          status=0; scripts/verify-all -j 4 "$RUNNER_TEMP/out" || status=$?
+          [ "$status" -le 1 ] || exit "$status"   # 2 and above: verify-all itself couldn't run
+          [ -s "$RUNNER_TEMP/out/verify-all.tsv" ] || { echo "verify-all wrote no results"; exit 1; }
+          cd "$RUNNER_TEMP/out"
+          mv verify-all.tsv "verify-all-$SHARD.tsv"
+          [ -f verify-all.txt ] && mv verify-all.txt "verify-all-$SHARD.txt"
+          [ -f define-all.txt ] && mv define-all.txt "define-all-$SHARD.txt"
+          rm -f set.mm macros
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chunks-${{ matrix.shard }}
+          path: ${{ runner.temp }}/out
+          retention-days: 30
+
+  # Total every job's chunks. Fails if a chunk is missing or a checker rejected anything.
+  totals:
+    needs: [plan, run]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chunks-*
+          path: ${{ runner.temp }}/all
+          merge-multiple: true
+      - name: Totals
+        env:
+          EXPECTED: ${{ needs.plan.outputs.chunks }}
+          RUN_RESULT: ${{ needs.run.result }}
+        run: |
+          cd "$RUNNER_TEMP/all"
+          translated=$(ls chunk-*.tsv 2>/dev/null | wc -l | tr -d ' ')
+          verified=$(ls chunk-*.verify 2>/dev/null | wc -l | tr -d ' ')
+          failed=$(cat verify-all-*.tsv 2>/dev/null | grep -c 'FAIL' || true)
+          {
+            echo "## Init-wide run"
+            echo
+            echo "- chunks expected: $EXPECTED; translated: $translated; verified: $verified; with a checker failure: $failed"
+            echo "- jobs: $RUN_RESULT"
+            echo
+            echo '```'
+            python3 "$GITHUB_WORKSPACE/scripts/summarize-all" . || echo "summarize-all failed"
+            echo '```'
+          } | tee summary.md >> "$GITHUB_STEP_SUMMARY"
+          ok=true
+          [ "$translated" = "$EXPECTED" ] || { echo "::error::$translated of $EXPECTED chunks were translated"; ok=false; }
+          [ "$verified" = "$EXPECTED" ] || { echo "::error::$verified of $EXPECTED chunks were verified"; ok=false; }
+          [ "$failed" = 0 ] || { echo "::error::$failed chunks have a checker failure"; ok=false; }
+          [ "$RUN_RESULT" = success ] || { echo "::error::a job did not succeed ($RUN_RESULT)"; ok=false; }
+          $ok
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: init-run-totals
+          path: |
+            ${{ runner.temp }}/all/summary.md
+            ${{ runner.temp }}/all/*.tsv
+            ${{ runner.temp }}/all/*.verify
+            ${{ runner.temp }}/all/*.txt

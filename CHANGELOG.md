@@ -1,8 +1,14 @@
 # Changelog
 
-All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org). Until v0.1.0 is tagged, builds carry the version `0.1.0-dev`.
+All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org). Builds between releases carry a `-dev` version.
 
-## Unreleased (after 0.1.0)
+## Unreleased
+
+- **Init-wide run on GitHub's runners** (`.github/workflows/init-run.yml`, run by hand from the Actions tab): exports Lean's `Init`, translates every constant the model handles with `define-all` across parallel jobs, checks every chunk with all three checkers, and totals the results in the run's summary. A pull request that changes the workflow runs a small smoke version.
+
+## [0.1.0] - 2026-11-27
+
+The first version meant for someone else to install and use: independently checked ZFC proofs from their own Lean code, on a stated, tested fragment.
 
 ### Universe elimination (milestone 4, started)
 
@@ -10,10 +16,6 @@ All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://
 - **`lean-wit-tw`**: ZFC proves a lowered tower exists (R1 at ω²·(n+1)), so a theorem whose statement doesn't mention `U` is discharged to plain ZFC. First ones: `lean-zfc-Nat.add_zero`, `|- ( A e. NN0 -> ( A + 0 ) = A )`, and `lean-zfc-Nat.zero_add`, from Lean's proofs.
 - **`scripts/check-axioms`**: metamath-exe's `trace_back /axioms`, failing on `ax-groth` or a universe left in the statement; in CI.
 - Each output's header says whether its theorems are plain ZFC. Design and plan: [docs/milestone4.md](docs/milestone4.md).
-
-## [0.1.0] - unreleased
-
-The first version meant for someone else to install and use: independently checked ZFC proofs from their own Lean code, on a stated, tested fragment. Everything below exists on `main` today; the release is tagged when the rest of the v0.1 roadmap in the README is done.
 
 ### Release engineering
 
