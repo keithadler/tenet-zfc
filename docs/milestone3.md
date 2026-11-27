@@ -943,3 +943,17 @@ scripts/summarize-all out
 - **Names:** 3,397 constants, 17% of `Init`, have names a set.mm token can't hold. An escaping scheme in `Model.Token` would admit most of them.
 - **Model features still missing:** `Acc` and well-founded recursion (389), proof fields of ∀-statements in computation rules (71), fields whose types bind variables (60), empty types (24).
 - **Tool limits:** mmj2's 32,000 symbols (76 definitions), and set.mm's 20 class variables (54).
+
+## Theorems across Init (built: `theorem-all`; measured on a sample)
+
+Until now 28 hand-picked theorems went through the model. This section measures how many of `Init`'s 45,588 theorems do, ranks what stops the others, and fixes the cheapest blockers.
+
+**The tools.**
+- `tenet-zfc theorem-all <export> <set.mm> <outdir> [--every N] [--chunk-size N] [--chunks a,b-c] [--jobs N] [--budget s] [--redo]` (`TheoremAll.cs`) proves every theorem of an export, or every Nth with `--every`, through the model, as `theorem` does. It works like `define-all`:
+  - **Chunks.** A chunk of N theorems is one standalone `.mm` that includes `set.mm` and writes every definition and lemma its theorems use. Within a chunk, theorems share lemmas and are proved in export order, so a theorem's dependencies come first. Chunks run in parallel (`--jobs`), each on its own thread with a 256 MB stack, sharing the export.
+  - **An outcome per theorem**, in `chunk-NNNN.tsv`: `proved` (with its flat size and the lemmas it was first to need), `refused` (with the reason), `timeout`, `error` (an exception other than a refusal, or a proof whose replay fails: a translator bug, caught before anything is written), or `crash`.
+  - **CPU-time budgets.** The budget counts the CPU time of the chunk's thread (`ThreadCpu.cs`: Mach's `thread_info` on macOS, `CLOCK_THREAD_CPUTIME_ID` on Linux), with wall time capped at ten times the budget. On this shared Mac, at loads of 100 to 270, a wall-clock budget of 120 s timed out `Nat.add_comm`, which takes 11 s on a quiet machine.
+  - **Incremental and resumable.** A chunk whose `.tsv` exists is done; a rerun proves only the others. A crash that ends the process (a stack overflow, running out of memory) leaves `chunk-NNNN.progress` naming the theorem in hand; the next run records that theorem as a `crash` and skips it. The folder remembers the run's shape (`theorem-all.shape`), so chunks of different shapes can't be mixed.
+- `scripts/verify-all` and `scripts/summarize-all` work on its folders unchanged; `summarize-all` reports theorems proved, refused, over budget and failed, ranks the blockers by construct, and gives the size and time distributions.
+- `scripts/subset-export <export> <out> <names>… [--theorems-every N]` cuts the named constants and everything they use out of an export, renumbered: what `leanout Init -- <names>` writes, without Lean. The fixtures below were cut from the `Init` export this way.
+- CI runs `theorem-all` and `verify-all` on `tests/fixtures/theoremall.ndjson` (23 theorems, two chunks, about a minute of proving): it fails on any `error`, `crash` or `timeout`, or if fewer than 16 are proved.
