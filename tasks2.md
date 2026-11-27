@@ -4,6 +4,22 @@ Tasks for a second machine (or cloud sessions) on `keithadler/tenet-zfc`, after 
 
 The heavy runs belong here, not on Keith's Mac: an Init-wide run pushed that machine's load past 100.
 
+## Status (27 November, from the second machine)
+
+Work happens in pull requests; nothing has been pushed to `main`. Heavy runs go to GitHub's runners (`init-run.yml`, which has a `theorems` mode in #20) or to AWS. They don't run on a laptop: on 16 GB, `theorem-all` chunks of 50 grew to 10 GB per process and swapped the machine.
+
+| Task | State | Where |
+|---|---|---|
+| 1. `theorem` over Init | **In progress.** Fixes for the first blockers are in #20: literals, `Decidable`'s proof field, `Exists`, `Nat.le`'s constructors and induction on recursive propositions, `$d` traps. `theoremall.ndjson` now proves 23 of 23. The full run over all 45,588 theorems is starting on AWS (2 × m7a.48xlarge, `scripts/cloud/`); the every-10th sample, before and after the fixes, is on GitHub's runners. The ranking and forecast come in a follow-up PR when they finish. | keithadler/tenet-zfc#20 |
+| 2. Init's definitions | **Mostly done.** The whole run, on GitHub's runners: 40 of 40 chunks, 17,329 of 17,590 definitions (98.5%) with verified equations. Chunk 31's mmj2 error is found and fixed (spare set variables). **Left:** 256 definitions too large for mmj2, 11 witness `$d` refusals, `Acc.rec`'s computation rule. | keithadler/tenet-zfc#23 |
+| 3. Plain ZFC for `List α` | **Not started.** | |
+| 4. More bridges | **Started.** `Nat.mul` is `x.`; `Nat.mul_zero`, `Nat.zero_mul` and `Nat.mul_succ` are restated in NN0, cross-checked by `2t2e4`. **Left:** `Nat.sub`, `≤`/`<`, `Int` to `ZZ`. | keithadler/tenet-zfc#21 |
+| 5. Toward the headline theorem | **Map done.** With #20, the primes cone proves 114 of its 146 theorems, `fact_pos` among them. The gap list and an estimate are in `docs/milestone5.md`. | keithadler/tenet-zfc#24 |
+
+Merge order: #20 first (#24's numbers come from its build); #21, #23 and #24 are independent of each other. All but #24 touch `CHANGELOG.md`, so expect small conflicts there.
+
+The second machine's commits say `Co-Authored-By: Claude Opus 5.5`, the model that did the work, not the Fable line in the rules below.
+
 ## Rules for every task
 
 - **Branches:** work on your own branch and open a PR against `main`. Never push to `main`, and never create tags or releases.
