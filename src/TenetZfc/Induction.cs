@@ -29,6 +29,15 @@ public sealed partial class Model
         {
             return _propRec[k.Name] = SubstRecLemma(k, rec, ind, iname);
         }
+        if (IsProposition(ind) && ind.Ctors.Length >= 2 && !ind.IsRec && ind.NumIndices == 0)
+        {
+            return PropCasesRecLemma(k, rec, ind, iname);
+        }
+        if (IsProposition(ind) && ind.Ctors.Length >= 2)
+        {
+            // Its set is if ( cases , 1o , (/) ), not a union of constructors' parts: RecTyLemma doesn't apply.
+            throw new Refused($"induction on {iname}, a proposition with {ind.Ctors.Length} constructors{(ind.IsRec ? ", recursive" : "")}, isn't typed yet");
+        }
         string rl = RecTyLemma(ind);
         EnsureTowerLemmas();
         EnsurePf();

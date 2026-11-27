@@ -1325,9 +1325,10 @@ public sealed partial class Model
     private Typed ConstMem(PCtx c, Const k)
     {
         using var prof = Prof.Time("ConstMem");
-        if (env.Find(k.Name) is { Kind: ConstKind.Recursor } rk && rk.LevelParams.Length > 0 && TrIn(c, k) == "(/)")
+        if (env.Find(k.Name) is { Kind: ConstKind.Recursor } rk && TrIn(c, k) == "(/)")
         {
-            // A recursor into Prop: induction (lean-ind-I).
+            // A recursor into Prop: induction (lean-ind-I). That includes the recursors of propositions that eliminate
+            // only into Prop (Or.rec), which have no universe parameter for the motive.
             (string il, string ity) = PropRecLemma(k);
             Proof ir = _d.Syl(Hyp(c.Ph, UHyp) ?? throw new Refused("no universe hypothesis"), ApplyId(il, S(("U", "U"))));
             return new Typed(ir, ity, _ops.InstantiateLevels(rk.Type, rk.LevelParams, k.Levels));

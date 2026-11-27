@@ -134,6 +134,29 @@ def blocker(reason):
         return "typing a constant needs itself", m.group(1)
     m = re.search(r"(lean\.[^ `]+)", r)
     const = m.group(1) if m else ""
+    m = re.match(r"(\S+)'s set isn't unions of a singleton", r)
+    if m:
+        return "a projection out of a structure in Prop (And, Iff, a class of propositions)", m.group(1)
+    if re.match(r"a field variable \S+ occurs in the hypotheses", r):
+        return "a structure's field variable clashes with a bound variable of the hypotheses", ""
+    if r.startswith("not a level of the tower"):
+        return "an instance argument of a type former, typed as if it were a type (not a level of the tower)", const
+    if re.match(r"not alpha-equivalent: \(/\)  vs  [a-z]\S*$", r):
+        return "a proof (/) where a bound variable was expected (Sort u at level 0)", ""
+    if re.match(r"not alpha-equivalent: \( \( \S+ e\. .* \|-> 2o \) ` ", r):
+        return "a motive applied to an argument, needing beta on the term's side", const
+    if "quotients and choice are not in the tower" in r:
+        return "quotients or choice (refused before they were in the tower)", r.split(":")[0]
+    if re.match(r"\S+ has a premise mentioning Acc", r):
+        return "Acc and well-founded recursion", "Acc"
+    if r.startswith("a proposition's cases aren't a disjunction"):
+        return "cases of an indexed inductive proposition (Nat.le)", const
+    if r.startswith("can't show ") or r.startswith("not alpha-equivalent"):
+        return "a conversion the translator can't show (" + r.split(" ")[0] + "…)", const
+    if r.startswith("no proof yet that"):
+        return "a membership the translator can't show yet", const
+    if "needs" in r and "distinct, but both contain" in r:
+        return "a $d condition violated in a step (translator bug)", ""
     return category(r), const
 
 
