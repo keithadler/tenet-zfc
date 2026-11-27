@@ -113,7 +113,7 @@ The work between here and a famous theorem end to end, in order:
 - [ ] **Measure theorem coverage on all of `Init`.** 28 hand-picked theorems go through; the share of all 45,588 is unknown, and it decides the timeline.
 - [ ] **More bridges**, so results land in `set.mm`'s own vocabulary: `Nat.mul` to `x.`, order to `<_` and `<`, `∣` to `||`, `Prime` to the statement in `infpn`; `Int` to `ZZ`.
 - [ ] **Plain ZFC for theorems in general** (milestone 4, below): `ccatlen` first, then the headline theorem, with no universe hypothesis.
-- [ ] **Finish `Init`'s definitions**: the 6 of 40 chunks that didn't finish, definitions too large for mmj2's check, and `Acc.rec`'s computation rule.
+- [ ] **Finish `Init`'s definitions**: all 40 chunks now finish on GitHub's runners, and **17,329 of 17,590 definitions (98.5%)** translate with verified equations ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-on-githubs-runners-built)). Left: 256 definitions too large for mmj2's check, 11 witness `$d` refusals, and `Acc.rec`'s computation rule.
 
 Runs of this size happen on GitHub's runners: `.github/workflows/init-run.yml` translates and checks all of `Init` across parallel jobs ([#16](https://github.com/keithadler/tenet-zfc/pull/16)).
 

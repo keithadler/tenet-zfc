@@ -191,18 +191,28 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     /// <summary>The set variable, declared first in the output when it is one of ours rather than set.mm's.</summary>
     private string Declare(string x)
     {
-        if (x.StartsWith("xx", StringComparison.Ordinal) && _declaredVars.Add(x))
+        if (x.StartsWith("xx", StringComparison.Ordinal) && !_declaredVars.Contains(x))
         {
-            string text = $"""
-                $( A set variable of tenet-zfc's own: set.mm's are used up. $)
-                $v {x} $.
-                v{x} $f setvar {x} $.
+            // With spares: mmj2's definitionCheck renames a definition's dummy variables apart (its justification
+            // theorem) and needs an unused set variable for each, so a definition that uses xxN needs about as many
+            // more. Up to xx(2N+26); a $v and $f add no axiom. (Lean.Grind.Config.noConfusionType used 149 of 150.)
+            int n = int.Parse(x[2..]);
+            int upTo = Math.Min(ExtraSetVars.Length, 2 * n + Letters.Length);
+            var text = new System.Text.StringBuilder();
+            foreach (string v in ExtraSetVars.Take(upTo).Prepend(x).Where(_declaredVars.Add))
+            {
+                text.Append($"""
+                    $( A set variable of tenet-zfc's own: set.mm's are used up. $)
+                    $v {v} $.
+                    v{v} $f setvar {v} $.
 
-                """;
-            _out.AppendLine(text);
+                    """);
+                text.AppendLine();
+            }
+            _out.AppendLine(text.ToString());
             if (!dryRun)
             {
-                pr.Database.Extend(text);
+                pr.Database.Extend(text.ToString());
             }
         }
         return x;

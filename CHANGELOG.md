@@ -4,6 +4,7 @@ All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- **Init-wide run, complete**: all 40 chunks on GitHub's runners. 17,329 of 17,590 definitions (98.5%) translate with verified equations, and no theorem is rejected by a checker. Outputs declare spare set variables, so mmj2's `definitionCheck` can rename a definition's dummies apart; this fixes chunk 31's mmj2 error, on `Lean.Grind.Config.noConfusionType`, which uses 149 of 150 declared set variables ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-on-githubs-runners-built)).
 - **Init-wide run on GitHub's runners** (`.github/workflows/init-run.yml`, run by hand from the Actions tab): exports Lean's `Init`, translates every constant the model handles with `define-all` across parallel jobs, checks every chunk with all three checkers, and totals the results in the run's summary. A pull request that changes the workflow runs a small smoke version.
 
 ## [0.1.0] - 2026-11-27
