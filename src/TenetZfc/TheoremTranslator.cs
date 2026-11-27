@@ -1256,7 +1256,7 @@ public sealed partial class Model
         if (_recursive.ContainsKey(itok))
         {
             _ctorIn = null;
-            Iota(ctor.Name);
+            IotaCore(ctor.Name);
             tagIn = _ctorIn?.TagIn ?? throw new Refused($"no membership proof for {ctor.Name}");
         }
         else

@@ -477,6 +477,37 @@ public sealed partial class Model
         throw new Refused($"no proof yet that {x} is a proposition");
     }
 
+    /// <summary>The value of a Nat literal's text, ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` N ) ) with N a decimal, or null.</summary>
+    private static System.Numerics.BigInteger? LitOfText(string x)
+    {
+        const string pre = "( lean.Nat.-lit ` ( lean.Nat.-ofnum ` ", post = " ) )";
+        if (!x.StartsWith(pre, StringComparison.Ordinal) || !x.EndsWith(post, StringComparison.Ordinal))
+        {
+            return null;
+        }
+        // Decimal's inverse: a digit, or ; D d.
+        var toks = x[pre.Length..^post.Length].Split(' ');
+        int i = 0;
+        System.Numerics.BigInteger? Num()
+        {
+            if (i >= toks.Length)
+            {
+                return null;
+            }
+            string tok = toks[i++];
+            if (tok.Length == 1 && char.IsAsciiDigit(tok[0]))
+            {
+                return tok[0] - '0';
+            }
+            if (tok != ";" || Num() is not System.Numerics.BigInteger hi || i >= toks.Length || toks[i].Length != 1 || !char.IsAsciiDigit(toks[i][0]))
+            {
+                return null;
+            }
+            return hi * 10 + (toks[i++][0] - '0');
+        }
+        return Num() is System.Numerics.BigInteger v && i == toks.Length ? v : null;
+    }
+
     /// <summary>( d.Ph -> x e. dom ) by the texts alone: a level of the tower, or a map into one (fmpt, mptelixpg).</summary>
     private Proof TextMem(PCtx d, string x, string dom)
     {
@@ -485,6 +516,13 @@ public sealed partial class Model
         if (xn.Rule.Label != "cmpt" || dn.Rule.Label is not ("co" or "cixp"))
         {
             bool level = dom == "2o" || dn.Rule.Label == "cfv" && pr.Render(dn.Children[1]) == "U" && OrdinalIndex(pr.Render(dn.Children[0])) >= 0;
+            if (!level && LitOfText(x) is System.Numerics.BigInteger lv)
+            {
+                // A Nat literal, ( lean.Nat.-lit ` ( lean.Nat.-ofnum ` N ) ), as an argument (OfNat.ofNat Nat 2 _):
+                // in Nat by its constructor form, as the literal itself is.
+                Typed lm = LitMem(d, (NatLit)t.Nat(lv));
+                return lm.Ty == dom ? lm.P : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", x), ("B", lm.Ty), ("C", dom)), lm.P, AlphaIn(d.Ph, lm.Ty, dom));
+            }
             if (!level && ConstApp(x) is (Name head, List<string> cargs))
             {
                 // Not a type in a universe but a term of an ordinary type (an instance, instLTNat : LT Nat): typed

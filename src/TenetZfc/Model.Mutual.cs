@@ -305,7 +305,7 @@ public sealed partial class Model
         for (int j = 0; j < blk.Types[tt].Ctors.Count; j++)
         {
             var (s, p, d) = BlockIotaAt(blk, tt, j);
-            r.Add((blk.Types[tt].Ctors[j].Real, s, p, d));
+            r.Add((blk.Types[tt].Ctors[j].Real, s, p, WithRequired(d, p)));
         }
         return r;
     }

@@ -1124,7 +1124,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         hyps.AddRange(args.Select((a, i) => $"{a} e. {doms[i]}"));
         string ph = Conj(hyps);
         (Proof eq, _, _) = Unfold(ph, tok, args, (i, dom) => Hyp(ph, $"{args[i]} e. {dom}") ?? throw new Refused($"no hypothesis {args[i]} e. {dom}"));
-        return (eq.Proves, eq.Proof, DistinctFor([tok], args));
+        return (eq.Proves, eq.Proof, WithRequired(DistinctFor([tok], args), eq.Proof));
     }
 
     /// <summary>
@@ -1132,6 +1132,14 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
     /// I.rec params motive minors (c params fields) = minor_c fields, for arguments of the right types.
     /// </summary>
     public (MmExpr Statement, List<string> Proof, string[] Distinct) Iota(Name ctorName)
+    {
+        var (stmt, proof, dv) = IotaCore(ctorName);
+        return (stmt, proof, WithRequired(dv, proof));
+    }
+
+    // The $d conditions above are written by hand per kind of rule; WithRequired adds any pair the proof's steps need
+    // beyond them (a binder renamed apart for a congruence, Deduction.RenameApart), so an output never lacks one.
+    private (MmExpr Statement, List<string> Proof, string[] Distinct) IotaCore(Name ctorName)
     {
         Define(ctorName);
         ConstInfo ctor = env.Find(ctorName)!;

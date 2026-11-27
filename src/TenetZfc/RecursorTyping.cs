@@ -22,7 +22,7 @@ public sealed partial class Model
         string label = $"lean-iota-{LabelOf(ctor)}";
         if (!Has(label))
         {
-            var (stmt, proof, _) = Iota(ctor);
+            var (stmt, proof, _) = IotaCore(ctor);
             EmitLemma(label, $"The computation rule of the recursor on {ctor}.", (proof, stmt));
         }
         return label;
