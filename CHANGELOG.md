@@ -4,6 +4,7 @@ All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- **`Nat.mul` is `x.`** (`nat-bridge`, tower mode, when the export has `Nat.mul`): any function with `Nat.mul`'s computation rules is `x.` through `F`. The model's `Nat.mul` satisfies them, proved from its definition. `Nat.mul_zero`, `Nat.zero_mul` and `Nat.mul_succ` are restated in `NN0` from Lean's proofs, and set.mm's `2t2e4` proves `2 * 2 = 4` in the model ([docs/bridges.md](docs/bridges.md)).
 - **Init-wide run on GitHub's runners** (`.github/workflows/init-run.yml`, run by hand from the Actions tab): exports Lean's `Init`, translates every constant the model handles with `define-all` across parallel jobs, checks every chunk with all three checkers, and totals the results in the run's summary. A pull request that changes the workflow runs a small smoke version.
 
 ## [0.1.0] - 2026-11-27
