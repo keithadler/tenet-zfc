@@ -1820,7 +1820,10 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         string x = pr.Render(n.Children[0]), dom = pr.Render(n.Children[1]), body = pr.Render(n.Children[2]);
         string inner = Subst(body, x, fields[k]);
         Proof pin = MemberPart(ph, tag, inner, fields, k + 1, pick);
-        Proof sub = _d.Congruence("class", Subst(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {fields[k]}"))));
+        // A field the tuple doesn't mention (a recursive proposition's premise, a proof): the body is constant in it.
+        Proof sub = body.Split(' ').Contains(x)
+            ? _d.Congruence("class", Subst(body, x, "Z"), "Z", pr.Apply("id", S(("ph", $"{x} = {fields[k]}"))))
+            : pr.Apply("a1i", S(("ph", $"{body} = {body}"), ("ps", $"{x} = {fields[k]}")), pr.Apply("eqid", S(("A", body))));
         Proof incl = pr.Apply("ssiun2s", S(("x", x), ("A", dom), ("B", body), ("C", fields[k]), ("D", inner)), sub);
         Proof sub2 = _d.Syl(pick(k, $"{fields[k]} e. {dom}"), incl);
         Proof imp = pr.Apply("sseld", S(("ph", ph), ("A", inner), ("B", part), ("C", tag)), sub2);
