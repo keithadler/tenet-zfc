@@ -41,12 +41,11 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
 
     private static Dictionary<string, string> S(params (string Var, string Value)[] xs) => xs.ToDictionary(x => x.Var, x => x.Value);
 
-    /// <summary>The set.mm token for a Lean constant, or null when its name has characters a token can't.</summary>
-    public static string? Token(Name n)
-    {
-        string s = $"{n}";
-        return s.Length > 0 && s.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '.' or '\'' or '{' or '}' or ',') && !s.Contains('\'') ? "lean." + s : null;
-    }
+    /// <summary>
+    /// The set.mm token for a Lean constant: lean. and its name, escaped (NameEscape.cs) so that any Lean name has one.
+    /// Never null; the type stays nullable for the callers written when some names had none.
+    /// </summary>
+    public static string? Token(Name n) => "lean." + NameEscape.Escape(n);
 
     /// <summary>What this model has written so far: declarations and definitions, in dependency order.</summary>
     public string Declarations => _out.ToString();
@@ -299,7 +298,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             throw new Refused($"{n}'s definition has {symbols} symbols, more than mmj2's definition check can hold ({MaxDefinitionSymbols})");
         }
         string text = $"""
-            $( The Lean {what} {n}, translated by the model of docs/milestone3.md. $)
+            $( The Lean {what} {NameEscape.CommentText($"{n}")}, translated by the model of docs/milestone3.md. $)
             $c {tok} $.
             c{LabelPart(tok)} $a class {tok} $.
             {"${"}
@@ -924,7 +923,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         }
         var b = bound.Distinct().ToList();
         string text = $"""
-            $( The {what} of {n}, for the model of docs/milestone3.md. $)
+            $( The {what} of {NameEscape.CommentText($"{n}")}, for the model of docs/milestone3.md. $)
             $c {tok} $.
             c{LabelPart(tok)} $a class {tok} $.
             {"${"}

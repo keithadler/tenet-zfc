@@ -62,7 +62,7 @@ public sealed partial class Model
         SharedProofs sh = pr.Database.Shared;
         long size = sh.Size(p.Proof);
         Debug($"lemma {label}: {size} steps");
-        comment = new string(comment.Where(ch => ch < 128).ToArray());
+        comment = NameEscape.CommentText(comment);
         p = RenameInternal(p);
         var dv = DistinctVars.Required(pr.Database, p.Proof);
         // Written compressed straight from the shared proof (it is never expanded).
@@ -833,7 +833,7 @@ public sealed partial class Model
     /// </summary>
     private string ProjLemma(ConstInfo ind, int i)
     {
-        string label = $"lean-proj-{LabelPart($"{ind.Name}")}-{i}";
+        string label = $"lean-proj-{LabelOf(ind.Name)}-{i}";
         if (Has(label))
         {
             return label;
@@ -1103,7 +1103,7 @@ public sealed partial class Model
     /// </summary>
     private string CtorInLemma(ConstInfo ctor)
     {
-        string label = $"lean-in-{LabelPart($"{ctor.Name}")}";
+        string label = $"lean-in-{LabelOf(ctor.Name)}";
         if (Has(label))
         {
             return label;
@@ -1360,7 +1360,7 @@ public sealed partial class Model
             default:
                 throw new Refused($"no typing lemma yet for {n} (a {ci.Kind.ToString().ToLowerInvariant()})");
         }
-        string label = $"lean-ty-{LabelPart($"{n}")}";
+        string label = $"lean-ty-{LabelOf(n)}";
         EmitLemma(label, $"The type of {n} in the model.", p);
         _constTy[n] = (label, ty);
         return (label, ty);

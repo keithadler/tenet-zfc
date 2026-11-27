@@ -71,7 +71,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
             {
                 Name n = mono is null ? c.Name : mono.Instance(c.Name, c.LevelParams.Select(_ => t.Zero).ToArray());
                 var (stmt, proof, distinct) = model.Equation(n);
-                proved.Add(($"lean-{Model.LabelPart($"{n}")}-eq", stmt, proof, distinct, $"The definitional equation of {n}."));
+                proved.Add(($"lean-{Model.LabelOf(n)}-eq", stmt, proof, distinct, $"The definitional equation of {n}."));
                 string iota = "-", reason = "";
                 int iotaSteps = 0;
                 if (c.Kind == ConstKind.Constructor)
@@ -79,7 +79,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
                     try
                     {
                         var (istmt, iproof, idistinct) = model.Iota(n);
-                        proved.Add(($"lean-{Model.LabelPart($"{n}")}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {n}."));
+                        proved.Add(($"lean-{Model.LabelOf(n)}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {n}."));
                         iota = "ok";
                         iotaSteps = iproof.Count;
                     }

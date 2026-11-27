@@ -27,7 +27,13 @@ public sealed partial class Model
     /// <summary>The hypothesis on the universe argument U.</summary>
     private string UHyp => $"U e. {UniverseDomain}";
 
-    /// <summary>A name as part of a label: labels allow only letters, digits and - _ . (c.{0,1} becomes c.u0_1).</summary>
+    /// <summary>A Lean name as part of a label: escaped (NameEscape.cs), with a level suffix c.{0,1} as c.u0_1.</summary>
+    public static string LabelOf(Name n) => LabelPart(NameEscape.Escape(n));
+
+    /// <summary>
+    /// A token as part of a label: labels allow only letters, digits and - _ . (c.{0,1} becomes c.u0_1). A token
+    /// (Token) has braces and commas only in a level suffix, so this is one-to-one on tokens.
+    /// </summary>
     public static string LabelPart(string name)
     {
         string r = name.Replace("{", "u").Replace(",", "_").Replace("}", "");
