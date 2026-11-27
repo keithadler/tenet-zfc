@@ -720,6 +720,14 @@ Constants that take W: Classical.choice.{1}, Classical.propDecidable.
 
 **Not yet:** a theorem whose proof uses choice. The translator would need a well-ordering hypothesis in the theorem's statement.
 
+**`model-survey` in the tower, after this change:** on Lean 4.36's `Init`, **14,091 of 17,590 definitions** translate with everything they use. No definition stops at a quotient or at `Classical.choice` any more; before, 95 were counted first under those two reasons. The earlier figure, 14,105, was measured before the refusal of definitions too large for mmj2's definition check (from the Init-wide run), which now stops at least 105 among the 25 most common reasons. So the two runs aren't on the same code, and the difference isn't attributed to this change. The first reasons now:
+
+| Definitions | First reason |
+|---|---|
+| 1,300 or more | a name with characters a `set.mm` token can't hold (`'`, `?`, `₂`) |
+| 268 | `Acc.intro`: a premise that is a function into the type |
+| 105 or more | a definition larger than mmj2's definition check can hold |
+
 ### How a theorem is proved
 
 The model is meant to be sound for Lean's typing: if `Γ ⊢ e : T` then `⟦e⟧ ∈ ⟦T⟧`. A proof `p : P` translates to `(/)`, so translating the typing of `p` proves `(/) e. ⟦P⟧`: the statement holds in the model. The output is
