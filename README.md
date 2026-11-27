@@ -1,6 +1,7 @@
 # tenet-zfc
 
 [![CI](https://github.com/keithadler/tenet-zfc/actions/workflows/ci.yml/badge.svg)](https://github.com/keithadler/tenet-zfc/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/keithadler/tenet-zfc)](https://github.com/keithadler/tenet-zfc/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **Lean 4 proofs, turned into ZFC proofs that two independent Metamath verifiers check.**
@@ -8,6 +9,14 @@
 Lean checks proofs in a dependent type theory. Most mathematicians name ZFC set theory as the foundation of mathematics. tenet-zfc connects the two mechanically: it takes a theorem Lean has accepted and produces a proof of the same statement from the axioms of ZFC, in Metamath's [`set.mm`](https://github.com/metamath/set.mm). There, verifiers a few hundred lines long, written in different languages, can check every step.
 
 The translator itself is not trusted. If it makes a mistake, the verifiers reject the output.
+
+**Where it stands** (v0.1.0, released 27 November 2026; about 60% of the way to the goal):
+
+- **80% of the definitions in Lean core's `Init`** (14,091 of 17,590) translate together with everything they use.
+- **28 Lean theorems** about `Nat` and `List` are proved from their own proof terms, and all three checkers accept every one.
+- **Lean's `List.length_append` comes out as `set.mm`'s `ccatlen`**, next to `set.mm`'s hand-written proof of the same statement.
+- **Two theorems are in plain ZFC** so far. Everything else still assumes a tower of universes as a hypothesis ([Limits](#limits)).
+- **Next:** the infinitude of primes, end to end ([examples/Primes.lean](examples/Primes.lean)).
 
 ```
 lean-two_add_two $p |- ( 2 + 2 ) = 4 $=
@@ -36,19 +45,20 @@ metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `
 
 - **A proof checked by Lean is not yet a ZFC proof.** Lean's logic is stronger than ZFC (Carneiro, [*The Type Theory of Lean*](https://github.com/digama0/lean-type-theory), 2019). tenet-zfc produces an explicit ZFC derivation for each theorem.
 - **The trusted part becomes small and independent.** You don't have to trust Lean's kernel, [Tenet](https://github.com/keithadler/tenet), or this translator. A result is accepted when two Metamath verifiers (C and Python) accept the proof, and mmj2's definition checker accepts every definition it introduces.
+- **Carneiro's model, run on real proofs.** The thesis proves on paper that Lean's type theory has a model in ZFC with a tower of inaccessible cardinals. tenet-zfc carries that construction out on Lean's actual library, one declaration at a time, and has independent verifiers check each result. This is case-by-case evidence, not a proof of the general theorem: a place where the model was unsound would show up as a Lean theorem whose translation the verifiers reject. So far every rejection has been a bug in the translator or a construct it doesn't cover.
 - **"How much of mathematics needs more than ZFC?"** becomes a measurement. Each result will be reported as plain ZFC, or as ZFC plus a universe along with the declarations that needed it.
 
 ## Status
 
-**About 50% of the way to the goal.** 28 real Lean theorems about `Nat` and `List`, `List.length_append` among them, now come out of the generic model as ZFC proofs that both verifiers accept. Every definition the model translates in Lean core has been verified at scale.
+**About 60% of the way to the goal.** [v0.1.0](https://github.com/keithadler/tenet-zfc/releases/tag/v0.1.0) is released: the first version someone else can install and run on their own Lean code. Milestones 1 and 2 are done. Milestone 3 has most of Lean core's definitions and a first library of theorems; what it lacks is a measurement of how many of core's theorems go through. Milestones 4 and 5 are started.
 
 | | Milestone | Gate | Status |
 |---|---|---|---|
 | 1 | **Trace** | Replaying Tenet's trace re-derives every check it made, on all of Lean core | ✅ 64,045 declarations, 86 million steps, 0 failures |
 | 2 | **Bridge library** | `2 + 2 = 4` and `List.length_append` translate, and both verifiers accept them | ✅ verified in CI |
-| 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 definitions mostly done; 28 `Init` theorems proved through the model |
-| 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 started: the first plain-ZFC theorems, `Nat.add_zero` and `Nat.zero_add` as `( A + 0 ) = A` and `( 0 + A ) = A`, from Lean's proof with no universe hypothesis and no `ax-groth` ([docs/milestone4.md](docs/milestone4.md)) |
-| 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | not started |
+| 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 about 75%: 80% of `Init`'s definitions translate; 28 `Init` theorems proved through the model; the share of `Init`'s 45,588 theorems that goes through is not measured yet |
+| 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 about 15%: the first plain-ZFC theorems, `Nat.add_zero` and `Nat.zero_add` as `( A + 0 ) = A` and `( 0 + A ) = A`, from Lean's proof with no universe hypothesis and no `ax-groth` ([docs/milestone4.md](docs/milestone4.md)) |
+| 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | 🚧 about 10%: the candidate is written, the infinitude of primes in core Lean ([examples/Primes.lean](examples/Primes.lean)); all 169 definitions it uses translate; a first run through the model found two translator gaps, and none of its theorems is proved yet |
 
 ### What works today
 
@@ -73,6 +83,8 @@ metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `
 
 On Lean 4.36's `Init`, `model-survey` counts **14,091 of 17,590 definitions (80%)** translating together with everything they use, in the tower model with quotients and choice, up from 48 when milestone 3 began. Since names are escaped and `Acc` is in the model, the latest Init-wide run translated, emitted and verified **16,565 of the 17,000 constants** in the 34 of its 40 chunks that finished, up from 13,553 in the same chunks. That includes **14,366 of 14,769 definitions (97%)** and 653 computation rules, and 33 of the 34 chunks pass all three checkers ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-again-built)).
 
+> **A caveat on these counts.** A code review after v0.1.0 found that the script totalling a run could count a theorem in a *failed* chunk as verified ([#17](https://github.com/keithadler/tenet-zfc/pull/17) fixes it). Chunks that passed all three checkers are counted correctly, which is 33 of the 34 here. The totals will be re-run with the fixed script and all 40 chunks, and replaced.
+
 **Theorems.** `tenet-zfc theorem` proves Lean theorems from their own proof terms, through the model. A proof's typing becomes membership, `(/) e. ⟦P⟧`, and each conversion becomes an equation.
 
 A starter library of **28 `Init` theorems about `Nat` and `List`** is proved this way, and all three checkers accept every one. Proving all 28 takes about 8 minutes of CPU in one run, which shares their lemmas.
@@ -90,16 +102,31 @@ Two are refused, each with its reason: `Nat.succ_ne_zero` and `Nat.le_refl`. Siz
 
 **Universes.** With a single universe, `Nat.below` is empty, so `Nat.add` and every other function defined by structural recursion collapse in the model. The model's default is therefore a tower: an increasing sequence of Grothendieck universes, one per level, under the hypothesis `U e. lean.-tower`. ZFC doesn't prove such a tower exists, so every result holds in the models of ZFC that have one; no axiom is added. Each output's header states this, how many levels it uses and which declarations use each. Quotients and `Classical.choice` are in the tower too; an output that uses choice also states that it takes a well-ordering of the tower's union as a parameter. `--single-universe` keeps the old model for comparison. See [docs/milestone3.md](docs/milestone3.md#tower-mode-as-the-default) and [quotients and choice in the tower](docs/milestone3.md#quotients-and-choice-in-the-tower-built).
 
-## Road to the first release (v0.1)
+## Roadmap
 
-v0.1 is the first version someone else can install and use to get independently checked ZFC proofs from their own Lean code, on a stated, tested fragment.
+### Next: toward the headline theorem
+
+The work between here and a famous theorem end to end, in order:
+
+- [x] **Pick the theorem and write it for the translator.** The infinitude of primes (Euclid) in core Lean, with no mathlib, structural recursion only, and no `omega`, `decide` or `simp`: [examples/Primes.lean](examples/Primes.lean). `set.mm` proves the same fact by hand (`infpn`), so the result can meet an independent proof, as `ccatlen` does. Its cone is 169 definitions, all of which translate, and 146 theorems ([examples/README.md](examples/README.md)).
+- [ ] **Prove its theorems through the model.** A workflow runs `tenet-zfc run` on the file on GitHub's runners and reports each theorem as proved, refused or failed. The first run (27 November): both definitions verify; the four lemmas stop at one translator bug, a distinct-variable clash when rewriting under a quantifier; the main theorem is refused because eliminating an existential (`Exists.rec`) has no typing lemma yet. Those two are the work list.
+- [ ] **Measure theorem coverage on all of `Init`.** 28 hand-picked theorems go through; the share of all 45,588 is unknown, and it decides the timeline.
+- [ ] **More bridges**, so results land in `set.mm`'s own vocabulary: `Nat.mul` to `x.`, order to `<_` and `<`, `∣` to `||`, `Prime` to the statement in `infpn`; `Int` to `ZZ`.
+- [ ] **Plain ZFC for theorems in general** (milestone 4, below): `ccatlen` first, then the headline theorem, with no universe hypothesis.
+- [ ] **Finish `Init`'s definitions**: the 6 of 40 chunks that didn't finish, definitions too large for mmj2's check, and `Acc.rec`'s computation rule.
+
+Runs of this size happen on GitHub's runners: `.github/workflows/init-run.yml` translates and checks all of `Init` across parallel jobs ([#16](https://github.com/keithadler/tenet-zfc/pull/16)).
+
+### v0.1.0 (released)
+
+v0.1 is the first version someone else can install and use to get independently checked ZFC proofs from their own Lean code, on a stated, tested fragment. [Release notes and binaries](https://github.com/keithadler/tenet-zfc/releases/tag/v0.1.0).
 
 **Definitions**
 - [x] A generic model for every kind of Lean declaration: definitions, inductive types, recursors, quotients and axioms
 - [x] More set variables than `set.mm`'s 26, declared by the output
 - [x] Every Lean name as a `set.mm` token: `'`, `?`, Unicode, `_@` and `«»` escaped one-to-one (3,397 constants were refused for their names alone)
 - [x] `Acc` and well-founded recursion: least fixed points as the intersection of the closed sets, `Acc.rec` by `frecs` over them (its computation rule is not done yet)
-- [ ] Translate the rest of `Init`'s definitions. In the 34 of 40 chunks of the latest run, 14,366 of 14,769 definitions (97%) translate with verified equations. What is left: chunks 33 and 35–39; definitions too large for mmj2's check (218); choice and quotients in chunks translated before they came to the tower (200); time-outs (28) ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-again-built))
+- [ ] Translate the rest of `Init`'s definitions (carried over to the list above). In the 34 of 40 chunks of the latest run, 14,366 of 14,769 definitions (97%) translate with verified equations. What is left: chunks 33 and 35–39; definitions too large for mmj2's check (218); choice and quotients in chunks translated before they came to the tower (200); time-outs (28) ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-again-built))
 - [x] Verify every translated `Init` definition with all three checkers, and publish the counts: 15,958 equations and 471 computation rules verified, none rejected ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-built))
 
 **Theorems**
@@ -120,16 +147,17 @@ v0.1 is the first version someone else can install and use to get independently 
 - [x] The full test suite passing on macOS: one test overflowed the stack there, fixed by [#2](https://github.com/keithadler/tenet-zfc/pull/2)
 - [x] One command from a Lean module to checked output: `tenet-zfc run` exports, traces, translates and verifies, and reports on each declaration
 - [x] A packaged CLI (a `dotnet tool` and prebuilt binaries for Linux, macOS and Windows), and a release workflow that attaches the verified outputs; [CHANGELOG.md](CHANGELOG.md) and [CONTRIBUTING.md](CONTRIBUTING.md)
-- [ ] Tag v0.1.0, once the items above are done
+- [x] v0.1.0 tagged and released, with the package, binaries for three platforms and the verified outputs attached
 
-**After v0.1:**
+### Later milestones
+
 - Milestone 4, universe elimination ([docs/milestone4.md](docs/milestone4.md)):
   - [x] A lowered tower of weak universes, proved in ZFC to exist (`lean-wit-tw`), and the first plain-ZFC theorem, `Nat.add_zero`, with `scripts/check-axioms` in CI
   - [ ] Recursive types with parameters, then `List.length_append` as `ccatlen` in plain ZFC
   - [ ] `--lowered` for `theorem`, `define` and `define-all`, with a survey of what lowers
   - [ ] The reflection schema in `set.mm`, for unions over type families; lowering as the default, with the tower as a reported fallback
   - [ ] Gate: mathlib's `Nat` and `Int` files in plain ZFC
-- Milestone 5: a headline theorem end to end.
+- Milestone 5: the headline theorem end to end in plain ZFC, with its outputs and counts published.
 
 ## How it works
 
@@ -150,6 +178,8 @@ v0.1 is the first version someone else can install and use to get independently 
 
 **What you don't trust:** Lean, Tenet, this translator, and its type inference. A bug in any of them produces a proof the verifiers reject, not a false theorem. During development, the verifiers have caught real mistakes, including a modelling error and several distinct-variable violations.
 
+**What the verifiers can't catch** is a definition that is well-formed but doesn't mean what Lean means, or a report that counts wrongly. Those are found by reading. An independent code review after v0.1.0 found one of each: a recursor that passed the wrong argument for one rare kind of inductive proposition, with a computation rule that verified only because its hypothesis was false, and totals that could count a theorem in a failed chunk as verified. Both are fixed in [#17](https://github.com/keithadler/tenet-zfc/pull/17); the affected construct is now refused until it is modelled properly.
+
 ## What it does and doesn't show
 
 A Metamath check proves *the translated statement*. Whether that statement is the theorem you care about is a separate question, and often the harder one.
@@ -160,6 +190,8 @@ The translator unfolds Lean's own definitions of ℕ, ℝ, ζ and the rest into 
 
 - **Never supported:** `sorry`, and `native_decide`, which trusts compiled code rather than a kernel proof. A project's own axioms can only appear as hypotheses.
 - **Mostly not plain ZFC, yet:** by default every output assumes a tower of Grothendieck universes, `U e. lean.-tower`, as a hypothesis. No axiom is added, and each output's header says how many levels it uses, which declarations need them, and whether any theorem is plain ZFC. What uses `Classical.choice` also takes a well-ordering `W` of the tower's union as a parameter, and a theorem that needs choice to pick an element has the hypothesis `W We U. ran U`, which ZFC can discharge (`weth`). With `--lowered` (milestone 4, [docs/milestone4.md](docs/milestone4.md)) the tower is made of weak universes, which ZFC proves exist, and the hypothesis is discharged: so far for `nat-bridge`, where `Nat.add_zero` comes out as `|- ( A e. NN0 -> ( A + 0 ) = A )`, checked by `scripts/check-axioms` to use no `ax-groth`. Recursive types with parameters (`List α`), unions over type families, and statements over all types aren't lowered yet. Theorems whose proofs genuinely need a universe will stay "ZFC plus universes".
+- **Refused, with a reason:** what the model doesn't cover yet is reported per declaration, never translated approximately. Examples: an inductive proposition with a data field that eliminates into data; a proposition with several constructors that eliminates into any sort; universe levels above 4.
+- **Not measured yet:** how much of Lean core's *theorems* go through. The 80% figure is definitions.
 - **Impractical:** computation-heavy proofs such as large `decide` calls translate in principle, but each kernel evaluation step becomes explicit proof steps.
 - **Not readable:** the outputs are machine-checked certificates, not mathematics to read.
 
@@ -261,6 +293,7 @@ scripts/check-definitions java path/to/mmj2 rec.mm
 | `bridge <set.mm> <out.mm>` | Writes the one-time lemmas recursive types rest on |
 | `theorem <export> <set.mm> <out.mm> <name>…` | Proves Lean theorems from their proof terms, through the model, in tower mode; universe parameters are 0 unless a name gives levels (`'Quot.inductionOn.{1}'`) |
 | `nat-bridge <export> <set.mm> <out.mm> [n…] [theorem…]` | Proves that the model's `Nat` is `NN0` (zero, successor, literals, `Nat.add`), with `F ( n ) = n` for each numeral given; proves each theorem given through the model and restates it in `NN0`; with `--lowered`, also in plain ZFC, with no universe hypothesis |
+| `list-bridge <export> <set.mm> <out.mm>` | Proves that the model's `List A` is `Word A`, with `List.length` as `#` and `List.append` as `++`, and restates `List.length_append` as `ccatlen` |
 | `survey <export>`, `model-survey <export>` | Measure how much of an export translates, and what blocks the rest |
 
 The model uses a tower of universes, one per level; add `--single-universe` anywhere for the old one-universe model. Proofs are compressed; add `--uncompressed` for flat ones.
@@ -276,14 +309,17 @@ src/TenetZfc/          the replayer, the generic model, the Metamath prover and 
   Recursion.cs         one-time lemmas for recursive types
   Universes.cs …       the universe tower, monomorphization (Monomorph.cs), and each output's stated assumptions
   TheoremTranslator.cs theorems through the model; DefEq.cs: definitional equations as theorems
-  NatBridge.cs         bridge theorems: the model's Nat is NN0
+  NatBridge.cs         bridge theorems: the model's Nat is NN0; ListBridge.cs: its List is Word
+  DefineAll.cs         a whole export in chunks, for runs over all of Init
   ProofKit.cs          a small tactic layer for writing set.mm proofs in C#
   Typing.cs            type inference, for proof irrelevance
   Metamath.cs          reads set.mm, parses its syntax, assembles and compresses proofs
 src/TenetZfc.Cli/      the tenet-zfc command; Run.cs is `tenet-zfc run`, Checkers.cs the three checkers
 tests/                 unit tests and fixtures exported from Lean 4.36.0
-scripts/               check-definitions (mmj2's definitionCheck)
-.github/workflows/     ci.yml (every push), release.yml (on a v* tag)
+examples/              Primes.lean: the candidate headline theorem, the infinitude of primes in core Lean
+scripts/               check-definitions (mmj2's definitionCheck), check-axioms (plain ZFC), verify-all and
+                       summarize-all (Init-wide runs), demo (the ccatlen demo with its sabotage checks)
+.github/workflows/     ci.yml (every push), release.yml (on a v* tag), headline.yml (the primes proof through the model)
 docs/                  spec, design and status
 ```
 
