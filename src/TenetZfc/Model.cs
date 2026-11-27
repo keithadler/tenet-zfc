@@ -1758,6 +1758,12 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             case "wrex":
                 {
                     string body = pr.Render(n.Children[0]), x = pr.Render(n.Children[1]), dom = pr.Render(n.Children[2]);
+                    if (ph.Split(' ').Contains(x))
+                    {
+                        // rspcedvd needs x disjoint from ph; a field's hypothesis (found up to renaming) may bind it
+                        // (Std.TransCmp.mk, found by the Init-wide run: all three checkers rejected it).
+                        throw new Refused($"the witness's variable {x} occurs in the hypotheses; not in the model yet");
+                    }
                     string inst = Subst(body, x, "(/)");
                     Proof sub = body.Split(' ').Contains(x)
                         ? _d.Congruence("wff", Subst(body, x, "Z"), "Z", pr.Apply("simpr", S(("ph", ph), ("ps", $"{x} = (/)"))))
