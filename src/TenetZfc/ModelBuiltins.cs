@@ -319,34 +319,27 @@ public sealed partial class Model
             throw new InvalidOperationException($"unexpected lift {g} or class {cls}");
         }
 
-        // 3. The relation, unfolded: ( ph -> R = ( ( A X. A ) i^i |^| Sx ) ), and an equivalence relation.
-        // In tower mode A ranges over U. ran U there, and A's level is inside it.
-        Proof EqvArg(int i, string dom) => i == 0 && dom == "U. ran U" && ld[0] != dom
-            ? pr.Apply("mpd", S(("ph", ph), ("ps", $"A e. {ld[0]}"), ("ch", "A e. U. ran U")), H(ph, $"A e. {ld[0]}"),
-                pr.Apply("sseld", S(("ph", ph), ("A", ld[0]), ("B", dom), ("C", "A")), SubOmega(ph, ld[0])))
-            : H(ph, $"{(i == 0 ? "A" : "B")} e. {dom}");
-        (Proof eqE, _, _) = Unfold(ph, QuotEqv, ["A", "B"], EqvArg);
-        string ebody = Rhs(eqE), sq = Kid("class", ebody, "A"), sx = Kid("class", Kid("class", ebody, "B"), "A");
-        string sv = Kid("class", sx, "x"), pw = Kid("class", sx, "A"), phi = Kid("class", sx, "ph");
-        string r0 = Kid("wff", Kid("wff", phi, "ph"), "A");
-        var used = new HashSet<string>($"{ph} {g} {ebody}".Split(' '));
-        string cv = FirstVar(v => !used.Contains(v)), q = FirstVar(v => !used.Contains(v) && v != cv);
-        string Phi(string s) => Subst(phi, sv, s);
-        Proof Elrab(string a) => pr.Apply("elrab", S(("A", a), ("B", pw), ("x", sv), ("ph", phi), ("ps", Phi(a))),
-            _d.Congruence("wff", Subst(phi, sv, "Z"), "Z", pr.Apply("id", S(("ph", $"{sv} = {a}")))));
+        var (erR, fun, lsub, qh, bound) = LiftIsFunction(ph, ld, g, H);
+        Proof Same(string to) => _d.Congruence("class", Subst(val, p, "Z"), "Z", pr.Apply("id", S(("ph", $"{p} = {to}"))));
+        Proof atF = pr.Apply("qliftval", new Dictionary<string, string>(lsub) { ["B"] = "( D ` F )", ["C"] = "F" }, qh[0], qh[1], erR, qh[2], Same("F"), fun);
+        cur = _d.Trans(cur, _d.Syl(_d.Jca(pr.Apply("id", S(("ph", ph))), H(ph, "F e. A")), atF));
 
-        Proof eachEr = pr.Apply("rgen", S(("x", cv), ("A", sx), ("ph", $"{cv} Er A")),
-            _d.Syl(pr.Apply("simprbi", S(("ph", $"{cv} e. {sx}"), ("ps", $"{cv} e. {pw}"), ("ch", Phi(cv))), Elrab(cv)),
-                pr.Apply("simpr", S(("ph", $"{r0} C_ {cv}"), ("ps", $"{cv} Er A")))));
-        string iin = $"|^|_ {cv} e. {sx} {cv}", sqIin = $"( {sq} i^i {iin} )";
-        Proof iinEr = pr.Apply("ax-mp", S(("ph", $"A. {cv} e. {sx} {cv} Er A"), ("ps", $"{sqIin} Er A")),
-            eachEr, pr.Apply("riiner", S(("x", cv), ("A", sx), ("R", cv), ("B", "A"))));
-        Proof toIin = pr.Apply("ineq2i", S(("A", $"|^| {sx}"), ("B", iin), ("C", sq)), pr.Apply("intiin", S(("x", cv), ("A", sx))));
-        Proof eBi = pr.Apply("ax-mp", S(("ph", $"{ebody} = {sqIin}"), ("ps", $"( {ebody} Er A <-> {sqIin} Er A )")),
-            toIin, pr.Apply("ereq1", S(("R", ebody), ("S", sqIin), ("A", "A"))));
-        Proof eEr = pr.Apply("mpbir", S(("ph", $"{ebody} Er A"), ("ps", $"{sqIin} Er A")), iinEr, eBi);
-        Proof erR = pr.Apply("mpbird", S(("ph", ph), ("ps", $"{rel} Er A"), ("ch", $"{ebody} Er A")),
-            _d.Lift(ph, eEr), _d.Syl(eqE, pr.Apply("ereq1", S(("R", rel), ("S", ebody), ("A", "A")))));
+        string[] dv = DistinctFor(ld[4].Split(' ').Where(_values.ContainsKey).Concat([lift, mk, QuotEqv]).Distinct(), largs.Append("F"));
+        return (cur.Proves, cur.Proof, WithRequired([string.Join(' ', $"{dv[0]} {bound}".Split(' ', StringSplitOptions.RemoveEmptyEntries).Distinct())], cur.Proof));
+    }
+
+    /// <summary>
+    /// Quot.lift's value g = ran ( p e. A |-> <. [ p ] R , ( D ` p ) >. ) is a function, under the hypotheses on A … E
+    /// in ph (steps 3 and 4 of <see cref="QuotLiftIota()"/>). Returns R Er A, Fun g, the substitution and the
+    /// hypotheses qliftval and qliftf share, and the bound variables the proof adds.
+    /// </summary>
+    private (Proof ErR, Proof Fun, Dictionary<string, string> Lsub, Proof[] Qh, string Bound) LiftIsFunction(string ph, List<string> ld, string g, Func<string, string, Proof> H)
+    {
+        string mpt = Kid("class", g, "A"), p = Kid("class", mpt, "x"), pair = Kid("class", mpt, "B");
+        string rel = Kid("class", Kid("class", pair, "A"), "R"), val = Kid("class", pair, "B");
+        var (eqE, ebody, sq, sx, pw, Phi, Elrab, r0, cv, erR) = Eqv(ph, ld[0], g, H);
+        var used = new HashSet<string>($"{ph} {g} {ebody} {cv}".Split(' '));
+        string q = FirstVar(v => !used.Contains(v));
 
         // 4. R is inside the kernel K of D.
         string k = "( `' D o. D )";
@@ -385,11 +378,7 @@ public sealed partial class Model
         Proof q4 = H(ph, $"A e. {ld[0]}");
         Proof Same(string to) => _d.Congruence("class", Subst(val, p, "Z"), "Z", pr.Apply("id", S(("ph", $"{p} = {to}"))));
         Proof fun = pr.Apply("qliftfund", new Dictionary<string, string>(lsub) { ["B"] = valQ }, q1, q2, erR, q4, Same(q), constant);
-        Proof atF = pr.Apply("qliftval", new Dictionary<string, string>(lsub) { ["B"] = "( D ` F )", ["C"] = "F" }, q1, q2, erR, q4, Same("F"), fun);
-        cur = _d.Trans(cur, _d.Syl(_d.Jca(pr.Apply("id", S(("ph", ph))), H(ph, "F e. A")), atF));
-
-        string[] dv = DistinctFor(ld[4].Split(' ').Where(_values.ContainsKey).Concat([lift, mk, QuotEqv]).Distinct(), largs.Append("F"));
-        return (cur.Proves, cur.Proof, WithRequired([string.Join(' ', $"{dv[0]} {cv} {q}".Split(' ', StringSplitOptions.RemoveEmptyEntries).Distinct())], cur.Proof));
+        return (erR, fun, lsub, [q1, q2, q4], $"{cv} {q}");
     }
 
     /// <summary>
@@ -471,6 +460,143 @@ public sealed partial class Model
         Proof sub = pr.Apply("ssopab2dv", S(("ph", ph), ("x", b), ("y", c), ("ps", psi), ("ch", $"{b} {k} {c}")), imp);
         return pr.Apply("sstrd", S(("ph", ph), ("A", r0), ("B", $"{{ <. {b} , {c} >. | {b} {k} {c} }}"), ("C", k)),
             sub, _d.Lift(ph, pr.Apply("opabss", S(("x", b), ("y", c), ("R", k)))));
+    }
+
+    /// <summary>
+    /// The quotient's relation R = ( ( ( lean.Quot.-eqv ` U ) ` A ) ` B ) under ph, which has A e. level and B's
+    /// hypothesis: R unfolded (R = ( ( A X. A ) i^i |^| Sx )), the parts of Sx, and R Er A, since R is an intersection
+    /// of equivalence relations inside A X. A (riiner, intiin). The bound variable it adds avoids ph and avoid.
+    /// </summary>
+    private (Proof EqE, string Ebody, string Sq, string Sx, string Pw, Func<string, string> Phi, Func<string, Proof> Elrab, string R0, string Cv, Proof ErR)
+        Eqv(string ph, string level, string avoid, Func<string, string, Proof> H)
+    {
+        string rel = $"( ( ( {QuotEqv} ` U ) ` A ) ` B )";
+        // 3. The relation, unfolded: ( ph -> R = ( ( A X. A ) i^i |^| Sx ) ), and an equivalence relation.
+        // In tower mode A ranges over U. ran U there, and A's level is inside it.
+        Proof EqvArg(int i, string dom) => i == 0 && dom == "U. ran U" && level != dom
+            ? pr.Apply("mpd", S(("ph", ph), ("ps", $"A e. {level}"), ("ch", "A e. U. ran U")), H(ph, $"A e. {level}"),
+                pr.Apply("sseld", S(("ph", ph), ("A", level), ("B", dom), ("C", "A")), SubOmega(ph, level)))
+            : H(ph, $"{(i == 0 ? "A" : "B")} e. {dom}");
+        (Proof eqE, _, _) = Unfold(ph, QuotEqv, ["A", "B"], EqvArg);
+        string ebody = Rhs(eqE), sq = Kid("class", ebody, "A"), sx = Kid("class", Kid("class", ebody, "B"), "A");
+        string sv = Kid("class", sx, "x"), pw = Kid("class", sx, "A"), phi = Kid("class", sx, "ph");
+        string r0 = Kid("wff", Kid("wff", phi, "ph"), "A");
+        var used = new HashSet<string>($"{ph} {avoid} {ebody}".Split(' '));
+        string cv = FirstVar(v => !used.Contains(v));
+        string Phi(string s) => Subst(phi, sv, s);
+        Proof Elrab(string a) => pr.Apply("elrab", S(("A", a), ("B", pw), ("x", sv), ("ph", phi), ("ps", Phi(a))),
+            _d.Congruence("wff", Subst(phi, sv, "Z"), "Z", pr.Apply("id", S(("ph", $"{sv} = {a}")))));
+
+        Proof eachEr = pr.Apply("rgen", S(("x", cv), ("A", sx), ("ph", $"{cv} Er A")),
+            _d.Syl(pr.Apply("simprbi", S(("ph", $"{cv} e. {sx}"), ("ps", $"{cv} e. {pw}"), ("ch", Phi(cv))), Elrab(cv)),
+                pr.Apply("simpr", S(("ph", $"{r0} C_ {cv}"), ("ps", $"{cv} Er A")))));
+        string iin = $"|^|_ {cv} e. {sx} {cv}", sqIin = $"( {sq} i^i {iin} )";
+        Proof iinEr = pr.Apply("ax-mp", S(("ph", $"A. {cv} e. {sx} {cv} Er A"), ("ps", $"{sqIin} Er A")),
+            eachEr, pr.Apply("riiner", S(("x", cv), ("A", sx), ("R", cv), ("B", "A"))));
+        Proof toIin = pr.Apply("ineq2i", S(("A", $"|^| {sx}"), ("B", iin), ("C", sq)), pr.Apply("intiin", S(("x", cv), ("A", sx))));
+        Proof eBi = pr.Apply("ax-mp", S(("ph", $"{ebody} = {sqIin}"), ("ps", $"( {ebody} Er A <-> {sqIin} Er A )")),
+            toIin, pr.Apply("ereq1", S(("R", ebody), ("S", sqIin), ("A", "A"))));
+        Proof eEr = pr.Apply("mpbir", S(("ph", $"{ebody} Er A"), ("ps", $"{sqIin} Er A")), iinEr, eBi);
+        Proof erR = pr.Apply("mpbird", S(("ph", ph), ("ps", $"{rel} Er A"), ("ch", $"{ebody} Er A")),
+            _d.Lift(ph, eEr), _d.Syl(eqE, pr.Apply("ereq1", S(("R", rel), ("S", ebody), ("A", "A")))));
+        return (eqE, ebody, sq, sx, pw, Phi, Elrab, r0, cv, erR);
+    }
+
+    /// <summary>
+    /// The typing of the quotient's constants for the theorem translator (TheoremTranslator.cs): the label of a lemma
+    /// lean-in-c, |- ( ( ( U e. lean.-tower /\ A e. D1 ) /\ … ) -> body e. target ), body being c's value at class
+    /// variables and target the codomain of c's type there (read off <paramref name="ty"/>, ⟦type of c⟧). For k ≥ 1:
+    /// - Quot.{k}: ( A /. R ) is in A's universe: it is inside ~P A (qsss, R being an equivalence relation), which is
+    ///   in the universe (grupw, gruss).
+    /// - Quot.mk.{k}: [ C ] R is a class (ecelqsw), and ( A /. R ) is ⟦Quot r⟧.
+    /// - Quot.lift.{k,l}: the lift is a function (as for the computation rule, because of h), from the classes to β
+    ///   (qliftf), so a member of ( β ^m ⟦Quot r⟧ ) (elmapg). At k = 0 it is f, in ( β ^m α ), and ⟦Quot r⟧ is α.
+    /// </summary>
+    internal string QuotInLemma(ConstInfo ci, string ty)
+    {
+        Name n = ci.Name;
+        string label = $"lean-in-{LabelPart($"{n}")}";
+        if (Has(label))
+        {
+            return label;
+        }
+        string tok = Token(n)!, which = BaseName(n);
+        int arity = which switch { "Quot" => 2, "Quot.mk" => 3, "Quot.lift" => 5, _ => throw new Refused($"{n}: not a quotient constant with a value") };
+        var args = ClassVars.Take(arity).ToList();
+        List<string> doms = Domains(tok, args, arity);
+        string ph = Conj(new[] { UHyp }.Concat(args.Select((a, i) => $"{a} e. {doms[i]}")));
+        Proof H(string ctx, string h) => Hyp(ctx, h) ?? throw new Refused($"no hypothesis {h}");
+        (Proof eqV, _, _) = Unfold(ph, tok, args, (i, dom) => H(ph, $"{args[i]} e. {dom}"));
+        string body = Rhs(eqV), target = ty;
+        foreach (string a in args)
+        {
+            SyntaxTree tn = pr.Parse("class", target.Split(' '))!;
+            target = tn.Rule.Label == "cixp" ? Subst(pr.Render(tn.Children[2]), pr.Render(tn.Children[0]), a)
+                : tn.Rule.Label == "co" && pr.Render(tn.Children[2]) == "^m" ? pr.Render(tn.Children[0])
+                : throw new Refused($"{n}'s type {ty} has fewer than {arity} arguments");
+        }
+        // ( ph -> Q = ( A /. R ) ) for Q = ( ( ( lean.Quot.{k} ` U ) ` A ) ` B ), from a target that names it.
+        Proof QuotEq(string q)
+        {
+            string qtok = Kid("class", Kid("class", Kid("class", q, "F"), "F"), "F");
+            Define(_tokenNames.TryGetValue(qtok, out Name? qn) ? qn : throw new Refused($"{qtok} isn't a defined constant"));
+            (Proof e, _, _) = Unfold(ph, qtok, ["A", "B"], (i, dom) => H(ph, $"{(i == 0 ? "A" : "B")} e. {dom}"));
+            return e;
+        }
+        Proof r;
+        switch (which)
+        {
+            case "Quot" when body == "A":
+                r = H(ph, "A e. 2o");   // a quotient of a proposition is the proposition
+                break;
+            case "Quot":
+                {
+                    var e = Eqv(ph, doms[0], body, H);
+                    string rel = Kid("class", body, "R"), level = doms[0];
+                    Proof sub = pr.Apply("qsss", S(("ph", ph), ("A", "A"), ("R", rel)), e.ErR);
+                    Proof univ = LevelUniv(ph, level.Split(' ')[3]);
+                    Proof pwIn = _d.Syl(_d.Jca(univ, H(ph, $"A e. {level}")), pr.Apply("grupw", S(("U", level), ("A", "A"))));
+                    r = _d.Syl(pr.Apply("3jca", S(("ph", ph), ("ps", $"{level} e. Univ"), ("ch", $"~P A e. {level}"), ("th", $"{body} C_ ~P A")), univ, pwIn, sub),
+                        pr.Apply("gruss", S(("U", level), ("A", "~P A"), ("B", body))));
+                    if (target != level)
+                    {
+                        throw new Refused($"{n}'s codomain is {target}, not {level}");
+                    }
+                    break;
+                }
+            case "Quot.mk":
+                {
+                    string rel = Kid("class", body, "R");
+                    Proof eqQ = QuotEq(target);
+                    Proof inQs = _d.Syl(_d.Jca(Exists(ph, rel), H(ph, "C e. A")), pr.Apply("ecelqsw", S(("R", rel), ("V", "_V"), ("B", "C"), ("A", "A"))));
+                    r = pr.Apply("eleqtrrd", S(("ph", ph), ("A", body), ("B", Rhs(eqQ)), ("C", target)), inQs, eqQ);
+                    break;
+                }
+            default:
+                {
+                    string q = Kid("class", target, "B");
+                    Proof eqQ = QuotEq(q);
+                    string qs = Rhs(eqQ), cod = Kid("class", target, "A");
+                    Proof inQs;
+                    if (body == "D")
+                    {
+                        inQs = H(ph, $"D e. ( {cod} ^m A )");   // a quotient of a proposition: Q is α, and the lift is f
+                    }
+                    else
+                    {
+                        var (erR, fun, lsub, qh, _) = LiftIsFunction(ph, doms, body, H);
+                        Proof f = pr.Apply("mpbid", S(("ph", ph), ("ps", $"Fun {body}"), ("ch", $"{body} : {qs} --> {cod}")), fun,
+                            pr.Apply("qliftf", new Dictionary<string, string>(lsub) { ["ph"] = ph }, qh[0], qh[1], erR, qh[2]));
+                        Proof bi = _d.Syl(_d.Jca(Exists(ph, cod), Exists(ph, qs)), pr.Apply("elmapg", S(("A", cod), ("B", qs), ("C", body), ("V", "_V"), ("W", "_V"))));
+                        inQs = pr.Apply("mpbird", S(("ph", ph), ("ps", $"{body} e. ( {cod} ^m {qs} )"), ("ch", $"{body} : {qs} --> {cod}")), f, bi);
+                    }
+                    Proof eqT = pr.Apply("oveq2d", S(("ph", ph), ("A", q), ("B", qs), ("C", cod), ("F", "^m")), eqQ);
+                    r = pr.Apply("eleqtrrd", S(("ph", ph), ("A", body), ("B", $"( {cod} ^m {qs} )"), ("C", target)), inQs, eqT);
+                    break;
+                }
+        }
+        EmitLemma(label, $"The value of {n} is in its type.", r);
+        return label;
     }
 
     /// <summary>

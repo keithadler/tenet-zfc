@@ -39,6 +39,12 @@ public sealed partial class Model
                     continue;
                 }
             }
+            if (head is Const qk && args.Count >= 6 && BaseName(qk.Name) == "Quot.lift" && env.Find(qk.Name) is { Kind: ConstKind.Quot }
+                && Ops.Spine(LeanWhnf(args[5]), out List<Expr> qargs) is Const qmk && BaseName(qmk.Name) == "Quot.mk" && qargs.Count == 3)
+            {
+                e = t.MkApp(t.App(args[3], qargs[2]), args.Skip(6));   // the quotient's computation rule
+                continue;
+            }
             if (head is Proj pj && Ops.Spine(LeanWhnf(pj.Struct), out List<Expr> sargs) is Const sk && env.Find(sk.Name) is { Kind: ConstKind.Constructor } sci)
             {
                 e = t.MkApp(sargs[sci.NumParams + pj.Idx], args);

@@ -212,6 +212,10 @@ if (args.Length >= 5 && args[0] == "theorem")
         {
             // A proof step that doesn't check: a bug in the translator, reported, and the other theorems go on.
             Console.WriteLine($"{name}: failed: {e.Message}");
+            if (System.Environment.GetEnvironmentVariable("TENET_DEBUG") is not null)
+            {
+                Console.Error.WriteLine(e.StackTrace);
+            }
             tstatus = 1;
         }
     }
