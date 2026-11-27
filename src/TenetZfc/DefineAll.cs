@@ -15,7 +15,7 @@ namespace TenetZfc;
 public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool compress = true)
 {
     /// <summary>What happened to one constant.</summary>
-    public sealed record Outcome(string Name, string Kind, string Status, int EqSteps, string Iota, int IotaSteps, string Reason, double Seconds);
+    public sealed record Outcome(string Name, string Kind, string Status, int EqSteps, string Iota, int IotaSteps, string Reason, double Seconds, string Label = "");
 
     /// <summary>The constants the run targets, in export order: everything but theorems, axioms and unsafe constants.</summary>
     public List<ConstInfo> Targets() => env.All
@@ -39,7 +39,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
     public double SlowSeconds { get; init; } = 5;
 
     /// <summary>
-    /// Write one chunk: chunk-NNNN.mm, and chunk-NNNN.tsv with one line per constant. Returns the outcomes.
+    /// Write one chunk: chunk-NNNN.mm, and chunk-NNNN.tsv with one line per constant (its last column is the label its theorems carry: lean-<label>-eq, lean-<label>-iota). Returns the outcomes.
     /// The model and its copy of set.mm's database are fresh per chunk, so one chunk's refusals can't leak into another.
     /// </summary>
     public List<Outcome> Chunk(int index, IReadOnlyList<ConstInfo> constants, string outDir)
@@ -67,11 +67,13 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
             pr.Deadline = DateTime.UtcNow.AddSeconds(BudgetSeconds);
             // What is running now, for watching a long run: chunk-NNNN.progress names the constant in hand.
             File.WriteAllText(Path.Combine(outDir, name + ".progress"), $"{outcomes.Count + 1}/{constants.Count} {c.Name}\n");
+            string label = "";
             try
             {
                 Name n = mono is null ? c.Name : mono.Instance(c.Name, c.LevelParams.Select(_ => t.Zero).ToArray());
                 var (stmt, proof, distinct) = model.Equation(n);
-                proved.Add(($"lean-{Model.LabelOf(n)}-eq", stmt, proof, distinct, $"The definitional equation of {n}."));
+                label = Model.LabelOf(n);
+                proved.Add(($"lean-{label}-eq", stmt, proof, distinct, $"The definitional equation of {n}."));
                 string iota = "-", reason = "";
                 int iotaSteps = 0;
                 if (c.Kind == ConstKind.Constructor)
@@ -79,7 +81,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
                     try
                     {
                         var (istmt, iproof, idistinct) = model.Iota(n);
-                        proved.Add(($"lean-{Model.LabelOf(n)}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {n}."));
+                        proved.Add(($"lean-{label}-iota", istmt, iproof, idistinct, $"The computation rule of the recursor on {n}."));
                         iota = "ok";
                         iotaSteps = iproof.Count;
                     }
@@ -93,7 +95,7 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
                         reason = Why(e);
                     }
                 }
-                outcomes.Add(new($"{c.Name}", kind, "ok", proof.Count, iota, iotaSteps, reason, sw.Elapsed.TotalSeconds));
+                outcomes.Add(new($"{c.Name}", kind, "ok", proof.Count, iota, iotaSteps, reason, sw.Elapsed.TotalSeconds, label));
             }
             catch (Exception e)
             {
@@ -112,10 +114,10 @@ public sealed class DefineAll(Terms t, Environment env, string setmmPath, bool c
             theorems.Theorem(p.Label, p.Comment, p.Statement, p.Proof, p.Distinct);
         }
         File.WriteAllText(Path.Combine(outDir, name + ".mm"), theorems.ToString());
-        var tsv = new StringBuilder("name\tkind\tstatus\teq_steps\tiota\tiota_steps\tseconds\treason\n");
+        var tsv = new StringBuilder("name\tkind\tstatus\teq_steps\tiota\tiota_steps\tseconds\treason\tlabel\n");
         foreach (Outcome o in outcomes)
         {
-            tsv.Append($"{o.Name}\t{o.Kind}\t{o.Status}\t{o.EqSteps}\t{o.Iota}\t{o.IotaSteps}\t{o.Seconds:F2}\t{o.Reason}\n");
+            tsv.Append($"{o.Name}\t{o.Kind}\t{o.Status}\t{o.EqSteps}\t{o.Iota}\t{o.IotaSteps}\t{o.Seconds:F2}\t{o.Reason}\t{o.Label}\n");
         }
         File.WriteAllText(Path.Combine(outDir, name + ".tsv"), tsv.ToString());
         File.Delete(Path.Combine(outDir, name + ".progress"));

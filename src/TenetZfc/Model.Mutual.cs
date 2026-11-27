@@ -11,14 +11,14 @@ namespace TenetZfc;
 /// for Array Syntax and List Syntax) is one least fixed point over a tagged sum. Its elements are pairs
 /// &lt;. ix , value &gt;., where ix is the type's index ((/), 1o, 2o, suc 2o, …) and value a tagged tuple as for
 /// any inductive type.
-/// - The step, lean.I_0.-mstep, adds for each constructor of each type the pairs &lt;. ix , tag(fields) &gt;., where a
+/// - The step, lean.I_0.-stepm, adds for each constructor of each type the pairs &lt;. ix , tag(fields) &gt;., where a
 ///   recursive field of type t ranges over ( X " { ix_t } ), the values of type t in the last stage.
 /// - The fixed point is the union of its ω-chain of stages, Fix = U_ k e. _om ( rec ( step , (/) ) ` k ), and each
 ///   original type is its slice, ( Fix " { ix } ).
 /// - Constructors build tagged tuples, as for other types.
 /// - The recursors are one well-founded recursion over smaller rank on every set, frecs ( RankLt , _V , H ), whose
 ///   value at a is the tuple of every type's case analysis on a: &lt;. case_0 , &lt;. case_1 , … (/) &gt;. &gt;.. The
-///   case analysis is lean.I_0.-mcase. I_t.rec reads component t of the value at its major premise, and a
+///   case analysis is lean.I_0.-casem. I_t.rec reads component t of the value at its major premise, and a
 ///   recursive field r of type t' gets component t' of the recursion at r.
 ///
 /// The recursion runs over every set, not just the block, so that its computation rules need no membership: smaller
@@ -106,7 +106,7 @@ public sealed partial class Model
             throw new Refused($"{n}'s recursors don't have one motive per type and one minor premise per constructor");
         }
         string itok = Token(first.Name)!;
-        string steptok = itok + ".-mstep", casetok = itok + ".-mcase";
+        string steptok = itok + ".-stepm", casetok = itok + ".-casem";
         var blockNames = new HashSet<Name>(raw.Select(b => b.Name), ReferenceEqualityComparer.Instance);
         bool Mentions(Expr e) => e switch
         {
@@ -209,7 +209,7 @@ public sealed partial class Model
             body = Subst(body, hole, $"( 2nd ` {w} )");
             stepBound.AddRange(sc.Bound.Where(x => x != UniverseVar && !ps.Any(q => q.Var == x)));
             stepBound.Add(w);
-            EmitRaw(t.Of($"{first.Name}.-mstep"), steptok, $"( {w} e. _V |-> {body} )", stepBound, "mutual block's stage step, over a packed argument");
+            EmitRaw(t.Of($"{first.Name}.-stepm"), steptok, $"( {w} e. _V |-> {body} )", stepBound, "mutual block's stage step, over a packed argument");
         }
         var block = new BlockInfo(steptok, casetok, info, np, nmotives, nminors, nestedParams);
         foreach (Name r in recNames)
@@ -275,7 +275,7 @@ public sealed partial class Model
             var packed = new[] { UniverseVar }.Concat(bs.Select(q => q.Var)).ToList();
             body = Unpack(body, packed, $"( 1st ` ( 1st ` {w} ) )");
             body = Subst(Subst(body, ha, $"( 2nd ` ( 1st ` {w} ) )"), hf, $"( 2nd ` {w} )");
-            EmitRaw(t.Of($"{first.Name}.-mcase"), casetok, $"( {w} e. _V |-> {body} )", [w], "mutual block's case analysis, over a packed argument");
+            EmitRaw(t.Of($"{first.Name}.-casem"), casetok, $"( {w} e. _V |-> {body} )", [w], "mutual block's case analysis, over a packed argument");
         }
 
         // The recursors: ( params |-> motives |-> minors |-> ( t e. ⟦major type⟧ |->

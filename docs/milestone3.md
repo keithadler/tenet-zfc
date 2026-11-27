@@ -527,16 +527,16 @@ Before this part, 1,483 definitions in `Init` stopped at "`Lean.Syntax` is a mut
 **A block is one least fixed point over a tagged sum.** The types of a mutual block, `I_0 … I_n-1`, are built together. A nested block first goes through the kernel's reduction to a mutual block, the one the replayer already checks (`Nested.cs`, now exposed as `Replayer.AuxiliaryBlock`). For `Rose α`, which holds a `List (Rose α)`, that block is `Rose` and an auxiliary type standing for `List (Rose α)`. `Lean.Syntax`'s block has three types: `Syntax`, `Array Syntax` and `List Syntax`.
 
 - **Elements** of the fixed point are pairs `<. ix , v >.`. Here `ix` is the type's index (`(/)`, `1o`, `2o`, `suc 2o`, …), and `v` is a tagged tuple, as for any inductive type.
-- **The step**, `lean.I_0.-mstep`, adds `<. ix , tag(fields) >.` for every constructor of every type. A recursive field of type `t` ranges over `( X " { ix_t } )`, the values of type `t` in the last stage.
+- **The step**, `lean.I_0.-stepm`, adds `<. ix , tag(fields) >.` for every constructor of every type. A recursive field of type `t` ranges over `( X " { ix_t } )`, the values of type `t` in the last stage.
 - **Each original type is its slice.** The fixed point is the union of its ω-chain of stages, as before:
 
   ```
   df-lean.Tm $a |- lean.Tm = ( u e. Univ |-> ( x e. u |->
-      ( U_ y e. _om ( rec ( ( r e. _V |-> ( lean.Tm.-mstep ` <. <. u , <. x , (/) >. >. , r >. ) ) , (/) ) ` y ) " { (/) } ) ) ) $.
+      ( U_ y e. _om ( rec ( ( r e. _V |-> ( lean.Tm.-stepm ` <. <. u , <. x , (/) >. >. , r >. ) ) , (/) ) ` y ) " { (/) } ) ) ) $.
   ```
 
 - **Constructors** build tagged tuples. An auxiliary type's constructors are the nested type's own (`List.nil`, `List.cons`), so a value of `List (Rose α)` is the same set whichever way it is read.
-- **The recursors are one recursion.** `frecs ( RankLt , _V , H )` runs over every set. Its value at `a` is the tuple of every type's case analysis on `a`, `<. case_0 , <. case_1 , … (/) >. >.`, computed by `lean.I_0.-mcase`. `I_t.rec`, and a nested block's `I.rec_k`, read component `t` at the major premise. A recursive field `r` of type `t'` gets component `t'` of the recursion at `r`.
+- **The recursors are one recursion.** `frecs ( RankLt , _V , H )` runs over every set. Its value at `a` is the tuple of every type's case analysis on `a`, `<. case_0 , <. case_1 , … (/) >. >.`, computed by `lean.I_0.-casem`. `I_t.rec`, and a nested block's `I.rec_k`, read component `t` at the major premise. A recursive field `r` of type `t'` gets component `t'` of the recursion at `r`.
 - **Why every set.** The recursion runs over `_V` rather than the block, so its computation rules need no membership in it: `frr2` only needs `X e. _V`. That takes one new lemma, besides `lean-rankfr`:
 
   `lean-rankse $p |- { <. x , y >. | ( rank ` x ) e. ( rank ` y ) } Se _V`, in 550 steps. The sets of smaller rank than `z` all lie in `( R1 ` ( rank ` z ) )` (`rankr1ag`), which is a set.
