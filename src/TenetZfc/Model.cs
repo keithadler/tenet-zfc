@@ -749,6 +749,11 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         {
             _ = Token(c.Name) ?? throw new Refused($"{c.Name}: the name has characters a set.mm token can't");
         }
+        if (NeedsLeastFixedPoint(ind, ctors, rec))
+        {
+            DefineLeastProposition(ind, itok, ctors, rec);   // Model.Least.cs: Acc, and recursors into any sort
+            return;
+        }
         string steptok = itok + ".-step";
         bool Mentions(Expr e) => e switch
         {
@@ -1587,6 +1592,10 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
         if (_intoPropOnly.Contains(rtok))
         {
             throw new Refused($"{rec.Name} eliminates only into Prop: both sides of its computation rule are proofs, (/)");
+        }
+        if (_leastRecursors.Contains(rtok))
+        {
+            throw new Refused($"{rec.Name} is well-founded recursion on a least fixed point; its computation rule is not in the model yet");
         }
         int np = ind.NumParams, nrec = np + rec.NumMotives + rec.NumMinors;
         List<string> recArgs = ClassVars.Take(nrec).ToList();
