@@ -134,7 +134,7 @@ The translator unfolds Lean's own definitions of ℕ, ℝ, ζ and the rest into 
 ## Limits
 
 - **Never supported:** `sorry`, and `native_decide`, which trusts compiled code rather than a kernel proof. A project's own axioms can only appear as hypotheses.
-- **Not plain ZFC:** theorems whose proofs genuinely need a higher universe come out as "ZFC plus a Grothendieck universe", and the output says which declarations forced it. Today every output assumes a universe; removing that assumption is milestone 4.
+- **Not plain ZFC, yet:** today every output assumes a tower of Grothendieck universes, `U e. lean.-tower`, as a hypothesis. No axiom is added, and each output's header says how many levels it uses and which declarations need them. Lowering that to plain ZFC, where a proof allows it, is milestone 4. Theorems whose proofs genuinely need a higher universe will stay "ZFC plus universes".
 - **Impractical:** computation-heavy proofs such as large `decide` calls translate in principle, but each kernel evaluation step becomes explicit proof steps.
 - **Not readable:** the outputs are machine-checked certificates, not mathematics to read.
 
