@@ -14,7 +14,7 @@ public class DeductionTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private static string? SetMm => System.Environment.GetEnvironmentVariable("TENET_ZFC_SETMM");
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void CongruenceRewritesInsideClassesAndFormulas()
     {
         if (SetMm is null)

@@ -81,7 +81,7 @@ public class TowerTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Contains("df-lean.Rose.u0 $a |- lean.Rose.{0} = ( u e. lean.-tower |-> ( x e. ( u ` (/) ) |->", m.Declarations);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void NatAndListRecursionComputeInTheTowerAndVerify()
     {
         if (SetMm is null)
@@ -134,7 +134,7 @@ public class TowerTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void AccIsALeastFixedPointAndItsRecursorIsWellFoundedRecursion()
     {
         // Acc's premise h : ∀ y, r y x → Acc r y is a function into Acc, so ω stages don't reach its least fixed point:
@@ -195,7 +195,7 @@ public class TowerTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TheRestOfInitsBlockersTranslateAndVerify()
     {
         // rest.ndjson: one constant for each fix of "The Init-wide run, again" (docs/milestone3.md).

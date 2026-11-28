@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Fail if a test in a .trx results file was skipped for a missing checker.
+
+CI sets every checker variable before the test step, so a test that still reports "needs TENET_ZFC_..." there
+means a variable went missing and the step would pass without checking anything. The slow theorem tests skip
+unless TENET_ZFC_THEOREMS is set; that opt-in is the one allowed reason.
+"""
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+ALLOWED = {"TENET_ZFC_THEOREMS"}
+ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+root = ET.parse(sys.argv[1]).getroot()
+skipped, bad = 0, []
+for r in root.iterfind(".//t:UnitTestResult", ns):
+    if r.get("outcome") != "NotExecuted":
+        continue
+    skipped += 1
+    msg = " ".join(m.text or "" for m in r.iterfind(".//t:Message", ns))
+    if set(re.findall(r"TENET_ZFC_\w+", msg)) - ALLOWED or "TENET_ZFC_" not in msg:
+        bad.append(f"{r.get('testName')}: {msg.strip()}")
+print(f"{skipped} skipped, {len(bad)} for a missing checker")
+for b in bad:
+    print(f"::error::{b}")
+sys.exit(1 if bad else 0)

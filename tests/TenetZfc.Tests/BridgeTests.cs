@@ -16,7 +16,7 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
     private const string F = NatBridge.F;
     private const string Nat = NatBridge.Nat;
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void NatIsNN0ThroughTheBridgeAndVerifies()
     {
         if (SetMm is null)
@@ -49,7 +49,7 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
         Verify(text, "natbridge");
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void ListIsWordThroughTheBridgeAndVerifies()
     {
         if (SetMm is null)
@@ -68,7 +68,7 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
         Verify(text, "listbridge");
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void InTheOneUniverseModelNatAddCollapsesAndItsRulesAreHypotheses()
     {
         if (SetMm is null)
@@ -87,7 +87,7 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
         Verify(text, "natbridge1");
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void LoweredTowerGivesNatAddZeroInPlainZfc()
     {
         if (SetMm is null)
@@ -133,7 +133,7 @@ public class BridgeTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH")]
     public void ABrokenBridgeProofFailsToVerify()
     {
         // The verifiers, not the translator, are what the bridge rests on: break one step and they must refuse it.

@@ -1125,5 +1125,53 @@ After the fixes, `Nat.succ_mul`, `maxOn_eq_minOn`, `decide_false`, `eq_true_of_d
 
 One fix needed a fix of its own. The renamed hypothesis brings in a `cbvmptv` step, and the computation rules declared their `$d` conditions by hand, so metamath-exe rejected `Rose.node`'s rule in `mutual.ndjson`. `Iota`, `RecursorIotas` and `Equation` now add every pair their proof's steps need (`DistinctVars.Required`).
 
-The measured totals over the whole sample, the ranking and the forecast follow in the next section, once the run is done.
+The measured totals, the ranking and the forecast are in the next section, from the full run rather than the sample.
+
+## Theorems across Init: the full run (measured)
+
+All 45,588 of `Init`'s theorems (Lean 4.36.0), not a sample, through `theorem-all` at `372fae6`: #20's translator with `scripts/cloud/` added. Chunks of 10, a CPU budget of 120 s per theorem. It ran on 2 × AWS `m7a.48xlarge` spot instances, half the chunks each, about 160 processes per machine (`scripts/cloud/setup.sh` and `run.sh`). Keith OK'd the run with a cost estimate, under tasks2.md's rule on paid machines. Proving took 290 CPU-hours, about 1 h 40 min of wall time, then `scripts/verify-all` checked the chunks on the same machines (below). The run cost about $12.
+
+| | Theorems | Share |
+|---|---|---|
+| **Proved** (each replayed by the translator before it is written) | **8,287** | **18.2%** |
+| … of which in chunks that pass all three checkers | 6,646 | 14.6% |
+| Refused, with a reason | 31,320 | 68.7% |
+| Over the time budget | 4,718 | 10.3% |
+| Errors (translator bugs, caught before writing) | 1,263 | 2.8% |
+| Crashes | 0 | |
+
+**Checking.** 3,382 of the 4,559 chunks were checked by metamath-exe, mmverify.py and mmj2's `definitionCheck`, and all 3,382 pass. AWS reclaimed the first half's spot instance after 1,103 of that half's 2,280 chunks were checked. Its results had already been copied off, so nothing was lost, but its other 1,177 chunks, with 1,641 of the proved theorems, haven't been through the checkers yet. Checking them takes about 2½ hours on one machine; until then they are proved by the translator, which replays every proof step and its `$d` conditions before writing, but not by the independent checkers.
+
+Proof sizes of the proved theorems: median 33,716 flat steps, 90th percentile 5.7 million, maximum 1.4 billion (shared and compressed in the output). CPU time per proved theorem: median 1.5 s, 90th percentile 37 s, 99th percentile 105 s.
+
+18.2% is lower than the 27% of the first 150 sampled theorems: those were `Init.Prelude` and early `Nat`, the simplest part of `Init`.
+
+### What stops the rest, ranked
+
+Each theorem that isn't proved is counted once, under the first thing that stopped it, so a theorem behind a fixed blocker may stop at the next one.
+
+| Rank | Blocker | Theorems | Share of Init |
+|---|---|---|---|
+| 1 | **A function variable's value, not shown to be in its codomain** (fixed in #33).  `( ( z ` t ) ` (/) )`, a motive applied, in the universe `( U ` (/) )`, or `( z ` p )` in `( lean.Nat ` U )`. The context has the function's type (`z e. X_ t e. D …`), but `UnivMem` and `TextMem` never apply it; they only follow "member of a member" facts. **Three exact messages account for 13,586 theorems** (5,879, 5,159 and 2,548): a few shared typing lemmas that fail the same way in every theorem that needs them. | ~13,600 | 30% |
+| 2 | Over the time budget: 4,223 in the prover (`CheckDeadline`), 495 in type inference | 4,718 | 10% |
+| 3 | A conversion the translator can't show, between texts that differ by more than bound variables (`lean.Eq.{1}` 1,422, `lean.Nat` 1,139, `Std.Refl` 463) | 4,199 | 9% |
+| 4 | "can't infer a type: applying something that isn't a function" | 2,508 | 5.5% |
+| 5 | Choice in theorems: `Classical.propDecidable`, `Classical.choose`, and definitions through them (`Std.Slice.toList`, the `Std.Rco`/`Rcc`/… ranges, iterators) | 1,819 | 4% |
+| 6 | Translator errors: `syl` (661) and `rspcdv` (261) replay mismatches, an index out of range (242), `RecTyLemma` (63) | 1,263 | 2.8% |
+| 7 | Typing a recursor with indices or several motives (`Eq.{2}.rec` 684, `Acc.{1}.rec` 463, …) | 1,178 | 2.6% |
+| 8 | "no hypothesis …" (`lean.Nat` 1,041) | 1,117 | 2.5% |
+| 9 | Fields that are propositions the translator can't show are one (`String.Pos.Raw.IsValid` 744, `ReflBEq` 131, `Membership.mem` 99) | ~1,000 | 2% |
+| 10 | Existential introduction whose witness's variable occurs in the hypotheses (the main machine's PR #28 brings the fix) | 545 | 1.2% |
+| | Definitions too large for mmj2's check, steps of a recursive proposition that come out differently (`List.Sublist`, `List.Pairwise`, `List.Perm`, `List.Mem`), string literals, and a long tail | ~2,400 | 5% |
+
+### The forecast
+
+To reach 50%, about 14,500 more theorems have to prove; for 80%, about 28,200.
+
+- **50% looks reachable with blockers 1 to 4**, which together stop 25,000 theorems. Blocker 1 is one construct, applying a function variable's hypothesis, and probably a day's work. Even if only half the theorems behind it then prove, that is about 6,800 (+15 points). Raising the budget and fixing the prover's slowest steps would recover much of blocker 2. Blockers 3 and 4 are case work like `Nat.le`'s this week. **Estimate: one to two weeks of translator work**, re-measured after each fix (a full run costs about $12 and two hours; the every-10th sample is free on GitHub's runners).
+- **80% needs nearly every category**: choice in theorems (blocker 5), recursors with indices (7), the proposition fields (9), and the long tail, each a construct of its own. **Estimate: four to six weeks.** The uncertainty is in what the theorems behind blockers 1 to 4 run into next, which only re-measuring shows.
+
+What the estimates rest on: this week's fixes moved the primes cone from 81 to 114 of 146, and `theoremall.ndjson` from 18 to 23 of 23, each time by a few constructs. The concentration above (three messages, 30% of Init) suggests the same here.
+
+**To reproduce:** on a fresh Ubuntu 22.04 machine with enough memory for about 160 processes (`m7a.48xlarge`: 192 vCPUs, 768 GB), run `scripts/cloud/setup.sh <commit>`, then `scripts/cloud/run.sh 160 10 120 <first chunk> <last chunk>`. Each machine writes `/workspace/results.tgz`, and `scripts/summarize-all` totals the chunks. Watch memory: chunks of 50 grew to 10 GB per process. With 160 processes of chunks of 10, a machine went as low as 22 GB available, and a guard that paused new chunks below 40 GB kept it from swapping.
 
