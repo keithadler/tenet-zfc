@@ -18,7 +18,8 @@ The translator itself is not trusted. If it makes a mistake, the verifiers rejec
 
 - **98.5% of the definitions in Lean core's `Init`** (17,329 of 17,590) translate with their equations checked by the verifiers, in a complete run on GitHub's runners. 80% (14,091) translate *together with everything they use*, which is what a theorem needs.
 - **Lean theorems proved from their own proof terms**, each accepted by all three checkers: a starter library of 28 about `Nat` and `List`, and 114 of the 146 theorems that the infinitude of primes depends on.
-- **Lean's `List.length_append` comes out as `set.mm`'s `ccatlen`**, next to `set.mm`'s hand-written proof of the same statement. Lean's `+` and `*` on `Nat` are proved to be `set.mm`'s `+` and `x.`.
+- **18% of all the theorems in `Init`** go through so far: 8,287 of 45,588 in a full run, 6,646 of them in chunks all three checkers have checked (the rest are proved but not yet checked). What stops the others is ranked in [docs/milestone3.md](docs/milestone3.md#theorems-across-init-the-full-run-measured), with a re-measurement after the first fix.
+- **Lean's `List.length_append` comes out as `set.mm`'s `ccatlen`**, next to `set.mm`'s hand-written proof of the same statement. Lean's `+`, `*`, `≤` and `<` on `Nat` are proved to be `set.mm`'s `+`, `x.`, `<_` and `<`.
 - **Two theorems are in plain ZFC** so far. Everything else still assumes a tower of universes as a hypothesis ([Limits](#limits)).
 - **In progress:** the infinitude of primes, end to end ([examples/Primes.lean](examples/Primes.lean)). 114 of the 146 theorems it rests on are proved and checked; of the file's own lemmas, `fact_pos` is. The gap list is in [docs/milestone5.md](docs/milestone5.md).
 
@@ -54,13 +55,13 @@ metamath-exe, mmverify.py and mmj2 accept both proofs. A corrupted proof step, `
 
 ## Status
 
-**About 65% of the way to the goal.** [v0.1.0](https://github.com/keithadler/tenet-zfc/releases/tag/v0.1.0) is released: the first version someone else can install and run on their own Lean code. Milestones 1 and 2 are done. Milestone 3 has nearly all of Lean core's definitions and a first measurement of its theorems; what it lacks is the measured share of all of core's theorems, and the constructs that stop the rest. Milestones 4 and 5 are started.
+**About 65% of the way to the goal.** [v0.1.0](https://github.com/keithadler/tenet-zfc/releases/tag/v0.1.0) is released: the first version someone else can install and run on their own Lean code. Milestones 1 and 2 are done. Milestone 3 has nearly all of Lean core's definitions and 18% of its theorems, measured over all 45,588; what it lacks is the constructs that stop the rest, which are ranked and being fixed in order. Milestones 4 and 5 are started.
 
 | | Milestone | Gate | Status |
 |---|---|---|---|
 | 1 | **Trace** | Replaying Tenet's trace re-derives every check it made, on all of Lean core | ✅ 64,045 declarations, 86 million steps, 0 failures |
 | 2 | **Bridge library** | `2 + 2 = 4` and `List.length_append` translate, and both verifiers accept them | ✅ verified in CI |
-| 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 about 80%: 98.5% of `Init`'s definitions translate with verified equations; theorems are proved from their proof terms, 114 of 146 in the primes proof's cone and 27% of a first sample of `Init` before the latest fixes; the share of all 45,588 is being measured |
+| 3 | **Full kernel** | All of Lean core translates and verifies | 🚧 about 80%: 98.5% of `Init`'s definitions translate with verified equations; theorems are proved from their proof terms, 114 of 146 in the primes proof's cone, and 8,287 of `Init`'s 45,588 (18.2%) in a full run, 6,646 of them checked by all three checkers so far; the blockers are ranked, and the first fix, re-measured, moved a 1,200-theorem sample from 20.3% to 20.8% |
 | 4 | **Universe elimination** | Mathlib's `Nat` and `Int` files come out in plain ZFC | 🚧 about 15%: the first plain-ZFC theorems, `Nat.add_zero` and `Nat.zero_add` as `( A + 0 ) = A` and `( 0 + A ) = A`, from Lean's proof with no universe hypothesis and no `ax-groth` ([docs/milestone4.md](docs/milestone4.md)) |
 | 5 | **Headline result** | A famous theorem end to end in plain ZFC, with outputs and counts published | 🚧 about 20%: the candidate is the infinitude of primes in core Lean ([examples/Primes.lean](examples/Primes.lean)); all 169 definitions it uses translate; 114 of the 146 theorems it rests on are proved and pass all three checkers; four of the file's five lemmas, the main theorem among them, don't go through yet ([docs/milestone5.md](docs/milestone5.md)) |
 
@@ -117,8 +118,9 @@ The work between here and a famous theorem end to end, in order:
   - **Still to land:** eliminating `Or`, `And` and `Iff`, and taking a field out of a proof of one; `False`'s recursor; conversion under a λ; a version of the example that uses the excluded middle alone.
   - **With those, on that branch,** 5 of the reworked file's 8 lemmas go through the translator: `fact_succ`, `fact_pos` (`0 < n!`), `dvd_fact` (every `m ≤ n` divides `n!`), and the two classical lemmas `not_forall` and `not_imp`. Not yet: the prime-factor lemma, its corollary, and the main theorem.
   - **Excluded middle will be proved in the model directly**, not from Lean's proof: a proposition of the model is a member of `2o`, so it is `(/)` or `1o`. Lean's own proof of `Classical.em` goes through `Classical.choice` used as data, which the theorem translator doesn't follow. `propext` is handled the same way.
-- [ ] **Measure theorem coverage on all of `Init`.** 28 hand-picked theorems went through; the share of all 45,588 is unknown, and it decides the timeline. The batch mode, `theorem-all`, and fixes for the first blockers it found are merged ([#20](https://github.com/keithadler/tenet-zfc/pull/20)): of the first 150 sampled theorems, 27% proved before the fixes. The measured totals over the whole sample are still to come.
-- [ ] **More bridges**, so results land in `set.mm`'s own vocabulary: `Nat.mul` to `x.` (done, [#21](https://github.com/keithadler/tenet-zfc/pull/21)), order to `<_` and `<`, `∣` to `||`, `Prime` to the statement in `infpn`; `Int` to `ZZ`.
+- [x] **Measure theorem coverage on all of `Init`.** A full run of all 45,588 theorems (27 November): **8,287 proved (18.2%)**, 6,646 of them in chunks checked by all three checkers, the other 1,641 proved but not yet checked. The blockers are ranked in [docs/milestone3.md](docs/milestone3.md#theorems-across-init-the-full-run-measured).
+- [ ] **Fix the blockers in rank order, re-measuring after each.** The first fix ([#33](https://github.com/keithadler/tenet-zfc/pull/33)) removed the top blocker's refusals but moved a 1,200-theorem sample only from 243 to 249 proved: those theorems stop at the next obstacle. So the first forecast (50% in a week or two) is withdrawn until more fixes are measured. Next: types the kernel reduces silently ([#39](https://github.com/keithadler/tenet-zfc/pull/39)), then conversions, time-outs and choice in theorems.
+- [ ] **More bridges**, so results land in `set.mm`'s own vocabulary: `Nat.mul` to `x.` (done, [#21](https://github.com/keithadler/tenet-zfc/pull/21)), order to `<_` and `<` (done, [#32](https://github.com/keithadler/tenet-zfc/pull/32)), `∣` to `||`, `Prime` to the statement in `infpn`; `Int` to `ZZ`.
 - [ ] **Plain ZFC for theorems in general** (milestone 4, below): `ccatlen` first, then the headline theorem, with no universe hypothesis.
 - [ ] **Finish `Init`'s definitions**: all 40 chunks now finish on GitHub's runners, and **17,329 of 17,590 definitions (98.5%)** translate with verified equations ([docs/milestone3.md](docs/milestone3.md#the-init-wide-run-on-githubs-runners-built)). Left: 256 definitions too large for mmj2's check, 11 witness `$d` refusals, and `Acc.rec`'s computation rule.
 
@@ -198,7 +200,7 @@ The translator unfolds Lean's own definitions of ℕ, ℝ, ζ and the rest into 
 - **Never supported:** `sorry`, and `native_decide`, which trusts compiled code rather than a kernel proof. A project's own axioms can only appear as hypotheses.
 - **Mostly not plain ZFC, yet:** by default every output assumes a tower of Grothendieck universes, `U e. lean.-tower`, as a hypothesis. No axiom is added, and each output's header says how many levels it uses, which declarations need them, and whether any theorem is plain ZFC. What uses `Classical.choice` also takes a well-ordering `W` of the tower's union as a parameter, and a theorem that needs choice to pick an element has the hypothesis `W We U. ran U`, which ZFC can discharge (`weth`). With `--lowered` (milestone 4, [docs/milestone4.md](docs/milestone4.md)) the tower is made of weak universes, which ZFC proves exist, and the hypothesis is discharged: so far for `nat-bridge`, where `Nat.add_zero` comes out as `|- ( A e. NN0 -> ( A + 0 ) = A )`, checked by `scripts/check-axioms` to use no `ax-groth`. Recursive types with parameters (`List α`), unions over type families, and statements over all types aren't lowered yet. Theorems whose proofs genuinely need a universe will stay "ZFC plus universes".
 - **Refused, with a reason:** what the model doesn't cover yet is reported per declaration, never translated approximately. Examples: an inductive proposition with a data field that eliminates into data; a proposition with several constructors that eliminates into any sort; universe levels above 4.
-- **Not measured yet:** how much of Lean core's *theorems* go through. The 80% figure is definitions.
+- **Most of Lean core's theorems don't go through yet:** 18% of `Init`'s 45,588 do (8,287, of which 6,646 are checked by all three checkers so far). The 98.5% and 80% figures are definitions. How fast the rest will come is not known: the first blocker fix, measured, gained half a point.
 - **Impractical:** computation-heavy proofs such as large `decide` calls translate in principle, but each kernel evaluation step becomes explicit proof steps.
 - **Not readable:** the outputs are machine-checked certificates, not mathematics to read.
 
@@ -261,11 +263,13 @@ tenet-zfc run: tests/fixtures/Example.lean -> example-out
   Color.next   definition   proved      definitions.mm (through the model)
   Color.rec    recursor     proved      definitions.mm (through the model)
   Color.red    constructor  proved      definitions.mm (through the model)
-  twice        definition   proved      definitions.mm (through the model)
+  twice        definition   proved      definitions.mm (through the model)  at twice.{0} only
   two_add_two  theorem      proved      trace-theorems.mm (from its trace)  |- ( 2 + 2 ) = 4
 
   8 proved, 0 refused, 0 failed. Outputs, logs and report.json are in example-out.
   proved: translated, and its output passed metamath-exe, mmverify.py and mmj2's definitionCheck against ~/mm/setmm/set.mm.
+  at … only: 1 universe-polymorphic, translated at the one universe instance shown, not at every level.
+    Unless the name gives levels, a parameter is at level 0: for a Sort u parameter, that is Prop.
 ```
 
 What each step does:
@@ -274,7 +278,7 @@ What each step does:
 2. **Trace.** When Tenet is found, it re-checks the theorems and records its derivations; `tenet-zfc` replays them without Tenet.
 3. **Translate.** Theorems the milestone 2 translator covers are proved from their traces, as statements in `set.mm`'s own vocabulary. Other theorems go through the model (`tenet-zfc theorem`), each under a time limit (`--timeout`, 30 minutes by default). Everything else goes through `define`: for a definition, its definitional equation is proved; for an inductive type, its constructors' computation rules. The model is the tower of universes by default, and each output's header states what it assumes; `--single-universe` picks the one-universe model.
 4. **Verify.** Every output must pass metamath-exe, mmverify.py and mmj2's definitionCheck. The verifiers check the proofs the output adds, as `scripts/verify-all` does; `set.mm`'s own proofs are checked once, apart (CI checks `set.mm` itself with both).
-5. **Report.** Each declaration is **proved** (translated, and the output passed all three checks), **refused** (outside what the translator covers, with the reason), or **failed** (a checker rejected the output, or the translator crashed: a bug to report). `report.json`, the outputs and every tool's log are in the `--out` directory. The exit status is 0 only when every declaration was proved (with `--no-verify`, translated).
+5. **Report.** Each declaration is **proved** (translated, and the output passed all three checks), **refused** (outside what the translator covers, with the reason), or **failed** (a checker rejected the output, or the translator crashed: a bug to report). A universe-polymorphic declaration is translated at one instance, and the report names it: `twice` is proved as `twice.{0}`, where its `α : Sort u_1` is a proposition, not at every level. `report.json`, the outputs and every tool's log are in the `--out` directory. The exit status is 0 only when every declaration was proved (with `--no-verify`, translated).
 
 For a module in a Lake project, run it under `lake env` so that `LEAN_PATH` reaches the project's `.olean` files: `lake env tenet-zfc run MyProject.Basic`. An existing export works too: `tenet-zfc run export.ndjson --decl Nat.add`.
 

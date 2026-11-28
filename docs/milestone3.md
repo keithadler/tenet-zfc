@@ -442,6 +442,18 @@ A literal is then `( ( lean.String.ofList ` u ) ` … )` over one `-cons` per ch
 - An axiom whose type is a proposition is a proof, so its value is `(/)`: `lean.propext = ( u e. Univ |-> (/) )`. So is `Quot.ind`, and `Quot.sound` when an export has it.
 - `Classical.choice` is defined relative to a well-ordering of the universe (see below).
 
+**Constants proved in the model directly, not from Lean's proofs.** Every other theorem's proof is translated from its proof term. These have no proof term to translate (Lean's axioms and the kernel's quotient), or one that the translator sets aside. For each, the model proves its statement itself: a trusted step only in the sense that the statement is Lean's and the proof is ours, and every such proof is still checked by all three checkers.
+
+| Constant | In Lean | In the model | Where |
+|---|---|---|---|
+| `propext` | axiom | `(/)`, a proof; its typing lemma proves that equivalent propositions are equal in `2o` | `ModelBuiltins.cs` (`DefineBuiltin`), `Propext.cs` (`PropextTyping`, from `lean-2oif`) |
+| `Quot.sound` | axiom | `(/)`; under its binders, the two classes are equal | `QuotTyping.cs` (`QuotSoundHolds`) |
+| `Quot`, `Quot.mk`, `Quot.lift`, `Quot.ind` | the kernel's built-in quotient | classes of the least equivalence relation containing `r`, and the lift through a representative; `Quot.ind` is `(/)` | `ModelBuiltins.cs` (`DefineQuot`), `QuotTyping.cs` |
+| `Classical.choice` | axiom | the least element in a well-ordering `W` of the universe, a parameter (below) | `ModelBuiltins.cs` (`DefineBuiltin`) |
+| `Classical.em` | a theorem, proved from `Classical.choice`, `propext` and `Quot.sound` (Diaconescu) | proved directly: a proposition is `(/)` or `1o`, so `p ∨ ¬p` holds without choice. Lean's proof term is not translated | `PropRecursors.cs` (`EmTyping`), from #28 |
+
+A theorem that uses one of these depends on the model's proof of its statement, not on Lean's. Nothing else is special-cased by name: a new entry here needs a reason in this table.
+
 **Quotients.** `Quot α r` is the set of classes of the least equivalence relation on `⟦α⟧` containing `r`. That relation is a helper constant: the intersection of every equivalence relation on `x` containing the pairs `r` relates, cut down to `x X. x`.
 
 ```
@@ -1160,6 +1172,27 @@ To reach 50%, about 14,500 more theorems have to prove; for 80%, about 28,200.
 - **80% needs nearly every category**: choice in theorems (blocker 5), recursors with indices (7), the proposition fields (9), and the long tail, each a construct of its own. **Estimate: four to six weeks.** The uncertainty is in what the theorems behind blockers 1 to 4 run into next, which only re-measuring shows.
 
 What the estimates rest on: this week's fixes moved the primes cone from 81 to 114 of 146, and `theoremall.ndjson` from 18 to 23 of 23, each time by a few constructs. The concentration above (three messages, 30% of Init) suggests the same here.
+
+### Re-measured after #33: the first forecast was too optimistic
+
+#33 fixed blocker 1. A sample of every 10th theorem, on GitHub's runners with the same 120 s budget, before and after (`init-run.yml`, runs 46111998359 and 46112000352). Only the ten shards that finished in both runs are compared, 1,200 theorems; the rest were lost to runners shut down for memory (6 of 38 jobs before, 27 of 38 after).
+
+| | Before #33 | After #33 |
+|---|---|---|
+| Proved | 243 (20.3%) | 249 (20.8%) |
+| Refused | 841 | 754 |
+| Over the time budget | 63 | 142 |
+| Errors | 53 | 55 |
+| Chunks passing all three checkers | 120 of 120 | 120 of 120 |
+
+Seven theorems gained and one lost (`Nat.shiftLeft_add`, now over the budget).
+
+- **The fix did what it was written to do.** Blocker 1's messages went from 411 of the 1,200 to 81: "no proof yet that …" 235 → 81, "not a level of the tower" 176 → 0.
+- **It bought half a point, not the 15 forecast above.** The theorems behind blocker 1 go on to the next obstacle: 178 stop at one new message, `a map over ( lean.Nat ` U ) where ( ( n e. ( lean.Nat ` U ) |-> ( lean.Nat ` U ) ) ` p ) is expected` (an expected type that is a map applied to an argument, which the kernel reduces silently), and 79 more run out of the 120 s budget.
+- **What was wrong with the forecast.** The ranking counts each theorem under the first thing that stops it. That says where theorems stop, and nothing about how many obstacles lie behind the first. "Even if only half then prove" was a guess, and the measured share is about 2% (7 of the 330 theorems that left blocker 1). A hard theorem has several obstacles in a row, and the common ones (definitions by well-founded recursion, `noConfusion`, conversions) sit behind each other.
+- **What to trust instead:** the proved count on a fixed sample, re-measured after each fix. The estimates above for 50% and 80% are not supported by this measurement and should be read as unknown until two or three more fixes have been measured the same way.
+
+The next fixes, for that message and for blocker 4's ("applying something that isn't a function": type inference had no computation rule for recursors), are in #39, with the workflow change that keeps a heavy chunk from losing a job (#40).
 
 **To reproduce:** on a fresh Ubuntu 22.04 machine with enough memory for about 160 processes (`m7a.48xlarge`: 192 vCPUs, 768 GB), run `scripts/cloud/setup.sh <commit>`, then `scripts/cloud/run.sh 160 10 120 <first chunk> <last chunk>`. Each machine writes `/workspace/results.tgz`, and `scripts/summarize-all` totals the chunks. Watch memory: chunks of 50 grew to 10 GB per process. With 160 processes of chunks of 10, a machine went as low as 22 GB available, and a guard that paused new chunks below 40 GB kept it from swapping.
 
