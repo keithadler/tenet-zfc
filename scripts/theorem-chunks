@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# theorem-all over a range of chunks on a machine with little memory (a 16 GB GitHub runner): one process per chunk,
+# a few at a time, with a guard that stops the largest translator process before the machine runs out of memory.
+#
+# usage: scripts/theorem-chunks <first> <last> <jobs> <out-dir> -- <tenet-zfc command …> theorem-all <args without --chunks>
+#
+# Why: a chunk's lemmas accumulate in its process, and two heavy chunks together can exhaust the machine. A GitHub
+# runner that runs out of memory is shut down and the whole job's results are lost (27 of 38 jobs in one sample run).
+# theorem-all already recovers from a process that ends early: chunk-NNNN.progress names the theorem in hand, and the
+# next run of the chunk records it as a crash and goes on. So each chunk is run again until it leaves its .tsv.
+#
+# A stopped process blames the theorem it was on, which may not be the one that used the memory. Every stop is
+# written to <out-dir>/memory-guard.log, so the crash records it caused can be told from real ones.
+#
+# TENET_ZFC_GUARD_MB (default 1500): stop a process when less than this much memory is available.
+set -euo pipefail
+first="$1"; last="$2"; jobs="$3"; out="$4"; shift 4
+[ "$1" = "--" ] && shift
+mkdir -p "$out"
+out="$(cd "$out" && pwd)"
+floor="${TENET_ZFC_GUARD_MB:-1500}"
+
+available_mb() {
+  if [ -r /proc/meminfo ]; then awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo
+  else echo 999999; fi   # no /proc (macOS): the guard never fires
+}
+(
+  while sleep 5; do
+    avail="$(available_mb)"
+    [ "$avail" -ge "$floor" ] && continue
+    line="$(ps -eo pid=,rss=,comm= --sort=-rss | awk '$3 == "dotnet" {print $1, int($2 / 1024); exit}')"
+    [ -n "$line" ] || continue
+    pid="${line% *}"
+    echo "$(date -u +%H:%M:%S) ${avail} MB available: stopped the largest translator process, pid $pid (${line#* } MB)" | tee -a "$out/memory-guard.log"
+    kill -9 "$pid" 2> /dev/null || true
+    sleep 15
+  done
+) &
+guard=$!
+trap 'kill "$guard" 2> /dev/null || true' EXIT
+
+one_chunk() {
+  local k name tries=0
+  k="$1"; shift
+  name="$(printf 'chunk-%04d' "$k")"
+  # Each run that ends early skips one more theorem, so a chunk is done within its size plus one runs; 60 is a bound
+  # for any chunk size in use.
+  while [ ! -f "$out/$name.tsv" ] && [ "$tries" -lt 60 ]; do
+    tries=$((tries + 1))
+    "$@" --chunks "$k" || true
+    [ -f "$out/$name.tsv" ] || echo "$name: the process ended without a result (run $tries); running the chunk again"
+  done
+  [ -f "$out/$name.tsv" ] || echo "$name: no result after $tries runs"
+}
+export -f one_chunk
+export out
+seq "$first" "$last" | xargs -P "$jobs" -I{} bash -c 'one_chunk "$@"' _ {} "$@"
