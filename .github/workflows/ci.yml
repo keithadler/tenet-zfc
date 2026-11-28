@@ -73,6 +73,10 @@ jobs:
           cc -O2 -w -o "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP"/mm/metamath-exe/src/*.c
           git clone -q https://github.com/david-a-wheeler/mmverify.py "$RUNNER_TEMP/mm/mmverify"
           git -C "$RUNNER_TEMP/mm/mmverify" checkout -q "$MMVERIFY_COMMIT"
+          mkdir -p "$RUNNER_TEMP/mm/mmj2/macros"
+          raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
+          curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
+          for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
       - name: Both verifiers accept set.mm itself
         working-directory: ${{ runner.temp }}/mm/setmm
         run: |
@@ -80,12 +84,18 @@ jobs:
           echo "$out" | tail -2
           if echo "$out" | grep -q '?Error'; then exit 1; fi
           python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" set.mm
-      - name: Tests, with emitted proofs checked by both verifiers
+      # Every checker is set here, so a test skipped for a missing checker fails the step. Only the slow
+      # TENET_ZFC_THEOREMS tests may skip (they are opt-in; the theorem steps below cover them).
+      - name: Tests, with emitted proofs checked by both verifiers and mmj2's definitionCheck
         env:
           TENET_ZFC_SETMM: ${{ runner.temp }}/mm/setmm
           TENET_ZFC_METAMATH: ${{ runner.temp }}/mm/metamath
           TENET_ZFC_MMVERIFY: ${{ runner.temp }}/mm/mmverify/mmverify.py
-        run: dotnet test tests/TenetZfc.Tests -c Release -f net10.0
+          TENET_ZFC_JAVA: java
+          TENET_ZFC_MMJ2: ${{ runner.temp }}/mm/mmj2
+        run: |
+          dotnet test tests/TenetZfc.Tests -c Release -f net10.0 --logger "trx;LogFileName=tests.trx" --results-directory "$RUNNER_TEMP/tr"
+          scripts/check-no-checker-skips "$RUNNER_TEMP/tr/tests.trx"
       - name: Emit the gate theorems and verify them
         run: |
           for g in gate lenapp; do
@@ -210,10 +220,6 @@ jobs:
           (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" quotthm.mm)
       - name: Check the translated definitions with mmj2's definitionCheck (milestone 3, step 2)
         run: |
-          mkdir -p "$RUNNER_TEMP/mm/mmj2/macros"
-          raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
-          curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
-          for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
           for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natmul natzfc listbridge thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
       # The Init-wide run (docs/milestone3.md) in miniature: define-all on a small export, in two chunks, and
       # scripts/verify-all with all three checkers. The full run on Init is too big for CI.

@@ -70,7 +70,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Contains("|-> ran ( r e. x |-> <. [ r ] ( ( ( lean.Quot.-eqv ` u ) ` x ) ` y ) , ( w ` r ) >. ) ) ) ) ) ) ) $.", d);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TheEquationsOfStringLiteralsVerify()
     {
         if (SetMm is null)
@@ -89,7 +89,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
         Check(w);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TheQuotientsAndChoicesEquationsAndRulesVerify()
     {
         if (SetMm is null)
@@ -146,7 +146,7 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Contains("Choice: Classical.choice is the least element in a well-ordering W of U. ran U, the tower's union", m.Assumptions());
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void InTheTowerTheQuotientsAndChoicesEquationsAndRulesVerify()
     {
         if (SetMm is null)

@@ -15,7 +15,7 @@ public class ProofTranslatorTests(Xunit.Abstractions.ITestOutputHelper output)
     private static string Fixture(string name) => Path.Combine(AppContext.BaseDirectory, "fixtures", name);
     private static string? SetMm => System.Environment.GetEnvironmentVariable("TENET_ZFC_SETMM");
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TheTwoInductionCasesTranslateAndVerify()
     {
         if (SetMm is null)
@@ -93,7 +93,7 @@ public class ProofTranslatorTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void ListLengthAppendIsTranslatedFromItsProofAndVerifies()
     {
         if (SetMm is null)
@@ -134,7 +134,7 @@ public class ProofTranslatorTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void AProofOfADifferentStatementIsRefused()
     {
         if (SetMm is null)
