@@ -1173,5 +1173,26 @@ To reach 50%, about 14,500 more theorems have to prove; for 80%, about 28,200.
 
 What the estimates rest on: this week's fixes moved the primes cone from 81 to 114 of 146, and `theoremall.ndjson` from 18 to 23 of 23, each time by a few constructs. The concentration above (three messages, 30% of Init) suggests the same here.
 
+### Re-measured after #33: the first forecast was too optimistic
+
+#33 fixed blocker 1. A sample of every 10th theorem, on GitHub's runners with the same 120 s budget, before and after (`init-run.yml`, runs 46111998359 and 46112000352). Only the ten shards that finished in both runs are compared, 1,200 theorems; the rest were lost to runners shut down for memory (6 of 38 jobs before, 27 of 38 after).
+
+| | Before #33 | After #33 |
+|---|---|---|
+| Proved | 243 (20.3%) | 249 (20.8%) |
+| Refused | 841 | 754 |
+| Over the time budget | 63 | 142 |
+| Errors | 53 | 55 |
+| Chunks passing all three checkers | 120 of 120 | 120 of 120 |
+
+Seven theorems gained and one lost (`Nat.shiftLeft_add`, now over the budget).
+
+- **The fix did what it was written to do.** Blocker 1's messages went from 411 of the 1,200 to 81: "no proof yet that …" 235 → 81, "not a level of the tower" 176 → 0.
+- **It bought half a point, not the 15 forecast above.** The theorems behind blocker 1 go on to the next obstacle: 178 stop at one new message, `a map over ( lean.Nat ` U ) where ( ( n e. ( lean.Nat ` U ) |-> ( lean.Nat ` U ) ) ` p ) is expected` (an expected type that is a map applied to an argument, which the kernel reduces silently), and 79 more run out of the 120 s budget.
+- **What was wrong with the forecast.** The ranking counts each theorem under the first thing that stops it. That says where theorems stop, and nothing about how many obstacles lie behind the first. "Even if only half then prove" was a guess, and the measured share is about 2% (7 of the 330 theorems that left blocker 1). A hard theorem has several obstacles in a row, and the common ones (definitions by well-founded recursion, `noConfusion`, conversions) sit behind each other.
+- **What to trust instead:** the proved count on a fixed sample, re-measured after each fix. The estimates above for 50% and 80% are not supported by this measurement and should be read as unknown until two or three more fixes have been measured the same way.
+
+The next fixes, for that message and for blocker 4's ("applying something that isn't a function": type inference had no computation rule for recursors), are in #39, with the workflow change that keeps a heavy chunk from losing a job (#40).
+
 **To reproduce:** on a fresh Ubuntu 22.04 machine with enough memory for about 160 processes (`m7a.48xlarge`: 192 vCPUs, 768 GB), run `scripts/cloud/setup.sh <commit>`, then `scripts/cloud/run.sh 160 10 120 <first chunk> <last chunk>`. Each machine writes `/workspace/results.tgz`, and `scripts/summarize-all` totals the chunks. Watch memory: chunks of 50 grew to 10 GB per process. With 160 processes of chunks of 10, a machine went as low as 22 GB available, and a guard that paused new chunks below 40 GB kept it from swapping.
 
