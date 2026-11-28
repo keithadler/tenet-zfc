@@ -29,6 +29,9 @@ on:
         type: choice
         options: [definitions, theorems]
         default: definitions
+      library_run:
+        description: For theorems, the run id of an "Init's lemma library" run whose library to cite (empty for none)
+        default: ''
       every:
         description: For theorems, every Nth theorem (1 for all)
         default: '1'
@@ -38,6 +41,7 @@ on:
 
 permissions:
   contents: read
+  actions: read   # to download a library built by library.yml
 
 env:
   SETMM_COMMIT: 6315535f37e5e58d14ece8c34ddb204926446264
@@ -152,6 +156,15 @@ jobs:
           name: init-export
           path: ${{ runner.temp }}
       - run: dotnet build src/TenetZfc.Cli -c Release -f net10.0
+      - name: Fetch the lemma library
+        if: inputs.library_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIBRARY_RUN: ${{ inputs.library_run }}
+        run: |
+          gh run download "$LIBRARY_RUN" --repo "$GITHUB_REPOSITORY" -n init-library -D "$RUNNER_TEMP/lib"
+          gunzip -c "$RUNNER_TEMP/lib/init-library.mm.gz" > "$RUNNER_TEMP/mm/setmm/init-library.mm"
+          echo "library: $(grep -c ' \$p ' "$RUNNER_TEMP/mm/setmm/init-library.mm") lemmas"
       - name: Translate chunks ${{ matrix.range }}
         env:
           RANGE: ${{ matrix.range }}
@@ -163,6 +176,7 @@ jobs:
         run: |
           gunzip "$RUNNER_TEMP/init.ndjson.gz"
           flags=""; [ "$SINGLE" = true ] && flags="--single-universe"
+          [ -f "$RUNNER_TEMP/mm/setmm/init-library.mm" ] && [ "$MODE" = theorems ] && flags="$flags --library $RUNNER_TEMP/mm/setmm/init-library.mm"
           if [ "$MODE" = theorems ]; then
             # One process per chunk, two at a time: in one process the chunk threads share a GC that stops them all,
             # and a chunk's lemmas accumulate, so small chunks in their own processes keep memory bounded
@@ -188,6 +202,7 @@ jobs:
           TENET_ZFC_MMJ2: ${{ runner.temp }}/mm/mmj2
           SHARD: ${{ matrix.shard }}
         run: |
+          [ -f "$RUNNER_TEMP/mm/setmm/init-library.mm" ] && export TENET_ZFC_LIBRARY="$RUNNER_TEMP/mm/setmm/init-library.mm"
           # A failed chunk is recorded, not fatal here: the totals job reports every failure, and fails the run.
           status=0; scripts/verify-all -j 4 "$RUNNER_TEMP/out" || status=$?
           [ "$status" -le 1 ] || exit "$status"   # 2 and above: verify-all itself couldn't run
@@ -196,7 +211,7 @@ jobs:
           mv verify-all.tsv "verify-all-$SHARD.tsv"
           [ -f verify-all.txt ] && mv verify-all.txt "verify-all-$SHARD.txt"
           [ -f define-all.txt ] && mv define-all.txt "define-all-$SHARD.txt"
-          rm -f set.mm macros
+          rm -f set.mm macros init-library.mm
       - uses: actions/upload-artifact@v4
         if: always()
         with:

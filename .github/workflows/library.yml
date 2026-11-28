@@ -1,0 +1,110 @@
+# Init's lemma library (docs/milestone3.md, "A library of lemmas"): the typing lemmas a sample of Init's theorems
+# proved again and again, each proved once here, in groups, as one .mm file that includes set.mm. The artifact,
+# init-library, is what init-run.yml's library_run input takes, so that theorem-all cites it.
+#
+# By hand from the Actions tab. A push to a branch named probe/library… runs it too, with the defaults.
+name: Init's lemma library
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Stop starting new groups after this many minutes (what is built is kept and checked)
+        default: '210'
+      layer:
+        description: Labels per process
+        default: '16'
+      budget:
+        description: Seconds for one lemma, with what it is the first to need
+        default: '600'
+      labels:
+        description: The labels to prove, in order
+        default: libraries/init-labels.txt
+  push:
+    branches: ['probe/library**']
+
+permissions:
+  contents: read
+
+env:
+  SETMM_COMMIT: 6315535f37e5e58d14ece8c34ddb204926446264
+  METAMATH_EXE_COMMIT: 580b4bd5ae6f2a0d746398b0033cddccba1b418b
+  MMVERIFY_COMMIT: 63a2aa3815cd5bf67892dbfc7f2048cbb177524c
+  MMJ2_COMMIT: c8dd05548139c7003220caedde65a7abe44a00bf
+  LEANOUT_COMMIT: 0562d84c5bad6e94f6c330754d61e51324fc905e
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      # mmj2's definitionCheck macro needs a JDK with Nashorn: Java 11, as set.mm's own CI uses.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '11'
+      - name: Fetch set.mm and the checkers
+        run: |
+          mkdir -p "$RUNNER_TEMP/mm/setmm" "$RUNNER_TEMP/mm/mmj2/macros"
+          curl -fsSL -o "$RUNNER_TEMP/mm/setmm/set.mm" "https://raw.githubusercontent.com/metamath/set.mm/$SETMM_COMMIT/set.mm"
+          git clone -q https://github.com/metamath/metamath-exe "$RUNNER_TEMP/mm/metamath-exe"
+          git -C "$RUNNER_TEMP/mm/metamath-exe" checkout -q "$METAMATH_EXE_COMMIT"
+          cc -O2 -w -o "$RUNNER_TEMP/mm/metamath" "$RUNNER_TEMP"/mm/metamath-exe/src/*.c
+          git clone -q https://github.com/david-a-wheeler/mmverify.py "$RUNNER_TEMP/mm/mmverify"
+          git -C "$RUNNER_TEMP/mm/mmverify" checkout -q "$MMVERIFY_COMMIT"
+          raw="https://raw.githubusercontent.com/digama0/mmj2/$MMJ2_COMMIT/mmj2jar"
+          curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/mmj2.jar" "$raw/mmj2.jar"
+          for m in definitionCheck init; do curl -sSfL -o "$RUNNER_TEMP/mm/mmj2/macros/$m.js" "$raw/macros/$m.js"; done
+      - name: Build leanout and export Init
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          export PATH="$HOME/.elan/bin:$PATH"
+          git clone -q https://github.com/keithadler/leanout "$RUNNER_TEMP/leanout"
+          git -C "$RUNNER_TEMP/leanout" checkout -q "$LEANOUT_COMMIT"
+          cd "$RUNNER_TEMP/leanout"
+          lake build leanout
+          .lake/build/bin/leanout Init -o "$RUNNER_TEMP/init.ndjson"
+          ls -l "$RUNNER_TEMP/init.ndjson"
+      - run: dotnet build src/TenetZfc.Cli -c Release -f net10.0
+      - name: Build the library, a group of labels per process
+        env:
+          MINUTES: ${{ inputs.minutes || '210' }}
+          LAYER: ${{ inputs.layer || '16' }}
+          BUDGET: ${{ inputs.budget || '600' }}
+          LABELS: ${{ inputs.labels || 'libraries/init-labels.txt' }}
+        run: |
+          scripts/build-library "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/init-library.mm" "$LABELS" \
+            --layer "$LAYER" --budget "$BUDGET" --minutes "$MINUTES" -- dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll
+          {
+            echo "### Init's lemma library"
+            echo '```'
+            tail -2 "$RUNNER_TEMP/mm/setmm/init-library.mm.log" || true
+            echo "lemmas: $(grep -c ' \$p ' "$RUNNER_TEMP/mm/setmm/init-library.mm"), $(($(wc -c < "$RUNNER_TEMP/mm/setmm/init-library.mm") / 1048576)) MiB"
+            echo "refused, by reason:"
+            grep ': refused: ' "$RUNNER_TEMP/mm/setmm/init-library.mm.log" | sed 's/^[^:]*: refused: //' | cut -c1-70 | sort | uniq -c | sort -rn | head -15
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RUNNER_TEMP/artifact"
+          gzip -1 -c "$RUNNER_TEMP/mm/setmm/init-library.mm" > "$RUNNER_TEMP/artifact/init-library.mm.gz"
+          cp "$RUNNER_TEMP/mm/setmm/init-library.mm.log" "$RUNNER_TEMP/artifact/"
+      # Before the checks: a library that fails one is still worth looking at.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: init-library
+          path: ${{ runner.temp }}/artifact
+          retention-days: 30
+      - name: Check the library with metamath-exe, mmverify.py and mmj2's definitionCheck
+        working-directory: ${{ runner.temp }}/mm/setmm
+        run: |
+          out=$("$RUNNER_TEMP/mm/metamath" "read init-library.mm" "verify proof lean-*" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then echo "$out" | grep -A3 '?Error' | head -20; exit 1; fi
+          echo "$out" | grep -q 'were read into the source buffer'
+          first=$(grep -m1 -o '^ *[^ ]* \$p ' init-library.mm | awk '{print $1}')
+          python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" -b "$first" init-library.mm
+          "$GITHUB_WORKSPACE/scripts/check-definitions" java "$RUNNER_TEMP/mm/mmj2" init-library.mm --long-proofs-ok

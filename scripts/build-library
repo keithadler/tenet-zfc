@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Build a library of typing lemmas (tenet-zfc library, docs/milestone3.md "A library of lemmas") from a list of
+# labels, a few at a time, each group in a process of its own that reads everything built so far.
+#
+# usage: scripts/build-library <export.ndjson> <set.mm> <library.mm> <labels-file> [options] -- <tenet-zfc command …>
+#   --layer N      labels per process (default 8)
+#   --budget S     seconds for one lemma, with what it is the first to need (default 600)
+#   --minutes M    stop starting new groups after this long (default: no limit); what is built is kept
+#
+# <library.mm> must be beside set.mm (it includes it by name), and grows as groups finish. Run again to continue:
+# labels already in the library are found there at once.
+#
+# Why groups: one process proving a whole cone holds everything it made (one sampled theorem alone reaches 12 GB).
+# A group's process ends, and the next starts from what was written. On Linux a guard stops a process before the
+# machine runs out of memory; that group is then tried one label at a time, and a label that can't be proved alone
+# is skipped and listed. The log, <library.mm>.log, has one line per label.
+set -euo pipefail
+export="$1"; setmm="$2"; lib="$3"; labels="$4"; shift 4
+layer=8; budget=600; minutes=0
+while [ "${1:-}" != "--" ]; do
+  case "$1" in
+    --layer) layer="$2"; shift 2 ;;
+    --budget) budget="$2"; shift 2 ;;
+    --minutes) minutes="$2"; shift 2 ;;
+    *) echo "scripts/build-library: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+shift
+dir="$(cd "$(dirname "$lib")" && pwd)"; lib="$dir/$(basename "$lib")"
+[ "$(cd "$(dirname "$setmm")" && pwd)" = "$dir" ] || { echo "scripts/build-library: $lib must be beside set.mm" >&2; exit 2; }
+log="$lib.log"; part="$dir/.$(basename "$lib" .mm).part.mm"; floor="${TENET_ZFC_GUARD_MB:-1500}"
+start=$SECONDS
+
+available_mb() {
+  if [ -r /proc/meminfo ]; then awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo; else echo 999999; fi
+}
+(
+  while sleep 5; do
+    [ "$(available_mb)" -ge "$floor" ] && continue
+    pid="$(ps -eo pid=,rss=,comm= --sort=-rss | awk '$3 == "dotnet" {print $1; exit}')"
+    [ -n "$pid" ] || continue
+    echo "memory guard: stopped pid $pid" >> "$log"
+    kill -9 "$pid" 2> /dev/null || true
+    sleep 15
+  done
+) &
+guard=$!
+trap 'kill "$guard" 2> /dev/null || true; wait "$guard" 2> /dev/null || true; rm -f "$part"' EXIT
+
+# One group: prove its labels on top of the library so far, then append what was written to the library.
+group() {
+  local out rc=0
+  rm -f "$part"
+  if [ -f "$lib" ]; then
+    out="$("$@" library "$export" "$setmm" "$part" "${names[@]}" --library "$lib" --budget "$budget" 2>&1)" || rc=$?
+  else
+    out="$("$@" library "$export" "$setmm" "$part" "${names[@]}" --budget "$budget" 2>&1)" || rc=$?
+  fi
+  [ -f "$part" ] || return 1   # the process ended before it wrote anything (stopped for memory, or crashed)
+  printf '%s\n' "$out" | grep -E '^lean-ty-[^ ]*: ' >> "$log" || true
+  if [ -f "$lib" ]; then
+    # The group's file includes the library; the library takes its statements, without that line.
+    grep -v -E '^\$\[ [^ ]* \$\]$' "$part" >> "$lib"
+  else
+    mv "$part" "$lib"
+  fi
+  rm -f "$part"
+}
+
+all=()
+while IFS= read -r line; do
+  case "$line" in ''|'#'*) ;; *) all+=("$line") ;; esac
+done < "$labels"
+total=${#all[@]}; groups=0
+for ((i = 0; i < total; i += layer)); do
+  if [ "$minutes" -gt 0 ] && [ $((SECONDS - start)) -ge $((minutes * 60)) ]; then
+    echo "stopped after $(((SECONDS - start) / 60)) minutes, at label $i of $total" | tee -a "$log"
+    break
+  fi
+  names=("${all[@]:i:layer}")
+  if ! group "$@"; then
+    echo "group at label $i ended early; trying its labels one at a time" >> "$log"
+    whole=("${names[@]}")
+    for one in "${whole[@]}"; do
+      names=("$one")
+      group "$@" || echo "$one: skipped: its process ended without a result" >> "$log"
+    done
+  fi
+  groups=$((groups + 1))
+  [ $((groups % 5)) -eq 0 ] && echo "$((i + layer)) of $total labels, $(grep -c ' \$p ' "$lib" 2> /dev/null || echo 0) lemmas, $(($(wc -c < "$lib") / 1048576)) MiB, $(((SECONDS - start) / 60)) min"
+done
+echo "library $(basename "$lib"): $(grep -c ' \$p ' "$lib") lemmas, $(($(wc -c < "$lib") / 1048576)) MiB, $(((SECONDS - start) / 60)) minutes"
+echo "labels: $(grep -c -E ': lean-ty-' "$log" || true) proved or found, $(grep -c ': refused: ' "$log" || true) refused, $(grep -c ': timeout: ' "$log" || true) over the budget, $(grep -c ': failed: ' "$log" || true) failed, $(grep -c ': skipped: ' "$log" || true) skipped"
