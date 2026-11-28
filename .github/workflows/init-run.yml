@@ -166,11 +166,13 @@ jobs:
           if [ "$MODE" = theorems ]; then
             # One process per chunk, two at a time: in one process the chunk threads share a GC that stops them all,
             # and a chunk's lemmas accumulate, so small chunks in their own processes keep memory bounded
-            # (docs/milestone3.md, "Running it on a 16 GB machine").
+            # (docs/milestone3.md, "Running it on a 16 GB machine"). scripts/theorem-chunks also stops a process
+            # before the runner runs out of memory, which would end the job and lose all of its results, and runs a
+            # chunk again until it leaves a result.
             first=${RANGE%-*}; last=${RANGE#*-}
-            seq "$first" "$last" | xargs -P 2 -I{} dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll theorem-all $flags \
-              "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/out" --every "$EVERY" --chunk-size "$CHUNK_SIZE" --chunks {} --budget "$BUDGET" \
-              | grep -E '^chunk-|Unhandled|overflow' || true
+            scripts/theorem-chunks "$first" "$last" 2 "$RUNNER_TEMP/out" -- dotnet src/TenetZfc.Cli/bin/Release/net10.0/tenet-zfc.dll theorem-all $flags \
+              "$RUNNER_TEMP/init.ndjson" "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/out" --every "$EVERY" --chunk-size "$CHUNK_SIZE" --budget "$BUDGET" \
+              | grep -E '^chunk-|Unhandled|overflow|available' || true
             ls "$RUNNER_TEMP"/out/chunk-*.mm > /dev/null
             exit 0
           fi
