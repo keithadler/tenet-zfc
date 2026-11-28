@@ -1194,5 +1194,47 @@ Seven theorems gained and one lost (`Nat.shiftLeft_add`, now over the budget).
 
 The next fixes, for that message and for blocker 4's ("applying something that isn't a function": type inference had no computation rule for recursors), are in #39, with the workflow change that keeps a heavy chunk from losing a job (#40).
 
+### After #33 and #39 the cost is the blocker: every chunk proves the same lemmas
+
+A second sample (`init-run.yml` on `main` with #39 and #40, run 46127004285; every 10th theorem, 120 s, chunks of 10) against the sample from before #33, on the 14 shards both have, 1,680 theorems (interim: the run was still going when this was written):
+
+| | Before #33 | With #33 and #39 |
+|---|---|---|
+| Proved | 314 | 327 |
+| Refused | 1,218 | 684 |
+| Over the time budget | 104 | 315 |
+| Process stopped for memory | 0 (those jobs were lost) | 320 |
+| Errors | 44 | 34 |
+| Chunks passing all three checkers | 168 of 168 | 168 of 168 |
+
+Refusals nearly halved, and almost all of the theorems freed run out of time or memory instead. The reason is in the outputs:
+
+- **4,221 distinct lemmas were proved 63,445 times** in the 168 chunks. `lean-ty-Nat.le_trans` is proved in 145 of them; an 89-million-step lemma, `lean-ty-Nat.eq_of_beq_eq_true._f`, in 94.
+- **Typing lemmas are 96% of all proof bytes.** A typing lemma of a theorem is that theorem proved through the model, so a theorem's cost is its whole cone, proved again in every chunk that touches it. One sampled theorem, `Rat.natCast_ofNat`, proves 183 lemmas, 192 million flat steps, before its own proof.
+- **Proving each lemma once would cut the outputs to 9%** (193 MB of compressed proofs instead of 2,110 MB). The top 50 lemmas are 70% of the bytes, the top 281 are 90%.
+- **Statements don't depend on the chunk**: all 1,635 typing lemmas proved in more than one chunk have byte-identical statements everywhere. The exceptions are the numbered variants (`lean-iota-…-sN`, 79 labels, a per-process counter) and 4 definitions of 2,871, which name one instance two ways (`lean.dite.{1}` in 40 chunks, `lean.dite` in 4): a bug of its own.
+
+### A library of lemmas (built)
+
+`Init` is a library, and `theorem-all` treated every chunk as a world of its own. A **library** is a `.mm` file of typing lemmas, each proved once, that includes `set.mm`; a run given `--library` reads it after `set.mm`, cites its lemmas, and writes an output that includes the library by name, as outputs otherwise include `set.mm`.
+
+```bash
+# Prove the typing lemmas of these constants, once. Named as theorem names them, or by a lemma's label, or in @file.
+tenet-zfc library export.ndjson set.mm lib1.mm Nat.succ_add 'Eq.{1}' lean-ty-Nat.add_zero
+# A second layer, built on the first: lib2.mm includes lib1.mm, which includes set.mm.
+tenet-zfc library export.ndjson set.mm lib2.mm Nat.add_comm --library lib1.mm
+# Theorems that cite them. theorem-all takes --library too.
+tenet-zfc theorem export.ndjson set.mm out.mm Nat.add_assoc Nat.add_left_comm --library lib2.mm
+```
+
+- **Nothing in the translator switches mode.** Whatever the database already holds is cited instead of written: a typing lemma is found by its label before it is proved (`ConstTyLemmaCore`), a definition or a variable declaration is not written twice (`Emit`, `EmitRaw`, `Declare`), and any other lemma that turns out to be there is dropped after it is proved (`EmitLemma`).
+- **A library that disagrees is refused, by name.** If the library's lemma or definition reads differently from the one this run would write, the theorem that needs it is refused (`the library's lean-ty-Nat.succ_add states something else than Nat.succ_add's type here`). Lemmas proved against one definition don't hold of another, and nothing is patched up.
+- **The checkers see the whole chain.** metamath-exe, mmverify.py and mmj2 follow the includes, so an output is checked together with its libraries and `set.mm`. A library is trusted no more than any other output.
+- **Layers** are how a library is built without one process holding everything: each layer is a process of its own that reads the layers before it.
+
+On the starter fixture: `Nat.add_comm`, `Nat.add_assoc` and `Nat.add_left_comm` write 6 proofs against a two-layer library and cite 29 typing lemmas, where `Nat.add_comm` and `Nat.add_assoc` alone wrote 75 proofs without one. All three files pass all three checkers, in CI.
+
+**Not built yet:** Init's own library. The plan is the lemmas above by weight, in layers on GitHub's runners, then `theorem-all --library` on the same sample; and after that, all of `Init` in dependency order, so that a theorem whose dependency is refused is refused at once. The assumptions header of an output that cites a library covers what that output itself uses, not what the library used.
+
 **To reproduce:** on a fresh Ubuntu 22.04 machine with enough memory for about 160 processes (`m7a.48xlarge`: 192 vCPUs, 768 GB), run `scripts/cloud/setup.sh <commit>`, then `scripts/cloud/run.sh 160 10 120 <first chunk> <last chunk>`. Each machine writes `/workspace/results.tgz`, and `scripts/summarize-all` totals the chunks. Watch memory: chunks of 50 grew to 10 GB per process. With 160 processes of chunks of 10, a machine went as low as 22 GB available, and a guard that paused new chunks below 40 GB kept it from swapping.
 
