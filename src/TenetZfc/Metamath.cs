@@ -63,6 +63,42 @@ public sealed class Database
         return db;
     }
 
+    /// <summary>
+    /// The file and the files it includes, the innermost first: set.mm, then a library of lemmas written against it,
+    /// then one written against that. Each of tenet-zfc's outputs includes one file by name, from its own directory.
+    /// </summary>
+    public static List<string> IncludeChain(string path)
+    {
+        var chain = new List<string>();
+        for (string? p = Path.GetFullPath(path); p is not null;)
+        {
+            if (chain.Contains(p))
+            {
+                throw new InvalidDataException($"{p} includes itself");
+            }
+            chain.Insert(0, p);
+            // The include comes before any statement, in the first lines; set.mm has none.
+            using var reader = new StreamReader(p);
+            string head = string.Join('\n', Enumerable.Range(0, 200).Select(_ => reader.ReadLine()).TakeWhile(l => l is not null));
+            // Outside comments: set.mm's own header describes the include statement in one.
+            head = System.Text.RegularExpressions.Regex.Replace(head, @"(?s)\$\(.*?(\$\)|$)", " ");
+            var m = System.Text.RegularExpressions.Regex.Match(head, @"(?m)^\s*\$\[ (\S+) \$\]");
+            p = m.Success ? Path.Combine(Path.GetDirectoryName(p)!, m.Groups[1].Value) : null;
+        }
+        return chain;
+    }
+
+    /// <summary>Read a file with what it includes (<see cref="IncludeChain"/>): set.mm alone, or set.mm and a library.</summary>
+    public static Database ReadChain(string path)
+    {
+        var db = new Database();
+        foreach (string p in IncludeChain(path))
+        {
+            db.Parse(Tokens(File.ReadAllText(p)));
+        }
+        return db;
+    }
+
     /// <summary>Read more statements into the database, as if they followed what it has read: the translator's own definitions.</summary>
     public void Extend(string text) => Parse(Tokens(text));
 
