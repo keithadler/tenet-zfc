@@ -288,17 +288,20 @@ if (args.Length >= 5 && args[0] == "library")
     TenetZfc.Environment lenv = Reader.ReadExport(lt, args[1]);
     var lpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.ReadChain(library ?? args[2]));
     var ltr = new TheoremTranslator(lt, lenv, lpr);
+    // What the library below already has, so that a lemma found there is reported as such whether this run asked for
+    // it first or met it while proving another.
+    var below = lpr.Database.Statements.Keys.Where(k => k.StartsWith("lean-ty-", StringComparison.Ordinal)).ToHashSet();
     var wanted = args[4..].SelectMany(a => a.StartsWith('@') ? File.ReadAllLines(a[1..]).Select(l => l.Trim()).Where(l => l != "" && !l.StartsWith('#')) : [a]).ToList();
     int lproved = 0, lcited = 0;
     foreach (string given in wanted)
     {
         var lsw = Stopwatch.StartNew();
-        int citedBefore = ltr.LibraryLemmas, lemmasBefore = ltr.LemmaSteps.Count;
+        int lemmasBefore = ltr.LemmaSteps.Count;
         lpr.Deadline = DateTime.UtcNow.AddSeconds(lbudget);
         try
         {
             string label = ltr.TypeConstant(given);
-            bool cited = ltr.LemmaSteps.Count == lemmasBefore && ltr.LibraryLemmas > citedBefore;
+            bool cited = below.Contains(label);
             if (cited) lcited++; else lproved++;
             Console.WriteLine($"{given}: {label} ({(cited ? "already in the library" : $"{ltr.LemmaSteps.Count - lemmasBefore} new lemmas")}, {lsw.Elapsed.TotalSeconds:F1}s)");
         }
