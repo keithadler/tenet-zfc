@@ -1594,6 +1594,11 @@ public sealed partial class Model
         Proof p;
         switch (ci.Kind)
         {
+            case ConstKind.Theorem when BaseName(n) == "funext":
+                // In the model directly, as propext is: functions of the model are ZFC functions, and two with the
+                // same values are equal (QuotTyping.cs). Lean's own proof goes through Quot.sound and Quot.liftOn.
+                p = IntroPiProp(c, ci.Type, (d, body) => FunextHolds(d, body));
+                break;
             case ConstKind.Definition or ConstKind.Theorem or ConstKind.Opaque when (ci.Value ?? ci.OpaqueValue) is Expr v:
                 {
                     Proof inV = Check(c, v, ci.Type, ty);

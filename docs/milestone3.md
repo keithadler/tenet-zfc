@@ -451,6 +451,7 @@ A literal is then `( ( lean.String.ofList ` u ) ` … )` over one `-cons` per ch
 | `Quot`, `Quot.mk`, `Quot.lift`, `Quot.ind` | the kernel's built-in quotient | classes of the least equivalence relation containing `r`, and the lift through a representative; `Quot.ind` is `(/)` | `ModelBuiltins.cs` (`DefineQuot`), `QuotTyping.cs` |
 | `Classical.choice` | axiom | the least element in a well-ordering `W` of the universe, a parameter (below) | `ModelBuiltins.cs` (`DefineBuiltin`) |
 | `Classical.em` | a theorem, proved from `Classical.choice`, `propext` and `Quot.sound` (Diaconescu) | proved directly: a proposition is `(/)` or `1o`, so `p ∨ ¬p` holds without choice. Lean's proof term is not translated | `PropRecursors.cs` (`EmTyping`), from #28 |
+| `funext` | a theorem, proved through the quotient (`Quot.sound`, `Quot.liftOn`) | proved directly: the model's functions are ZFC functions on `⟦α⟧`, so two with equal values are equal (`eqfnfvd`). Lean's proof term is not translated; one conversion in it (an η step after `Quot.lift`'s computation rule) is beyond the translator | `QuotTyping.cs` (`FunextHolds`) |
 
 A theorem that uses one of these depends on the model's proof of its statement, not on Lean's. Nothing else is special-cased by name: a new entry here needs a reason in this table.
 

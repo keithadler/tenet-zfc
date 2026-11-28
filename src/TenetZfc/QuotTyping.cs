@@ -133,6 +133,100 @@ public sealed partial class Model
         return Lhs(eqEq) == goalTy ? r : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", "(/)"), ("B", Lhs(eqEq)), ("C", goalTy)), r, AlphaIn(d.Ph, Lhs(eqEq), goalTy));
     }
 
+    /// <summary>
+    /// ( d.Ph -> (/) e. ⟦Eq (∀ x, β x) f g⟧ ) under funext's binders (IntroPiProp), from its hypothesis ∀ x, f x = g x.
+    /// The model's functions are ZFC functions on ⟦α⟧, so the two are equal when their values are (eqfnfvd). Lean's
+    /// own proof of funext goes through Quot.sound and Quot.liftOn; the statement is the same, and here it needs
+    /// neither. Where β is a family of propositions both sides are proofs, (/), and equal outright.
+    /// </summary>
+    private Proof FunextHolds(PCtx d, Expr body)
+    {
+        string goalTy = TrIn(d, body);
+        if (Ops.Spine(_typing.Whnf(body), out List<Expr> ea) is not Const eqc || ea.Count != 3)
+        {
+            throw new Refused($"funext's statement isn't an equation: {goalTy}");
+        }
+        var texts = ea.Select(e => TrIn(d, e)).ToList();
+        (Proof eqEq, _, _) = Unfold(d.Ph, Token(eqc.Name)!, texts, (i, dom) => Check(d, ea[i], InferIn(d, ea[i]), dom));
+        string ite = Rhs(eqEq);
+        SyntaxTree n = pr.Parse("class", ite.Split(' '))!;
+        if (n.Rule.Label != "cif")
+        {
+            throw new Refused($"{eqc.Name} doesn't unfold to a proposition: {ite}");
+        }
+        string phi = pr.Render(n.Children[0]);
+        string f = texts[1], g = texts[2];
+        Proof fg = f == g ? _d.Refl(d.Ph, f) : FunctionsEqual(d, texts[0], f, g);
+        Proof phiP = phi == $"{f} = {g}" ? fg : phi == $"{g} = {f}" ? _d.Symm(fg) : throw new Refused($"{eqc.Name}'s condition is {phi}");
+        EnsureTowerLemmas();
+        Proof inIf = _d.Syl(phiP, Bi2(ApplyId("lean-prop", S(("ph", phi)))));
+        Proof r = pr.Apply("eleqtrrd", S(("ph", d.Ph), ("A", "(/)"), ("B", ite), ("C", Lhs(eqEq))), inIf, eqEq);
+        return Lhs(eqEq) == goalTy ? r : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", "(/)"), ("B", Lhs(eqEq)), ("C", goalTy)), r, AlphaIn(d.Ph, Lhs(eqEq), goalTy));
+    }
+
+    /// <summary>
+    /// ( d.Ph -> f = g ) for two members of the function type ty, X_ z e. A B or ( B ^m A ), from a hypothesis of the
+    /// context that their values are equal at every z in A: a Π-proposition (/) e. if ( A. z e. A … , 1o , (/) ) whose
+    /// body, at z, is an equation between ( f ` z ) and ( g ` z ).
+    /// </summary>
+    private Proof FunctionsEqual(PCtx d, string ty, string f, string g)
+    {
+        SyntaxTree tn = pr.Parse("class", ty.Split(' '))!;
+        bool dep = tn.Rule.Label == "cixp";
+        if (!dep && !(tn.Rule.Label == "co" && pr.Render(tn.Children[2]) == "^m"))
+        {
+            throw new Refused($"funext at a type that isn't a function type in the model: {ty}");
+        }
+        string dom = pr.Render(tn.Children[1]);
+        Proof Fn(string h)
+        {
+            Proof mem = TryHyp(d, $"{h} e. {ty}") ?? HypAlpha(d, h, ty) ?? throw new Refused($"no hypothesis that {h} is in {ty}");
+            return _d.Syl(mem, dep
+                ? pr.Apply("ixpfn", S(("F", h), ("x", pr.Render(tn.Children[0])), ("A", dom), ("B", pr.Render(tn.Children[2]))))
+                : pr.Apply("elmapfn", S(("A", h), ("B", pr.Render(tn.Children[0])), ("C", dom))));
+        }
+        Proof fFn = Fn(f), gFn = Fn(g);
+        string z = FreshFor(d.Ph, f, g, ty, string.Join(' ', d.Binders));
+        PCtx e = EnterText(d, z, dom);
+        string fz = $"( {f} ` {z} )", gz = $"( {g} ` {z} )";
+        // The context's facts, carried into the binder's context (EnterText weakens each by the new hypothesis).
+        foreach ((Proof here, string h) in Facts(e).Reverse())
+        {
+            if (!h.StartsWith("(/) e. if ( A. ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            Proof at;
+            string psi;
+            try
+            {
+                (at, psi) = TextApplyProp(e.Ph, here, h[7..], z, dm => TryHyp(e, $"{z} e. {dm}") ?? HypAlpha(e, z, dm) ?? throw new Refused($"{z} isn't in {dm}"));
+            }
+            catch (Refused)
+            {
+                continue;
+            }
+            // psi: (/) e. ( ( ( lean.Eq ` T ) ` ( f ` z ) ) ` ( g ` z ) ), or the two the other way round.
+            if (!psi.StartsWith("(/) e. ", StringComparison.Ordinal) || ConstApp(psi[7..]) is not (Name eqn, List<string> eargs) || eargs.Count != 3
+                || !(eargs[1] == fz && eargs[2] == gz || eargs[1] == gz && eargs[2] == fz))
+            {
+                continue;
+            }
+            (Proof eqAt, _, _) = Unfold(e.Ph, Token(eqn)!, eargs, (i, dm) => TryHyp(e, $"{eargs[i]} e. {dm}") ?? HypAlpha(e, eargs[i], dm) ?? TextMem(e, eargs[i], dm));
+            SyntaxTree it = pr.Parse("class", Rhs(eqAt).Split(' '))!;
+            if (it.Rule.Label != "cif")
+            {
+                throw new Refused($"{eqn} doesn't unfold to a proposition: {Rhs(eqAt)}");
+            }
+            string cond = pr.Render(it.Children[0]);
+            Proof inIf = pr.Apply("eleqtrd", S(("ph", e.Ph), ("A", "(/)"), ("B", psi[7..]), ("C", Rhs(eqAt))), at, eqAt);
+            Proof holds = _d.Syl(inIf, Bi1(ApplyId("lean-prop", S(("ph", cond)))));
+            Proof values = cond == $"{fz} = {gz}" ? holds : cond == $"{gz} = {fz}" ? _d.Symm(holds) : throw new Refused($"{eqn}'s condition is {cond}");
+            return pr.Apply("eqfnfvd", S(("ph", d.Ph), ("F", f), ("G", g), ("A", dom), ("x", z)), fFn, gFn, values);
+        }
+        throw new Refused($"no hypothesis that {f} and {g} have the same values on {dom}");
+    }
+
     /// <summary>( d.Ph -> Quot.mk r a = Quot.mk r b ), by lean-sound-k at a, b and the hypothesis r a b.</summary>
     private Proof QuotMkEq(PCtx d, Expr ma, Expr mb)
     {
