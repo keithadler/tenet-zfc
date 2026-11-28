@@ -442,6 +442,18 @@ A literal is then `( ( lean.String.ofList ` u ) ` … )` over one `-cons` per ch
 - An axiom whose type is a proposition is a proof, so its value is `(/)`: `lean.propext = ( u e. Univ |-> (/) )`. So is `Quot.ind`, and `Quot.sound` when an export has it.
 - `Classical.choice` is defined relative to a well-ordering of the universe (see below).
 
+**Constants proved in the model directly, not from Lean's proofs.** Every other theorem's proof is translated from its proof term. These have no proof term to translate (Lean's axioms and the kernel's quotient), or one that the translator sets aside. For each, the model proves its statement itself: a trusted step only in the sense that the statement is Lean's and the proof is ours, and every such proof is still checked by all three checkers.
+
+| Constant | In Lean | In the model | Where |
+|---|---|---|---|
+| `propext` | axiom | `(/)`, a proof; its typing lemma proves that equivalent propositions are equal in `2o` | `ModelBuiltins.cs` (`DefineBuiltin`), `Propext.cs` (`PropextTyping`, from `lean-2oif`) |
+| `Quot.sound` | axiom | `(/)`; under its binders, the two classes are equal | `QuotTyping.cs` (`QuotSoundHolds`) |
+| `Quot`, `Quot.mk`, `Quot.lift`, `Quot.ind` | the kernel's built-in quotient | classes of the least equivalence relation containing `r`, and the lift through a representative; `Quot.ind` is `(/)` | `ModelBuiltins.cs` (`DefineQuot`), `QuotTyping.cs` |
+| `Classical.choice` | axiom | the least element in a well-ordering `W` of the universe, a parameter (below) | `ModelBuiltins.cs` (`DefineBuiltin`) |
+| `Classical.em` | a theorem, proved from `Classical.choice`, `propext` and `Quot.sound` (Diaconescu) | proved directly: a proposition is `(/)` or `1o`, so `p ∨ ¬p` holds without choice. Lean's proof term is not translated | `PropRecursors.cs` (`EmTyping`), from #28 |
+
+A theorem that uses one of these depends on the model's proof of its statement, not on Lean's. Nothing else is special-cased by name: a new entry here needs a reason in this table.
+
 **Quotients.** `Quot α r` is the set of classes of the least equivalence relation on `⟦α⟧` containing `r`. That relation is a helper constant: the intersection of every equivalence relation on `x` containing the pairs `r` relates, cut down to `x X. x`.
 
 ```
