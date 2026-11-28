@@ -257,11 +257,13 @@ tenet-zfc run: tests/fixtures/Example.lean -> example-out
   Color.next   definition   proved      definitions.mm (through the model)
   Color.rec    recursor     proved      definitions.mm (through the model)
   Color.red    constructor  proved      definitions.mm (through the model)
-  twice        definition   proved      definitions.mm (through the model)
+  twice        definition   proved      definitions.mm (through the model)  at twice.{0} only
   two_add_two  theorem      proved      trace-theorems.mm (from its trace)  |- ( 2 + 2 ) = 4
 
   8 proved, 0 refused, 0 failed. Outputs, logs and report.json are in example-out.
   proved: translated, and its output passed metamath-exe, mmverify.py and mmj2's definitionCheck against ~/mm/setmm/set.mm.
+  at … only: 1 universe-polymorphic, translated at the one universe instance shown, not at every level.
+    Unless the name gives levels, a parameter is at level 0: for a Sort u parameter, that is Prop.
 ```
 
 What each step does:
@@ -270,7 +272,7 @@ What each step does:
 2. **Trace.** When Tenet is found, it re-checks the theorems and records its derivations; `tenet-zfc` replays them without Tenet.
 3. **Translate.** Theorems the milestone 2 translator covers are proved from their traces, as statements in `set.mm`'s own vocabulary. Other theorems go through the model (`tenet-zfc theorem`), each under a time limit (`--timeout`, 30 minutes by default). Everything else goes through `define`: for a definition, its definitional equation is proved; for an inductive type, its constructors' computation rules. The model is the tower of universes by default, and each output's header states what it assumes; `--single-universe` picks the one-universe model.
 4. **Verify.** Every output must pass metamath-exe, mmverify.py and mmj2's definitionCheck. The verifiers check the proofs the output adds, as `scripts/verify-all` does; `set.mm`'s own proofs are checked once, apart (CI checks `set.mm` itself with both).
-5. **Report.** Each declaration is **proved** (translated, and the output passed all three checks), **refused** (outside what the translator covers, with the reason), or **failed** (a checker rejected the output, or the translator crashed: a bug to report). `report.json`, the outputs and every tool's log are in the `--out` directory. The exit status is 0 only when every declaration was proved (with `--no-verify`, translated).
+5. **Report.** Each declaration is **proved** (translated, and the output passed all three checks), **refused** (outside what the translator covers, with the reason), or **failed** (a checker rejected the output, or the translator crashed: a bug to report). A universe-polymorphic declaration is translated at one instance, and the report names it: `twice` is proved as `twice.{0}`, where its `α : Sort u_1` is a proposition, not at every level. `report.json`, the outputs and every tool's log are in the `--out` directory. The exit status is 0 only when every declaration was proved (with `--no-verify`, translated).
 
 For a module in a Lake project, run it under `lake env` so that `LEAN_PATH` reaches the project's `.olean` files: `lake env tenet-zfc run MyProject.Basic`. An existing export works too: `tenet-zfc run export.ndjson --decl Nat.add`.
 

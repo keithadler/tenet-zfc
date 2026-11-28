@@ -53,6 +53,8 @@ public static class RunCommand
         public string Route { get; set; } = "";
         public string? File { get; set; }
         public string Detail { get; set; } = "";
+        /// <summary>The universe instance translated, as c.{0,…}, when the declaration is universe-polymorphic.</summary>
+        public string? Instance { get; set; }
     }
 
     public static int Execute(string[] args)
@@ -320,6 +322,7 @@ public static class RunCommand
         foreach (Decl d in decls)
         {
             string where = d.Status is "proved" or "translated" ? $"{Path.GetFileName(d.File)} ({(d.Route == "trace" ? "from its trace" : "through the model")})" : d.Detail;
+            if (d.Status is "proved" or "translated" && d.Instance is not null) where += $"  at {d.Instance} only";
             if (d.Status is "proved" or "translated" && d.Detail != "") where += $"  {d.Detail}";
             Console.WriteLine($"  {d.Name.PadRight(w)}  {d.Kind,-11}  {d.Status,-10}  {where}");
         }
@@ -332,6 +335,12 @@ public static class RunCommand
         {
             Console.WriteLine($"  proved: translated, and its output passed metamath-exe, mmverify.py and mmj2's definitionCheck against {setmm}.");
         }
+        int atInstance = decls.Count(d => d.Status is "proved" or "translated" && d.Instance is not null);
+        if (atInstance > 0)
+        {
+            Console.WriteLine($"  at … only: {atInstance} universe-polymorphic, translated at the one universe instance shown, not at every level.");
+            Console.WriteLine("    Unless the name gives levels, a parameter is at level 0: for a Sort u parameter, that is Prop.");
+        }
         var report = new
         {
             tool = "tenet-zfc",
@@ -340,7 +349,7 @@ public static class RunCommand
             module,
             setmm,
             verified = verify,
-            declarations = decls.Select(d => new { name = d.Name, kind = d.Kind, status = d.Status, route = d.Route, file = d.File is null ? null : Path.GetFileName(d.File), detail = d.Detail }),
+            declarations = decls.Select(d => new { name = d.Name, kind = d.Kind, status = d.Status, route = d.Route, file = d.File is null ? null : Path.GetFileName(d.File), instance = d.Instance, detail = d.Detail }),
             summary = new { proved, refused, failed, translated = unverified },
         };
         File.WriteAllText(Path.Combine(outDir, "report.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }) + "\n");
@@ -368,6 +377,10 @@ public static class RunCommand
             var m = lines.Select(l => head.Match(l)).FirstOrDefault(x => x.Success);
             if (m is null) continue;
             string rest = m.Result("$'");
+            // define names the instance in the line itself; theorem adds a line "name: at name.{0}, …".
+            if (m.Groups[1].Success) d.Instance = d.Name + m.Groups[1].Value;
+            var at = lines.Select(l => System.Text.RegularExpressions.Regex.Match(l, "^" + System.Text.RegularExpressions.Regex.Escape(d.Name) + @": at (\S+?), universe parameters ")).FirstOrDefault(x => x.Success);
+            if (at is not null) d.Instance = at.Groups[1].Value;
             if (rest.StartsWith("refused: ", StringComparison.Ordinal)) { d.Status = "refused"; d.Detail = rest["refused: ".Length..]; }
             else if (rest.StartsWith("failed: ", StringComparison.Ordinal)) { d.Status = "failed"; d.Detail = $"translator error: {rest["failed: ".Length..]}"; }
             else d.Status = "translated";

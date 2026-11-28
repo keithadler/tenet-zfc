@@ -215,6 +215,12 @@ if (args.Length >= 5 && args[0] == "theorem")
             done.Add(($"lean-thm-{Model.LabelOf(tt.Of(name))}", stmt, proof, name));
             Console.WriteLine($"{name}: {stmt} ({tpr.Database.Shared.Size(proof)} proof steps, {sw1.Elapsed.TotalSeconds:F1}s)");
             Console.WriteLine($"{name}: {translator.LemmaSteps.Count - lemmasBefore} new lemmas ({translator.LemmaSteps.Values.Sum() - stepsBefore} flat steps)");
+            // A universe-polymorphic theorem is proved at one instance, every parameter at level 0 (for a Sort u
+            // parameter that is Prop): say which, so a report doesn't read it as the theorem at every level.
+            if (tenv.Find(tt.Of(name)) is { LevelParams.Length: > 0 } poly)
+            {
+                Console.WriteLine($"{name}: at {name}.{{{string.Join(",", poly.LevelParams.Select(_ => "0"))}}}, universe parameters {string.Join(", ", poly.LevelParams.Select(l => $"{l}"))} at level 0");
+            }
         }
         catch (Model.Refused e)
         {
