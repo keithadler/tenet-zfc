@@ -229,9 +229,18 @@ jobs:
           echo "$out" | tail -2
           if echo "$out" | grep -q '?Error'; then exit 1; fi
           (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" quotthm.mm)
+      # A type computed by a recursor on a constructor (Nat.noConfusion's at two successors), inferred under a lambda:
+      # refused ("applying something that isn't a function") until type inference had the recursor's computation rule.
+      - name: Prove a theorem whose type needs a recursor's computation rule, and verify
+        run: |
+          dotnet run --project src/TenetZfc.Cli -c Release -f net10.0 -- theorem tests/fixtures/iota.ndjson "$RUNNER_TEMP/mm/setmm/set.mm" "$RUNNER_TEMP/mm/setmm/iota.mm" succ_inj_lam
+          out=$(cd "$RUNNER_TEMP/mm/setmm" && "$RUNNER_TEMP/mm/metamath" "read iota.mm" "verify proof *" "exit")
+          echo "$out" | tail -2
+          if echo "$out" | grep -q '?Error'; then exit 1; fi
+          (cd "$RUNNER_TEMP/mm/setmm" && python3 -I "$RUNNER_TEMP/mm/mmverify/mmverify.py" iota.mm)
       - name: Check the translated definitions with mmj2's definitionCheck (milestone 3, step 2)
         run: |
-          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natmul natorder natzfc listbridge thm quotthm; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
+          for g in model ind props rec tree natle setvars strings axioms axioms1 mutual natbridge1 natbridge natmul natorder natzfc listbridge thm quotthm iota; do scripts/check-definitions java "$RUNNER_TEMP/mm/mmj2" "$RUNNER_TEMP/mm/setmm/$g.mm"; done
       # The Init-wide run (docs/milestone3.md) in miniature: define-all on a small export, in two chunks, and
       # scripts/verify-all with all three checkers. The full run on Init is too big for CI.
       - name: define-all and verify-all on a small export (milestone 3 at scale)

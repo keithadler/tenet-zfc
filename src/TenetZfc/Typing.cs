@@ -100,6 +100,11 @@ public sealed class Typing(Terms t, Environment env)
                         pending.Clear();
                         if (ft is not Binder { IsPi: true })
                         {
+                            if (System.Environment.GetEnvironmentVariable("TENET_DEBUG") is not null)
+                            {
+                                string shown = $"{ft}";
+                                Console.Error.WriteLine($"[debug] not a function type, at argument {i} of {head}: {(shown.Length > 900 ? shown[..900] : shown)}");
+                            }
                             throw new Stuck("applying something that isn't a function");
                         }
                     }
@@ -162,7 +167,7 @@ public sealed class Typing(Terms t, Environment env)
         return Whnf(ct) is Binder { IsPi: true } f ? f.Domain : throw new Stuck("too few fields");
     }
 
-    /// <summary>Weak head normal form by beta, delta (definitions only) and zeta. Enough to expose a Π or a sort.</summary>
+    /// <summary>Weak head normal form by beta, delta (definitions only), zeta and iota (a recursor on a constructor). Enough to expose a Π or a sort.</summary>
     public Expr Whnf(Expr e)
     {
         for (int fuel = 0; fuel < 10_000; fuel++)
@@ -191,6 +196,26 @@ public sealed class Typing(Terms t, Environment env)
                 case Const c when env.Find(c.Name) is { Kind: ConstKind.Definition, Value: Expr v } ci:
                     e = t.MkApp(_ops.InstantiateLevels(v, ci.LevelParams, c.Levels), args);
                     continue;
+                case Const c when env.Find(c.Name) is { Kind: ConstKind.Recursor, Rules.Length: > 0 } rec:
+                    {
+                        // Iota: a recursor on a constructor is its rule's right side at the parameters, motives and
+                        // minor premises, then the constructor's fields, then whatever follows the major premise.
+                        // A type computed by cases (Nat.noConfusionType on two successors) is a Π only after this.
+                        int pre = rec.NumParams + rec.NumMotives + rec.NumMinors, major = pre + rec.NumIndices;
+                        if (args.Count <= major)
+                        {
+                            return e;
+                        }
+                        Expr ctor = Ops.Spine(Whnf(args[major]), out List<Expr> cargs);
+                        if (ctor is not Const cc || rec.Rules.FirstOrDefault(r => ReferenceEquals(r.Ctor, cc.Name) || $"{r.Ctor}" == $"{cc.Name}") is not RecRule rule
+                            || cargs.Count < rule.NumFields)
+                        {
+                            return e;
+                        }
+                        Expr rhs = _ops.InstantiateLevels(rule.Rhs, rec.LevelParams, c.Levels);
+                        e = t.MkApp(t.MkApp(t.MkApp(rhs, args.Take(pre)), cargs.Skip(cargs.Count - rule.NumFields)), args.Skip(major + 1));
+                        continue;
+                    }
             }
             return e;
         }
