@@ -60,6 +60,13 @@ public sealed partial class TheoremTranslator
                 found = b;
                 levels = lv.Groups[2].Value.Split('_').Select(int.Parse).ToArray();
             }
+            // A recursor's instance is named after its type's: List.{0}.rec, so lean-ty-List.u0.rec.
+            var rc = System.Text.RegularExpressions.Regex.Match(label, @"^(.*)\.u([0-9]+(?:_[0-9]+)*)\.(rec(?:_[0-9]+)?)$");
+            if (found is null && rc.Success && _byLabel.GetValueOrDefault($"{rc.Groups[1].Value}.{rc.Groups[3].Value}") is Name r)
+            {
+                found = r;
+                levels = rc.Groups[2].Value.Split('_').Select(int.Parse).ToArray();
+            }
             return _model.TypeLemma(Instance(found ?? throw new Model.Refused($"no constant of the export has the label {label}"), levels)).Label;
         }
         var m = System.Text.RegularExpressions.Regex.Match(given, @"^(.*)\.\{([0-9]+(?:,[0-9]+)*)\}$");
@@ -77,6 +84,11 @@ public sealed partial class TheoremTranslator
         ConstInfo c = _mono.Source.Find(n)!;
         Level Lv(int k) => k == 0 ? _t.Zero : _t.Succ(Lv(k - 1));
         Level[] levels = given is null ? c.LevelParams.Select(_ => _t.Zero).ToArray() : given.Select(Lv).ToArray();
+        if (c.Kind == ConstKind.Recursor && levels.Length == c.LevelParams.Length - 1)
+        {
+            // Named by its type's levels alone: the motive's level, which comes first, stays a parameter (Monomorph).
+            levels = [_t.Zero, .. levels];
+        }
         if (levels.Length != c.LevelParams.Length)
         {
             throw new Model.Refused($"{n} has {c.LevelParams.Length} universe parameters, given {levels.Length}");
