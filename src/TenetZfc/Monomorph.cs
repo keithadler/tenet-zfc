@@ -20,12 +20,15 @@ public sealed class Monomorph
     private readonly Ops _ops;
     private readonly Dictionary<(Name, string), Name> _instances = new();
 
+    /// <summary>The environment as exported, before any instance was made.</summary>
+    public Environment Source => _src;
+
     public Monomorph(Terms t, Environment src)
     {
         _t = t;
         _src = src;
         _ops = new Ops(t);
-        Env = new Environment(src);
+        Env = new Environment(src) { InstanceOf = Instance };
     }
 
     /// <summary>The environment of instances, over the original one.</summary>

@@ -71,6 +71,13 @@ public sealed class Environment
     /// <summary>This environment's own constants, in no particular order.</summary>
     public IEnumerable<ConstInfo> All => _consts.Values;
     public ConstInfo? Find(Name n) => _consts.TryGetValue(n, out ConstInfo? c) ? c : _parent?.Find(n);
+
+    /// <summary>
+    /// For an environment of instances (Monomorph.Env): the instance of a constant at closed levels, made on demand.
+    /// The model's own references to constants by name (a string literal's List.cons and Char.ofNat) go through it,
+    /// so that they are the instances everything else uses. Null for an environment as exported.
+    /// </summary>
+    public Func<Name, Level[], Name>? InstanceOf { get; internal set; }
     internal void Add(ConstInfo c) => _consts[c.Name] = c;
 }
 

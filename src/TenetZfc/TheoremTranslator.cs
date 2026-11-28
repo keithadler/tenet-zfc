@@ -35,6 +35,55 @@ public sealed partial class TheoremTranslator
     /// <summary>The declarations and lemmas written so far, in order.</summary>
     public string Declarations => _model.Declarations;
 
+    /// <summary>The typing lemmas cited from a library instead of proved.</summary>
+    public int LibraryLemmas => _model.LibraryLemmas;
+
+    private Dictionary<string, Name>? _byLabel;
+
+    /// <summary>
+    /// Prove the typing lemma of one constant, lean-ty-c, for a library of lemmas (docs/milestone3.md). The constant is
+    /// named as Prove names a theorem (Nat.le_trans, Eq.{1}), or by the lemma's label (lean-ty-Eq.u1), which is how
+    /// a run's outputs name the lemmas worth sharing. Returns the label.
+    /// </summary>
+    public string TypeConstant(string given)
+    {
+        string name = given;
+        int[]? levels = null;
+        if (given.StartsWith("lean-ty-", StringComparison.Ordinal))
+        {
+            _byLabel ??= _mono.Source.All.GroupBy(c => Model.LabelOf(c.Name)).ToDictionary(g => g.Key, g => g.First().Name);
+            string label = given["lean-ty-".Length..];
+            var lv = System.Text.RegularExpressions.Regex.Match(label, @"^(.*)\.u([0-9]+(?:_[0-9]+)*)$");
+            Name? found = _byLabel.GetValueOrDefault(label);
+            if (found is null && lv.Success && _byLabel.GetValueOrDefault(lv.Groups[1].Value) is Name b)
+            {
+                found = b;
+                levels = lv.Groups[2].Value.Split('_').Select(int.Parse).ToArray();
+            }
+            return _model.TypeLemma(Instance(found ?? throw new Model.Refused($"no constant of the export has the label {label}"), levels)).Label;
+        }
+        var m = System.Text.RegularExpressions.Regex.Match(given, @"^(.*)\.\{([0-9]+(?:,[0-9]+)*)\}$");
+        if (m.Success)
+        {
+            name = m.Groups[1].Value;
+            levels = m.Groups[2].Value.Split(',').Select(int.Parse).ToArray();
+        }
+        ConstInfo c = _mono.Source.All.FirstOrDefault(x => $"{x.Name}" == name) ?? throw new Model.Refused($"{name} is not in the export");
+        return _model.TypeLemma(Instance(c.Name, levels)).Label;
+    }
+
+    private Name Instance(Name n, int[]? given)
+    {
+        ConstInfo c = _mono.Source.Find(n)!;
+        Level Lv(int k) => k == 0 ? _t.Zero : _t.Succ(Lv(k - 1));
+        Level[] levels = given is null ? c.LevelParams.Select(_ => _t.Zero).ToArray() : given.Select(Lv).ToArray();
+        if (levels.Length != c.LevelParams.Length)
+        {
+            throw new Model.Refused($"{n} has {c.LevelParams.Length} universe parameters, given {levels.Length}");
+        }
+        return _mono.Instance(n, levels);
+    }
+
     /// <summary>The flat size of each lemma written so far, by label.</summary>
     public IReadOnlyDictionary<string, long> LemmaSteps => _model.LemmaSteps;
 
@@ -75,6 +124,16 @@ public sealed partial class Model
     /// <summary>Write |- statement as a $p with its proof and exactly the $d conditions the proof needs; teach it to the prover.</summary>
     private void EmitLemma(string label, string comment, Proof p)
     {
+        if (pr.Database.Statements.TryGetValue(label, out Statement? have))
+        {
+            // Already there, from a library the database was read with: cited, not written again. (Typing lemmas
+            // are found before they are proved, in ConstTyLemmaCore; the other kinds are proved first and land here.)
+            if (!have.Expr.Equals(p.Proves))
+            {
+                throw new Refused($"the library's {label} states something else than this run proves");
+            }
+            return;
+        }
         SharedProofs sh = pr.Database.Shared;
         long size = sh.Size(p.Proof);
         Debug($"lemma {label}: {size} steps");
@@ -863,7 +922,12 @@ public sealed partial class Model
         Statement st = pr.Database[label];
         (string ante, string concl) = _d.Split(st.Expr);
         string ante2 = RenameApart(ante, clash, avoidText, concl), concl2 = RenameApart(concl, clash, avoidText, ante, ante2);
-        string vlabel = $"{label}-s{_variants++}";   // -s: no escaped name has it (NameEscape)
+        string vlabel;
+        do
+        {
+            vlabel = $"{label}-s{_variants++}";   // -s: no escaped name has it (NameEscape)
+        }
+        while (pr.Database.Statements.ContainsKey(vlabel));   // a library numbers its own variants from 0 too
         _variantOf[key] = vlabel;
         Proof orig = ApplyId(label, new Dictionary<string, string>());
         Proof toAnte = ante2 == ante ? pr.Apply("id", S(("ph", ante)))
@@ -1534,6 +1598,16 @@ public sealed partial class Model
 
     // ---- constants: typed once each, by a lemma ---------------------------------------------------------------
 
+    /// <summary>The typing lemmas cited from a library instead of proved.</summary>
+    public int LibraryLemmas { get; private set; }
+
+    /// <summary>lean-ty-c for a constant on its own, as a library builds it: the label and the type's text.</summary>
+    public (string Label, string Ty) TypeLemma(Name n)
+    {
+        _typing.Reduce = LeanWhnf;   // as ProveTheorem sets it: type inference reduces as the translator does
+        return ConstTyLemma(n);
+    }
+
     private readonly Dictionary<Name, (string Label, string Ty)> _constTy = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Name> _typing_ = new(ReferenceEqualityComparer.Instance);
 
@@ -1591,6 +1665,18 @@ public sealed partial class Model
             throw new Refused($"{n} depends on Classical.choice; theorems through choice aren't in the translator yet");
         }
         string ty = TrIn(c, ci.Type);
+        if (pr.Database.Statements.TryGetValue($"lean-ty-{LabelOf(n)}", out Statement? inLibrary))
+        {
+            // A library the database was read with has this lemma: cite it. This is what a library is for: a typing
+            // lemma of a theorem is that theorem proved through the model, and every chunk proved it again.
+            if ($"{inLibrary.Expr}" != $"|- ( {UHyp} -> {text} e. {ty} )")
+            {
+                throw new Refused($"the library's {inLibrary.Label} states something else than {n}'s type here");
+            }
+            LibraryLemmas++;
+            _constTy[n] = (inLibrary.Label, ty);
+            return (inLibrary.Label, ty);
+        }
         Proof p;
         switch (ci.Kind)
         {
