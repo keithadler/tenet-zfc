@@ -4,6 +4,7 @@ All notable changes to tenet-zfc. The format follows [Keep a Changelog](https://
 
 ## Unreleased
 
+- **`run` names the universe instance it proved**: a universe-polymorphic declaration is translated at one instance (every parameter at level 0 unless the name gives levels; for `Sort u`, that is `Prop`). The report used to say "proved" with no qualification; the table now says `at twice.{0} only`, the summary counts them, and `report.json` has an `instance` field. `theorem` prints the instance on a line of its own.
 - **The demo tells a crash from a rejection**: `scripts/demo`'s sabotage checks count a checker's verdict (metamath-exe's `?Error` on a file it read, mmverify.py's `MMError`) or the translator's refusal as a rejection. A checker or translator that crashes, is killed, or reports a failed proof step now fails the demo instead.
 - **Constants proved in the model directly** are listed in `docs/milestone3.md`: `propext`, `Quot.sound`, the quotient's built-ins, `Classical.choice`, and `Classical.em` (from #28).
 - **Checker-gated tests skip instead of passing**: a test that needs `set.mm` or a checker is a `[VerifierFact]`, reported as skipped with the variables it needs, where it used to return early and count as a pass. CI's test step now sets `TENET_ZFC_JAVA` and `TENET_ZFC_MMJ2` too, so the tests' mmj2 checks run there, and `scripts/check-no-checker-skips` fails the step if any test still skips for a missing checker.
