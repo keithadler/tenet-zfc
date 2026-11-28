@@ -43,7 +43,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal("", m.Declarations);   // nothing written for a refused definition
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TheDefinitionalEquationsOfIdCompAndConstVerify()
     {
         if (SetMm is null)
@@ -93,7 +93,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_JAVA", "TENET_ZFC_MMJ2")]
     public void TheTranslatedDefinitionsPassTheDefinitionCheckerAndABadOneDoesNot()
     {
         // mmj2's definitionCheck, through scripts/check-definitions. Needs TENET_ZFC_JAVA (Java 11) and TENET_ZFC_MMJ2.
@@ -149,7 +149,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Contains("if ( ( 1st ` ", decls);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TheComputationRulesOfBoolProdAndOptionVerify()
     {
         if (SetMm is null)
@@ -235,7 +235,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.True(ty.IsProposition(t.Const(t.Of("True"), []), ctx));
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TheComputationRulesOfEqAndAndVerify()
     {
         if (SetMm is null)
@@ -286,7 +286,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void SmallerRankIsWellFoundedOnAnyClass()
     {
         // The bridge lemma recursive types' recursors rest on: frr2 needs RankLt Fr A.
@@ -321,7 +321,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void NatRecursionComputesOnZeroAndSuccessorAndVerifies()
     {
         if (SetMm is null)
@@ -365,7 +365,7 @@ public class ModelTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TreeRecursionComputesOnTwoRecursiveFieldsAndVerifies()
     {
         if (SetMm is null)

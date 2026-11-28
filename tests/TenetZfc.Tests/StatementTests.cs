@@ -50,7 +50,7 @@ public class StatementTests
         Assert.Equal(r.Steps, r.Count(Verdict.Verified));
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void LengthAppendIsCcatlenAndAWrongStatementIsNot()
     {
         string? dir = System.Environment.GetEnvironmentVariable("TENET_ZFC_SETMM");

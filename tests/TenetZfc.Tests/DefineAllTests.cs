@@ -21,7 +21,7 @@ public class DefineAllTests
         Assert.True(targets.FindIndex(c => $"{c.Name}" == "Nat") < targets.FindIndex(c => $"{c.Name}" == "Nat.le"));
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void AChunkDefinesWhatItUsesAndReportsEachConstant()
     {
         if (SetMm is not string dir)

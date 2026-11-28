@@ -53,7 +53,7 @@ public class EmitTests
         return (new Emitter(t, pr, new Bridge(pr, db)), pr);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void TheGateTheoremIsEmittedAndBothVerifiersAcceptIt()
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load();
@@ -88,7 +88,7 @@ public class EmitTests
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void WithoutTheKernelsAdditionInTheTraceNothingIsEmitted()
     {
         // The emitter may only use arithmetic the kernel performed: drop the NatLitOp step and it must refuse.
@@ -104,7 +104,7 @@ public class EmitTests
         Assert.Contains("not a literal addition the kernel performed", why);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void AFalseStatementIsRefused()
     {
         (Terms t, Env env, List<DeclTrace> traces) = Load();
