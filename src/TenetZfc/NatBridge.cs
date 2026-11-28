@@ -114,6 +114,10 @@ public sealed class NatBridge
             {
                 bridge.Restate(tt, name);
             }
+            if ((restate ?? []).Contains("Nat.le_add_right"))
+            {
+                bridge.CrossCheckLeAddRight();
+            }
         }
         else
         {
@@ -870,6 +874,19 @@ public sealed class NatBridge
         }
     }
 
+    /// <summary>
+    /// Cross-check: Lean's Nat.le_add_right, restated through the bridges (lean-nn0-Nat.le_add_right), is set.mm's
+    /// nn0addge1 at A in NN0; lean-nn0-Nat.le_add_right-setmm proves the same statement from nn0addge1, so two
+    /// independent proofs meet, as Lean's List.length_append does set.mm's ccatlen.
+    /// </summary>
+    public void CrossCheckLeAddRight()
+    {
+        string h = $"( ( U e. {D} /\\ A e. NN0 ) /\\ B e. NN0 )";
+        Proof aRe = Imp(h, "nn0re", [Hyp(h, "A e. NN0")]);
+        Thm("lean-nn0-Nat.le_add_right-setmm", "The statement of lean-nn0-Nat.le_add_right, from set.mm's own nn0addge1: a second, independent proof.",
+            Imp(h, "nn0addge1", [aRe, Hyp(h, "B e. NN0")]));
+    }
+
     // ================================================================ order (tower mode)
 
     private const string LeNat = "( ( ( lean.LE.le.{0} ` U ) ` ( lean.Nat ` U ) ) ` ( lean.instLENat ` U ) )";
@@ -1042,6 +1059,7 @@ public sealed class NatBridge
         {
             binderTypes.Add(natT);
         }
+        string kind = "eq";
         (Expr L, Expr R, Expr T) Sides(IReadOnlyList<Expr> fvs)
         {
             Expr e = ty;
@@ -1054,9 +1072,16 @@ public sealed class NatBridge
                 }
                 e = ops.Instantiate(pb.Body, [fvs[i++]]);
             }
-            if (Ops.Spine(e, out List<Expr> a) is not Const { } eq || !$"{eq.Name}".StartsWith("Eq.{", StringComparison.Ordinal) || a.Count != 3)
+            Expr head = Ops.Spine(e, out List<Expr> a);
+            if (head is Const { } rel && a.Count == 4 && $"{rel.Name}" is "LE.le.{0}" or "LT.lt.{0}")
             {
-                throw new Model.Refused($"{name}: restating needs an equation, not {e}");
+                // An inequality on Nat: through lean-nat-le or lean-nat-lt (NatLeBridge).
+                kind = $"{rel.Name}" == "LE.le.{0}" ? "le" : "lt";
+                return (a[2], a[3], a[0]);
+            }
+            if (head is not Const { } eq || !$"{eq.Name}".StartsWith("Eq.{", StringComparison.Ordinal) || a.Count != 3)
+            {
+                throw new Model.Refused($"{name}: restating needs an equation or an inequality, not {e}");
             }
             return (a[1], a[2], a[0]);
         }
@@ -1070,26 +1095,41 @@ public sealed class NatBridge
         Proof hu = Hyp(ph, $"U e. {D}");
         string nfl = _k.Sides(_k.Split(ProofKit.Of(dl)).X).R, nfr = _k.Sides(_k.Split(ProofKit.Of(dr)).X).R;
 
-        // Eq is =: lean.Eq.{1} at ( N , L , R ) is if ( R = L , 1o , (/) ).
-        Name eqInst = t.Of("Eq.{1}");
-        if (!Db.Statements.ContainsKey("lean-Eq.u1-eq"))
+        Proof model;
+        if (kind != "eq")
         {
-            // With exactly the $d conditions its proof needs: the model's blanket list would keep the class variables
-            // apart, and the restatement substitutes terms that share U.
-            var (es, ep, _) = tt.Model.Equation(eqInst);
-            Add("lean-Eq.u1-eq", "The definitional equation of Eq.{1}.", es, ep, Required(ep));
+            // <= and <: the bridge at the two sides, then each side's value under F computed (breq12d).
+            string bridge = kind == "le" ? "lean-nat-le" : "lean-nat-lt", rel = kind == "le" ? "<_" : "<";
+            Proof lmI = Use("eqeltrd", dl, Mem(ph, nfl, hu));
+            Proof rmI = Use("eqeltrd", dr, Mem(ph, nfr, hu));
+            Proof iff = Imp(ph, bridge, [hu, Use("jca", lmI, rmI)]);
+            Proof holdsF = Use("mpbid", thm, iff);
+            Proof eqL = Trans(Ce(Fv("Y"), dl), FVal(ph, nfl, hu)), eqR = Trans(Ce(Fv("Y"), dr), FVal(ph, nfr, hu));
+            model = Use("mpbid", holdsF, UseS("breq12d", [("R", rel)], eqL, eqR));
         }
-        Proof lm = Use("eqeltrd", dl, Mem(ph, nfl, hu));
-        Proof rm = Use("eqeltrd", dr, Mem(ph, nfr, hu));
-        Proof tyNat = Imp(ph, "lean-ty-Nat", [hu]);
-        Proof eqv = Imp(ph, "lean-Eq.u1-eq", [Use("jca", Use("jca", Use("jca", hu, tyNat), lm), rm)]);
-        Proof holds = Rw(thm, eqv);
-        string cond = _k.Split(ProofKit.Of(holds)).X;   // (/) e. if ( R = L , 1o , (/) )
-        string rEqL = _pr.Render(ProofKit.Child(ProofKit.Child(_k.Wff(cond), "B"), "ph"));
-        Proof rl = Use("sylib", holds, UseS("lean-prop", [("ph", rEqL)]));
-        Proof nfEq = Trans(Symm(dl), Symm(rl), dr);   // ( ph -> NfL = NfR )
-        Proof fEq = Ce(Fv("Y"), nfEq);
-        Proof model = Trans(Symm(FVal(ph, nfl, hu)), fEq, FVal(ph, nfr, hu));
+        else
+        {
+            // Eq is =: lean.Eq.{1} at ( N , L , R ) is if ( R = L , 1o , (/) ).
+            Name eqInst = t.Of("Eq.{1}");
+            if (!Db.Statements.ContainsKey("lean-Eq.u1-eq"))
+            {
+                // With exactly the $d conditions its proof needs: the model's blanket list would keep the class variables
+                // apart, and the restatement substitutes terms that share U.
+                var (es, ep, _) = tt.Model.Equation(eqInst);
+                Add("lean-Eq.u1-eq", "The definitional equation of Eq.{1}.", es, ep, Required(ep));
+            }
+            Proof lm = Use("eqeltrd", dl, Mem(ph, nfl, hu));
+            Proof rm = Use("eqeltrd", dr, Mem(ph, nfr, hu));
+            Proof tyNat = Imp(ph, "lean-ty-Nat", [hu]);
+            Proof eqv = Imp(ph, "lean-Eq.u1-eq", [Use("jca", Use("jca", Use("jca", hu, tyNat), lm), rm)]);
+            Proof holds = Rw(thm, eqv);
+            string cond = _k.Split(ProofKit.Of(holds)).X;   // (/) e. if ( R = L , 1o , (/) )
+            string rEqL = _pr.Render(ProofKit.Child(ProofKit.Child(_k.Wff(cond), "B"), "ph"));
+            Proof rl = Use("sylib", holds, UseS("lean-prop", [("ph", rEqL)]));
+            Proof nfEq = Trans(Symm(dl), Symm(rl), dr);   // ( ph -> NfL = NfR )
+            Proof fEq = Ce(Fv("Y"), nfEq);
+            model = Trans(Symm(FVal(ph, nfl, hu)), fEq, FVal(ph, nfr, hu));
+        }
         Thm($"lean-nat-{lp}", $"The Lean theorem {name} in NN0, for elements of the model's Nat: through the bridge F, from its proof through the model.", model);
 
         // For A B … in NN0: substitute ( `' F ` A ), which is in the model's Nat, and F ( `' F ` A ) = A.
