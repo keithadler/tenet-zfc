@@ -105,6 +105,11 @@ public sealed class NatBridge
                 model.Define(((Const)tt.Const0("Nat.mul")).Name);
                 bridge.NatMulRules(tt);
             }
+            if (env.Find(t.Of("Nat.le.intro")) is not null && env.Find(t.Of("Nat.sub_add_cancel")) is not null)
+            {
+                // Order too (tasks2.md, task D item 1), from Lean's own Nat.le.intro and Nat.sub_add_cancel.
+                bridge.NatLeBridge(tt, env.Find(t.Of("LT.lt")) is not null && env.Find(t.Of("instLTNat")) is not null);
+            }
             foreach (string name in restate ?? [])
             {
                 bridge.Restate(tt, name);
@@ -865,6 +870,152 @@ public sealed class NatBridge
         }
     }
 
+    // ================================================================ order (tower mode)
+
+    private const string LeNat = "( ( ( lean.LE.le.{0} ` U ) ` ( lean.Nat ` U ) ) ` ( lean.instLENat ` U ) )";
+    private static string Le(string a, string b) => $"( ( {LeNat} ` {a} ) ` {b} )";
+    private static string EqNat(string l, string r) => $"( ( ( ( lean.Eq.{{1}} ` U ) ` ( lean.Nat ` U ) ) ` {l} ) ` {r} )";
+
+    /// <summary>
+    /// The order bridge (tasks2.md, task D item 1): for A and B in the model's Nat, Lean's A ≤ B holds exactly when
+    /// F A <_ F B (lean-nat-le). Both directions come from Lean's own theorems, proved through the model:
+    /// - if A ≤ B, then Nat.sub_add_cancel gives ( B - A ) + A = B in the model, so F B = F ( B - A ) + F A, and
+    ///   F ( B - A ) is in NN0 (nn0addge2);
+    /// - if F A <_ F B, then k = F B - F A is in NN0 (nn0sub2), C = F^-1 k is in the model's Nat, A + C = B because
+    ///   their values under F agree (lean-nat-natadd, pncan3, lean-nat-eq), and Nat.le.intro gives A ≤ B.
+    /// </summary>
+    public void NatLeBridge(TheoremTranslator tt, bool withLt)
+    {
+        Terms t = tt.Terms;
+        var ops = new Ops(t);
+        foreach (string name in new[] { "Nat.sub_add_cancel", "Nat.le.intro" })
+        {
+            string lp = Model.LabelOf(t.Of(name));
+            if (!Db.Statements.ContainsKey($"lean-thm-{lp}"))
+            {
+                var (ts, tp) = tt.Prove(t.Of(name));
+                Add($"lean-thm-{lp}", $"The Lean theorem {name}, proved through the model from its proof term.", ts, tp, Required(tp));
+            }
+        }
+        if (!Db.Statements.ContainsKey("lean-Eq.u1-eq"))
+        {
+            var (es, ep, _) = tt.Model.Equation(t.Of("Eq.{1}"));
+            Add("lean-Eq.u1-eq", "The definitional equation of Eq.{1}.", es, ep, Required(ep));
+        }
+
+        // Lean's HAdd and HSub at Nat, read off Nat.sub_add_cancel's conclusion ( n - m ) + m = n.
+        Expr natT = tt.Const0("Nat");
+        Expr sty = tt.Type0("Nat.sub_add_cancel");
+        Expr Body(IReadOnlyList<Expr> v)
+        {
+            Expr e = sty;
+            int i = 0;
+            while (e is Binder { IsPi: true } pb)
+            {
+                e = ops.Instantiate(pb.Body, [i < v.Count ? v[i] : v[0]]);
+                i++;
+            }
+            return e;
+        }
+        (Expr Head, List<Expr> Args) Split(Expr e) { Expr h = Ops.Spine(e, out List<Expr> a); return (h, a); }
+        Expr Rebuild(Expr e, Expr x, Expr y) { var (h, a) = Split(e); return t.MkApp(h, a.Take(a.Count - 2).Append(x).Append(y)); }
+        var (subS, subP) = tt.ProveDefEq([natT, natT], v =>
+        {
+            var (_, eq) = Split(Body(v));
+            return (eq[1], Nf(tt, eq[1]));
+        });
+        Add("lean-nat-le-subdef", "( n - m ) + m in Lean's notation, unfolded to Nat.add and Nat.sub.", subS, subP, Required(subP));
+        var (addS, addP) = tt.ProveDefEq([natT, natT], v =>
+        {
+            var (_, eq) = Split(Body(v));
+            Expr hadd = Rebuild(eq[1], v[0], v[1]);
+            return (hadd, Nf(tt, hadd));
+        });
+        Add("lean-nat-le-adddef", "n + m in Lean's notation, unfolded to Nat.add.", addS, addP, Required(addP));
+
+        string h0 = $"( U e. {D} /\\ ( A e. {Nat} /\\ B e. {Nat} ) )";
+        string fA = Fv("A"), fB = Fv("B");
+
+        // A ≤ B gives F A <_ F B.
+        Proof fwd;
+        {
+            string h = $"( {h0} /\\ (/) e. {Le("A", "B")} )";
+            Proof hu = Hyp(h, $"U e. {D}"), ha = Hyp(h, $"A e. {Nat}"), hb = Hyp(h, $"B e. {Nat}"), hle = Hyp(h, $"(/) e. {Le("A", "B")}");
+            Proof inEq = Imp(h, "lean-thm-Nat.sub_add_cancel", [Use("jca", Use("jca", Use("jca", hu, hb), ha), hle)]);
+            Proof dl = Imp(h, "lean-nat-le-subdef", [Use("jca", Use("jca", hu, hb), ha)]);
+            string lText = _k.Sides(_k.Split(ProofKit.Of(dl)).X).L, nf = _k.Sides(_k.Split(ProofKit.Of(dl)).X).R;
+            Proof lm = Use("eqeltrd", dl, Mem(h, nf, hu));
+            Proof eqv = Imp(h, "lean-Eq.u1-eq", [Use("jca", Use("jca", Use("jca", hu, Imp(h, "lean-ty-Nat", [hu])), lm), hb)]);
+            Proof holds = Rw(inEq, eqv);
+            Proof rl = Use("sylib", holds, UseS("lean-prop", [("ph", $"B = {lText}")]));
+            Proof sum = Trans(Ce(Fv("Y"), Trans(rl, dl)), FVal(h, nf, hu));                 // F B = F ( B - A ) + F A
+            SyntaxTree add = _k.Tree("class", nf.Split(' '));
+            string sTerm = _pr.Render(add.Children[1].Children[0]);
+            Proof f = Imp(h, "f1of", [Imp(h, "lean-nat-f1o", [hu])]);
+            Proof sIn = Imp(h, "ffvelcdm", [f, Mem(h, sTerm, hu)]);
+            Proof aRe = Imp(h, "nn0re", [Imp(h, "ffvelcdm", [f, ha])]);
+            Proof ge = Imp(h, "nn0addge2", [aRe, sIn]);
+            fwd = Use("ex", Use("breqtrrd", ge, sum));
+        }
+        // F A <_ F B gives A ≤ B.
+        Proof bwd;
+        {
+            string h = $"( {h0} /\\ {fA} <_ {fB} )";
+            Proof hu = Hyp(h, $"U e. {D}"), ha = Hyp(h, $"A e. {Nat}"), hb = Hyp(h, $"B e. {Nat}"), hle = Hyp(h, $"{fA} <_ {fB}");
+            Proof f1o = Imp(h, "lean-nat-f1o", [hu]);
+            Proof f = Imp(h, "f1of", [f1o]);
+            Proof aN0 = Imp(h, "ffvelcdm", [f, ha]), bN0 = Imp(h, "ffvelcdm", [f, hb]);
+            Proof kN0 = Imp(h, "nn0sub2", [aN0, bN0, hle]);
+            string k = $"( {fB} - {fA} )", c = $"( `' {F} ` {k} )";
+            Proof cIn = Imp(h, "ffvelcdm", [Imp(h, "f1of", [Imp(h, "f1ocnv", [f1o])]), kN0]);
+            Proof fc = Imp(h, "f1ocnvfv2", [f1o, kN0]);                                  // F C = k
+            string nfA = $"( ( ( lean.Nat.add ` U ) ` A ) ` {c} )";
+            Proof addF = Imp(h, "lean-nat-natadd", [hu, Use("jca", ha, cIn)]);            // F ( A + C ) = F A + F C
+            Proof pnc = Imp(h, "pncan3", [Imp(h, "lean-nat-fcn", [hu, ha]), Imp(h, "lean-nat-fcn", [hu, hb])]);
+            Proof fEq = Trans(addF, Ce($"( {fA} + Y )", fc), pnc);                          // F ( A + C ) = F B
+            Proof nfIn = Imp(h, "lean-nat-natadd-el", [hu, Use("jca", ha, cIn)]);
+            Proof iff = Imp(h, "lean-nat-eq", [hu, Use("jca", hb, nfIn)]);               // ( B = A + C <-> F B = F ( A + C ) )
+            Proof bEq = Use("mpbird", Symm(fEq), iff);
+            Proof dAdd = Imp(h, "lean-nat-le-adddef", [Use("jca", Use("jca", hu, ha), cIn)]);
+            string hadd = _k.Sides(_k.Split(ProofKit.Of(dAdd)).X).L;
+            Proof rEq = Trans(bEq, Symm(dAdd));                                            // B = A + C, in Lean's notation
+            Proof inIf = Use("sylibr", rEq, UseS("lean-prop", [("ph", $"B = {hadd}")]));
+            Proof lm = Use("eqeltrd", dAdd, nfIn);
+            Proof eqv = Imp(h, "lean-Eq.u1-eq", [Use("jca", Use("jca", Use("jca", hu, Imp(h, "lean-ty-Nat", [hu])), lm), hb)]);
+            Proof inEq = Use("eleqtrrd", inIf, eqv);
+            Proof le = Imp(h, "lean-thm-Nat.le.intro", [Use("jca", Use("jca", Use("jca", Use("jca", hu, ha), hb), cIn), inEq)]);
+            bwd = Use("ex", le);
+        }
+        Thm("lean-nat-le", "Bridge: Lean's <= on the model's Nat is <_ through F, from Lean's Nat.sub_add_cancel and Nat.le.intro.",
+            Use("impbid", fwd, bwd));
+
+        // A < B is Nat.lt A B, which is Nat.le ( succ A ) B by definition: so < through F (nn0ltp1le).
+        if (!withLt)
+        {
+            return;
+        }
+        Expr LtE(Expr a, Expr b) => t.MkApp(tt.Const0("LT.lt"), [natT, tt.Const0("instLTNat"), a, b]);
+        Expr LeE(Expr a, Expr b) => t.MkApp(tt.Const0("LE.le"), [natT, tt.Const0("instLENat"), a, b]);
+        var (ltS, ltP) = tt.ProveDefEq([natT, natT], v => (LtE(v[0], v[1]), LeE(t.App(tt.Const0("Nat.succ"), v[0]), v[1])));
+        Add("lean-nat-lt-def", "n < m on Nat is, by definition, succ n <= m.", ltS, ltP, Required(ltP));
+        {
+            string h = h0;
+            Proof hu = Hyp(h, $"U e. {D}"), ha = Hyp(h, $"A e. {Nat}"), hb = Hyp(h, $"B e. {Nat}");
+            Proof def = Imp(h, "lean-nat-lt-def", [Use("jca", Use("jca", hu, ha), hb)]);   // LT A B = LE ( succ A ) B
+            string lt = _k.Sides(_k.Split(ProofKit.Of(def)).X).L, le = _k.Sides(_k.Split(ProofKit.Of(def)).X).R;
+            Proof step1 = UseS("eleq2d", [("C", "(/)")], def);                              // ( (/) e. LT <-> (/) e. LE )
+            string sa = Succ("A");
+            Proof saIn = Imp(h, "lean-nat-succel", [hu, ha]);
+            Proof step2 = Imp(h, "lean-nat-le", [hu, Use("jca", saIn, hb)]);               // ( (/) e. LE <-> F ( succ A ) <_ F B )
+            Proof fs = Imp(h, "lean-nat-fsucc", [hu, ha]);                                 // F ( succ A ) = ( F A + 1 )
+            Proof step3 = UseS("breq1d", [("R", "<_"), ("C", fB)], fs);                   // ( F ( succ A ) <_ F B <-> ( F A + 1 ) <_ F B )
+            Proof f = Imp(h, "f1of", [Imp(h, "lean-nat-f1o", [hu])]);
+            Proof step4 = Use("bicomd", Imp(h, "nn0ltp1le", [Imp(h, "ffvelcdm", [f, ha]), Imp(h, "ffvelcdm", [f, hb])]));
+            Proof all = Use("bitrd", Use("bitrd", Use("bitrd", step1, step2), step3), step4);
+            Thm("lean-nat-lt", "Bridge: Lean's < on the model's Nat is < through F (Nat.lt is succ n <= m, then lean-nat-le and nn0ltp1le).", all);
+        }
+    }
+
     /// <summary>
     /// A Lean theorem about Nat, proved through the model and restated in set.mm's arithmetic. The theorem must be
     /// ∀ (a b … : Nat), l = r with l and r built from +, 0, literals, Nat.succ and the variables (Nat.add_zero,
@@ -990,6 +1141,8 @@ public sealed class NatBridge
             (_, "HAdd.hAdd.{0,0,0}", 6) => t.App(t.App(add, Nf(tt, a[4])), Nf(tt, a[5])),
             (_, "Nat.mul", 2) => t.App(t.App(tt.Const0("Nat.mul"), Nf(tt, a[0])), Nf(tt, a[1])),
             (_, "HMul.hMul.{0,0,0}", 6) => t.App(t.App(tt.Const0("Nat.mul"), Nf(tt, a[4])), Nf(tt, a[5])),
+            (_, "Nat.sub", 2) => t.App(t.App(tt.Const0("Nat.sub"), Nf(tt, a[0])), Nf(tt, a[1])),
+            (_, "HSub.hSub.{0,0,0}", 6) => t.App(t.App(tt.Const0("Nat.sub"), Nf(tt, a[4])), Nf(tt, a[5])),
             (_, "OfNat.ofNat.{0}", 3) when a[1] is NatLit l && l.Value <= 10 => Lit(l.Value),
             _ => throw new Model.Refused($"restating: {e} is not built from +, *, literals, Nat.succ and variables"),
         };
@@ -1015,6 +1168,14 @@ public sealed class NatBridge
             {
                 string x = _pr.Render(inner.Children[0]);
                 return Imp(ph, "lean-nat-natadd-el", [hu, Use("jca", Mem(ph, x, hu), Mem(ph, arg, hu))]);
+            }
+            if (inner.Rule.Label == "cfv" && _pr.Render(inner.Children[1]) == "( lean.Nat.sub ` U )" && Db.Statements.ContainsKey("lean-ty-Nat.sub"))
+            {
+                // Nat.sub, a map into ( ( N ^m N ) ^m N ) by its typing lemma, applied twice (elmapi, ffvelcdm).
+                string x = _pr.Render(inner.Children[0]);
+                Proof ty = Imp(ph, "lean-ty-Nat.sub", [hu]);
+                Proof s1 = Imp(ph, "ffvelcdm", [Imp(ph, "elmapi", [ty]), Mem(ph, x, hu)]);
+                return Imp(ph, "ffvelcdm", [Imp(ph, "elmapi", [s1]), Mem(ph, arg, hu)]);
             }
             if (inner.Rule.Label == "cfv" && _pr.Render(inner.Children[1]) == "( lean.Nat.mul ` U )")
             {
