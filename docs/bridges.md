@@ -152,7 +152,7 @@ The restatement reads `≤` and `<` too. Lean's own proofs come out in `NN0`:
 
 **Cross-check:** `lean-nn0-Nat.le_add_right-setmm` proves the same statement as `lean-nn0-Nat.le_add_right` from `set.mm`'s own `nn0addge1`: two independent proofs of one statement, as with `ccatlen`. CI proves all of this from `tests/fixtures/natorder.ndjson` and checks the output with all three checkers.
 
-This needs #28: `Nat.le.dest`-style witnesses and the fixes it brings. `Nat.sub` is in the bridge's vocabulary only through its typing; truncated subtraction as `set.mm` arithmetic (task D, item 2) is still to do.
+`Nat.sub` is in the bridge's vocabulary only through its typing. Truncated subtraction as `set.mm` arithmetic (task D, item 2) is still to do.
 
 ## In the one-universe model, the rules are false
 
