@@ -295,7 +295,28 @@ public sealed partial class Model
             (cur, ty) = ApplyText(d.Ph, cur, f, ty, a, aIn);
             f = $"( {f} ` {a} )";
         }
-        return ty == dom ? cur : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", f), ("B", ty), ("C", dom)), cur, AlphaIn(d.Ph, ty, dom));
+        return Retype(d, f, cur, ty, dom);
+    }
+
+    /// <summary>
+    /// ( d.Ph -> a e. dom ) from ( d.Ph -> a e. ty ): the two equal as texts, up to bound names, or once a map applied
+    /// to an argument at the head of ty is reduced (a recursor's value at a constant motive: ( ( v e. D |-> Nat ) ` q )
+    /// is Nat).
+    /// </summary>
+    private Proof Retype(PCtx d, string a, Proof inTy, string ty, string dom)
+    {
+        if (ty == dom)
+        {
+            return inTy;
+        }
+        try
+        {
+            return pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", a), ("B", ty), ("C", dom)), inTy, AlphaIn(d.Ph, ty, dom));
+        }
+        catch (Refused) when (BetaHead(d, ty) is (Proof eq, string to))
+        {
+            return Retype(d, a, pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", a), ("B", ty), ("C", to)), inTy, eq), to, dom);
+        }
     }
 
     /// <summary>
@@ -537,6 +558,11 @@ public sealed partial class Model
     {
         SyntaxTree dn = pr.Parse("class", dom.Split(' '))!;
         SyntaxTree xn = pr.Parse("class", x.Split(' '))!;
+        if (BetaHead(d, dom) is (Proof whole, string reduced))
+        {
+            // The expected type is a map applied to an argument (a constant motive at its index): reduce it first.
+            return pr.Apply("eleqtrrd", S(("ph", d.Ph), ("A", x), ("B", reduced), ("C", dom)), TextMem(d, x, reduced), whole);
+        }
         if (xn.Rule.Label != "cmpt" || dn.Rule.Label is not ("co" or "cixp"))
         {
             bool level = dom == "2o" || dn.Rule.Label == "cfv" && pr.Render(dn.Children[1]) == "U" && OrdinalIndex(pr.Render(dn.Children[0])) >= 0;
@@ -576,6 +602,12 @@ public sealed partial class Model
                 // through its constant's typing lemma, argument by argument.
                 return ConstAppMem(d, head, cargs, dom);
             }
+            // A variable of an ordinary type (o e. ( lean.Nat ` U )): by its own hypothesis, as it stands, up to bound
+            // names, or once the hypothesis's type is reduced.
+            if (!level && (TryHyp(d, $"{x} e. {dom}") ?? HypAlpha(d, x, dom) ?? HypBeta(d, x, dom)) is Proof hb)
+            {
+                return hb;
+            }
             return UnivMem(d, x, dom);
         }
         string v = pr.Render(xn.Children[0]), vd = pr.Render(xn.Children[1]), body = pr.Render(xn.Children[2]);
@@ -588,6 +620,16 @@ public sealed partial class Model
         bool dep = dn.Rule.Label == "cixp";
         string ddom = pr.Render(dn.Children[1]);
         string cod = dep ? SubstFree(pr.Render(dn.Children[2]), pr.Render(dn.Children[0]), v) : pr.Render(dn.Children[0]);
+        if (ddom != vd && BetaHead(d, ddom) is (Proof deq, string dred))
+        {
+            // The expected domain is such an application, ( ( n e. Nat |-> Nat ) ` p ) for Nat: the same map is in the
+            // type over the reduced domain, and the two types are equal (ixpeq1d, oveq2d).
+            string dom2 = dep ? $"X_ {pr.Render(dn.Children[0])} e. {dred} {pr.Render(dn.Children[2])}" : $"( {pr.Render(dn.Children[0])} ^m {dred} )";
+            Proof same = dep
+                ? pr.Apply("ixpeq1d", S(("ph", d.Ph), ("x", pr.Render(dn.Children[0])), ("A", ddom), ("B", dred), ("C", pr.Render(dn.Children[2]))), deq)
+                : pr.Apply("oveq2d", S(("ph", d.Ph), ("A", ddom), ("B", dred), ("C", pr.Render(dn.Children[0])), ("F", "^m")), deq);
+            return pr.Apply("eleqtrrd", S(("ph", d.Ph), ("A", x), ("B", dom2), ("C", dom)), TextMem(d, x, dom2), same);
+        }
         if (ddom != vd)
         {
             throw new Refused($"a map over {vd} where {ddom} is expected");
@@ -606,6 +648,68 @@ public sealed partial class Model
         Proof fn = pr.Apply("sylib", S(("ph", d.Ph), ("ps", $"A. {v} e. {vd} {body} e. {cod}"), ("ch", $"{x} : {vd} --> {cod}")), ral, fmap);
         Proof bi2 = pr.Apply("elmapd", S(("ph", d.Ph), ("A", cod), ("B", vd), ("C", x), ("V", "_V"), ("W", "_V")), Exists(d.Ph, cod), Exists(d.Ph, vd));
         return pr.Apply("mpbird", S(("ph", d.Ph), ("ps", $"{x} e. {dom}"), ("ch", $"{x} : {vd} --> {cod}")), fn, bi2);
+    }
+
+    /// <summary>
+    /// ( d.Ph -> t = t' ) for t a map applied to an argument, ( ( w e. D |-> B ) ` a ), with a shown in D: t' is B at a.
+    /// Lean's kernel reduces such a type silently (a recursor's motive at its index); the model's texts keep it until
+    /// someone asks. Null when t isn't one, or the argument can't be shown in the map's domain.
+    /// </summary>
+    private (Proof Eq, string To)? BetaHead(PCtx d, string t)
+    {
+        SyntaxTree n = pr.Parse("class", t.Split(' '))!;
+        if (n.Rule.Label != "cfv" || n.Children[1].Rule.Label != "cmpt")
+        {
+            return null;
+        }
+        SyntaxTree fn = n.Children[1];
+        string w = pr.Render(fn.Children[0]), wd = pr.Render(fn.Children[1]), body = pr.Render(fn.Children[2]);
+        string arg = pr.Render(n.Children[0]), f = pr.Render(fn);
+        Proof? argIn = TryHyp(d, $"{arg} e. {wd}") ?? HypAlpha(d, arg, wd);
+        if (argIn is null)
+        {
+            try
+            {
+                argIn = TextMem(d, arg, wd);
+            }
+            catch (Refused e)
+            {
+                if (System.Environment.GetEnvironmentVariable("TENET_DEBUG") is not null) Console.Error.WriteLine($"[debug] BetaHead: {arg} not in {wd}: {e.Message}");
+                return null;
+            }
+        }
+        Proof eq = BetaShadowed(d.Ph, pr.Apply("eqid", S(("A", f))), w, wd, body, arg, argIn.Value, f);
+        return (eq, Rhs(eq));
+    }
+
+    /// <summary>( d.Ph -> a e. dom ) from a fact a e. T whose type is a map applied to an argument that reduces to dom.</summary>
+    private Proof? HypBeta(PCtx d, string a, string dom)
+    {
+        foreach ((Proof p, string h) in Facts(d))
+        {
+            if (!h.StartsWith(a + " e. ( ( ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            string have = h[(a.Length + 4)..];
+            if (BetaHead(d, have) is not (Proof eq, string to))
+            {
+                continue;
+            }
+            Proof red = pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", a), ("B", have), ("C", to)), p, eq);
+            if (to == dom)
+            {
+                return red;
+            }
+            try
+            {
+                return pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", a), ("B", to), ("C", dom)), red, AlphaIn(d.Ph, to, dom));
+            }
+            catch (Refused)
+            {
+            }
+        }
+        return null;
     }
 
     /// <summary>( d.Ph -> a e. dom ) from a fact a e. D' with D' equal to dom up to bound names.</summary>
