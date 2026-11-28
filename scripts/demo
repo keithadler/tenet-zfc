@@ -2,7 +2,8 @@
 # The headline demo (docs/demo.md): Lean's List.length_append, translated to ZFC through tenet-zfc's model and
 # restated through the List/Word bridge as set.mm's own ccatlen; checked by metamath-exe, mmverify.py and mmj2,
 # next to set.mm's hand-written proof of the same statement. Then three sabotage checks: a corrupted proof step,
-# a changed statement (+ to x.), and a broken Lean proof. Each must be rejected.
+# a changed statement (+ to x.), and a broken Lean proof. Each must be rejected, by a checker's or the translator's
+# verdict: a checker or translator that crashes on a sabotaged input fails the demo instead of counting as a rejection.
 #
 # usage: scripts/demo [<workdir>]
 #
@@ -18,7 +19,7 @@
 #   TENET_ZFC_LEANOUT   leanout, to export List.length_append from Lean's Init yourself; without it the demo uses
 #                       tests/fixtures/library.ndjson, the same export (leanout Init, Lean 4.36.0)
 #
-# Exit status 0 when the real proof passes all three checkers and every sabotaged one is rejected.
+# Exit status 0 when the real proof passes all three checkers and every sabotaged one is rejected (not crashed on).
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -46,23 +47,35 @@ now() { python3 -c 'import time; print(time.time())'; }
 secs() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f", b - a }'; }
 size() { wc -c < "$1" | tr -d ' '; }
 banner() { printf '\n== %s\n' "$*"; }
-# metamath-exe and mmverify.py on the file's own theorems; prints one line per checker, returns 0 when both accept.
+# metamath-exe and mmverify.py on the file's own theorems; prints one line per checker. Returns 0 when both accept,
+# 1 when a checker rejects the file and neither crashed, 2 when either crashed. A rejection is the checker's own
+# verdict on the proof: metamath-exe read the file and printed ?Error; mmverify.py stopped on an MMError. Anything
+# else (killed by a signal, a missing binary, a file never read, a Python exception that isn't MMError) is a crash,
+# and a crash is not evidence that the sabotaged proof is wrong.
 proofcheck() {
-  local f="$1" first msg ok=0
+  local f="$1" first msg rc ok=0 crashed=0
   first="$(grep -m1 -E '^ *[^ ]+ +\$p' "$f" | awk '{print $1}')"
-  printf 'set scroll continuous\nread %s\nverify proof lean-*\nexit\n' "$f" | "$TENET_ZFC_METAMATH" > "$f.metamath.log" 2>&1 || true
-  if grep -q '?Error' "$f.metamath.log" || ! grep -q 'were read into the source buffer' "$f.metamath.log"; then
-    msg="$(awk '/\?Error/ && !e {e = NR} e && NR == e + 1 {match($0, /"[^"]*"/); l = substr($0, RSTART, RLENGTH)} e && /^The / {print l ": " $0; exit}' "$f.metamath.log" | cut -c1-150)"
+  rc=0
+  printf 'set scroll continuous\nread %s\nverify proof lean-*\nexit\n' "$f" | "$TENET_ZFC_METAMATH" > "$f.metamath.log" 2>&1 || rc=$?
+  if [ $rc -ge 126 ] || ! grep -q 'were read into the source buffer' "$f.metamath.log"; then
+    echo "  metamath-exe: CRASHED (exit $rc): $(grep -v '^ *$' "$f.metamath.log" | tail -1 | cut -c1-150)"; crashed=1
+  elif grep -q '?Error' "$f.metamath.log"; then
+    msg="$(awk '/\?Error/ && !e {e = NR} e && NR == e + 1 {match($0, /"[^"]*"/); l = substr($0, RSTART, RLENGTH)} e && /^The / {print l ": " $0; exit}' "$f.metamath.log" | cut -c1-150 || true)"
     echo "  metamath-exe: REJECTED: $msg"; ok=1
   else
     echo "  metamath-exe: accepted"
   fi
-  if python3 -I "$TENET_ZFC_MMVERIFY" -b "$first" "$f" > "$f.mmverify.log" 2>&1; then
+  rc=0
+  python3 -I "$TENET_ZFC_MMVERIFY" -b "$first" "$f" > "$f.mmverify.log" 2>&1 || rc=$?
+  msg="$(grep -v '^ *$' "$f.mmverify.log" | tail -1 | sed 's/\[[^]]*\]//g; s/  */ /g; s/ \././' | cut -c1-150 || true)"
+  if [ $rc -eq 0 ]; then
     echo "  mmverify.py:  accepted"
-  else
-    msg="$(grep -v '^ *$' "$f.mmverify.log" | tail -1 | sed 's/\[[^]]*\]//g; s/  */ /g; s/ \././' | cut -c1-150)"
+  elif [ $rc -eq 1 ] && echo "$msg" | grep -q 'MMError: '; then
     echo "  mmverify.py:  REJECTED: $msg"; ok=1
+  else
+    echo "  mmverify.py:  CRASHED (exit $rc): $msg"; crashed=1
   fi
+  [ $crashed -eq 1 ] && return 2
   return $ok
 }
 
@@ -128,9 +141,19 @@ sed 's/^/  /' verify.log
 echo "  ($t_verify s)"
 
 banner "5. Sabotage: each must be rejected"
+# Each sabotage must be rejected by a checker's verdict. Accepted fails the demo, and so does a crash: a checker
+# that dies on the file has not judged it.
+verdict() {   # <proofcheck's status>
+  case "$1" in
+    0) echo "  -> NOT rejected: the demo fails"; status=1 ;;
+    1) echo "  -> rejected" ;;
+    *) echo "  -> a checker crashed, which is not a rejection: the demo fails"; status=1 ;;
+  esac
+}
 reject() {   # <name> <file>
   echo "$1"
-  if proofcheck "$2"; then echo "  -> NOT rejected: the demo fails"; status=1; else echo "  -> rejected"; fi
+  local rc=0; proofcheck "$2" || rc=$?
+  verdict $rc
 }
 # (a) One step of lean-ccatlen's proof corrupted: the first letter of its compressed proof.
 python3 - demo.mm bad-step.mm <<'EOF'
@@ -178,12 +201,20 @@ lines[target] = json.dumps(objs[target], separators=(',', ':'))
 open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
 EOF
 echo "(c) List.length_append's proof term replaced by List.append_nil's"
-"${tz[@]}" theorem bad-export.ndjson set.mm bad-proof.mm List.length_append > bad-proof.out 2>&1 || true
+# The translator's verdict on a proof term it can't type is a refusal: "<name>: refused: ..." and exit status 1.
+# "<name>: failed: ..." is a proof step that didn't check (a translator bug), and any other exit is a crash; neither
+# counts as rejecting the broken proof.
+rc=0
+"${tz[@]}" theorem bad-export.ndjson set.mm bad-proof.mm List.length_append > bad-proof.out 2>&1 || rc=$?
 if grep -q '^List.length_append: |-' bad-proof.out; then
-  if proofcheck bad-proof.mm; then echo "  -> NOT rejected: the demo fails"; status=1; else echo "  -> rejected by the checkers"; fi
+  rc=0; proofcheck bad-proof.mm || rc=$?
+  verdict $rc
+elif [ $rc -eq 1 ] && grep -q '^List.length_append: refused: ' bad-proof.out; then
+  echo "  tenet-zfc: $(grep -m1 '^List.length_append: refused: ' bad-proof.out | cut -c1-160)"
+  echo "  -> rejected by the translator: no proof is produced, so there is nothing for the checkers to accept"
 else
-  echo "  tenet-zfc: $(grep -m1 -E 'refused|Exception' bad-proof.out | cut -c1-160)"
-  echo "  -> rejected: no proof is produced, so there is nothing for the checkers to accept"
+  echo "  tenet-zfc: CRASHED (exit $rc): $(grep -v '^ *$' bad-proof.out | grep -m1 -E 'failed:|Exception|error' || grep -v '^ *$' bad-proof.out | tail -1 | cut -c1-160)"
+  echo "  -> the translator crashed, which is not a rejection: the demo fails"; status=1
 fi
 
 banner "Summary"
