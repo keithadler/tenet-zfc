@@ -4,6 +4,10 @@ The infinitude of primes, in core Lean with no mathlib: the candidate headline t
 Written for the translator. Everything is stated over `Nat` with core's `∣`, the recursion is structural, and the
 proofs are plain terms and `induction`/`cases`: no `omega`, `decide` or `simp`, so the proof terms stay small and
 cite only a few of core's lemmas. `Prime` has the shape of the statement in set.mm's own `infpn`.
+
+Classical reasoning is `Classical.em` alone. Core's `Classical.not_forall` and `Classical.not_imp` go through
+`Decidable` instances built from `Classical.choice`, which is choice used as data; the two facts needed are proved
+here from the excluded middle instead (`not_forall`, `not_imp`).
 -/
 namespace Headline
 
@@ -14,6 +18,17 @@ def Prime (p : Nat) : Prop := 2 ≤ p ∧ ∀ m : Nat, m ∣ p → m = 1 ∨ m =
 def fact : Nat → Nat
   | 0 => 1
   | n + 1 => (n + 1) * fact n
+
+theorem fact_succ (n : Nat) : fact (n + 1) = (n + 1) * fact n := rfl
+
+/-- If not every number has `P`, some number doesn't: from the excluded middle alone. -/
+theorem not_forall {P : Nat → Prop} (h : ¬ ∀ m, P m) : ∃ m, ¬ P m :=
+  (Classical.em (∃ m, ¬ P m)).elim id
+    (fun hne => absurd (fun m => (Classical.em (P m)).elim id (fun hn => absurd ⟨m, hn⟩ hne)) h)
+
+/-- If `a` doesn't imply `b`, then `a` holds and `b` doesn't: from the excluded middle alone. -/
+theorem not_imp {a b : Prop} (h : ¬ (a → b)) : a ∧ ¬ b :=
+  ⟨(Classical.em a).elim id (fun na => absurd (fun ha => absurd ha na) h), fun hb => h (fun _ => hb)⟩
 
 theorem fact_pos (n : Nat) : 0 < fact n := by
   induction n with
@@ -26,9 +41,10 @@ theorem dvd_fact (n : Nat) : ∀ m : Nat, 0 < m → m ≤ n → m ∣ fact n := 
   | zero => exact fun m hm h => absurd hm (Nat.not_lt.mpr h)
   | succ n ih =>
     intro m hm h
+    rw [fact_succ]
     cases Nat.lt_or_eq_of_le h with
     | inl hlt => exact Nat.dvd_trans (ih m hm (Nat.le_of_lt_succ hlt)) (Nat.dvd_mul_left (fact n) (n + 1))
-    | inr heq => exact heq.symm ▸ Nat.dvd_mul_right (n + 1) (fact n)
+    | inr heq => rw [heq]; exact Nat.dvd_mul_right (n + 1) (fact n)
 
 /-- Every number from 2 up has a prime factor. Induction on a bound `k`, so the recursion is structural. -/
 theorem exists_prime_factor_le (k : Nat) : ∀ n : Nat, n ≤ k → 2 ≤ n → ∃ p, Prime p ∧ p ∣ n := by
@@ -40,9 +56,9 @@ theorem exists_prime_factor_le (k : Nat) : ∀ n : Nat, n ≤ k → 2 ≤ n → 
     | inl hp => exact ⟨n, hp, Nat.dvd_refl n⟩
     | inr hnp =>
       have hnot : ¬ ∀ m : Nat, m ∣ n → m = 1 ∨ m = n := fun h => hnp ⟨h2, h⟩
-      cases Classical.not_forall.mp hnot with
+      cases not_forall hnot with
       | intro m hm =>
-        have hmn : m ∣ n ∧ ¬ (m = 1 ∨ m = n) := Classical.not_imp.mp hm
+        have hmn : m ∣ n ∧ ¬ (m = 1 ∨ m = n) := not_imp hm
         have npos : 0 < n := Nat.lt_of_lt_of_le (Nat.zero_lt_succ 1) h2
         have hlt : m < n := Nat.lt_of_le_of_ne (Nat.le_of_dvd npos hmn.1) (fun e => hmn.2 (Or.inr e))
         have hm2 : 2 ≤ m :=

@@ -765,6 +765,10 @@ public sealed partial class Model
         {
             throw new Refused($"a projection out of something that isn't a structure ({p})");
         }
+        if (IsProposition(ind))
+        {
+            return PropProjMem(c, p, ind, ps);   // PropRecursors.cs
+        }
         string label = ProjLemma(ind, p.Idx);
         var args = new List<(string, Expr, Expr)>();
         List<Expr> doms = PiDomains(ind.Type, ps);
@@ -1209,16 +1213,28 @@ public sealed partial class Model
         {
             holds = HoldsRecursiveCtor(d, ind, j, cond, need.Select(m => m.P).ToList());
         }
-        else if (facts.Count == 0)
-        {
-            holds = _d.Lift(d.Ph, pr.Apply("mptru", S(("ph", cond)), ProveCase("T.", cond, j, ind.Ctors.Length)));
-        }
         else
         {
-            string ph2 = Conj(facts);
-            Proof Fact(string f) => need.First(m => _d.Split(m.P.Proves).X == f).P;
-            Proof all = facts.Skip(1).Aggregate(Fact(facts[0]), (acc, f) => _d.Jca(acc, Fact(f)));
-            holds = _d.Syl(all, ProveCase(ph2, cond, j, ind.Ctors.Length));
+            try
+            {
+                if (facts.Count == 0)
+                {
+                    holds = _d.Lift(d.Ph, pr.Apply("mptru", S(("ph", cond)), ProveCase("T.", cond, j, ind.Ctors.Length)));
+                }
+                else
+                {
+                    string ph2 = Conj(facts);
+                    Proof Fact(string f) => need.First(m => _d.Split(m.P.Proves).X == f).P;
+                    Proof all = facts.Skip(1).Aggregate(Fact(facts[0]), (acc, f) => _d.Jca(acc, Fact(f)));
+                    holds = _d.Syl(all, ProveCase(ph2, cond, j, ind.Ctors.Length));
+                }
+            }
+            catch (Refused)
+            {
+                // A data field (Exists.intro's witness), or a bound variable that occurs in the hypotheses: witness
+                // each field by the constructor's own argument, the case's bound variables renamed apart.
+                holds = HoldsCase(d, cond, ind, j);
+            }
         }
         Proof isOne = pr.Apply("iftrued", S(("ph", d.Ph), ("ch", cond), ("A", "1o"), ("B", "(/)")), holds);
         Proof toOne = _d.Trans(eqT, isOne);
@@ -1594,6 +1610,16 @@ public sealed partial class Model
         Proof p;
         switch (ci.Kind)
         {
+            case ConstKind.Theorem when $"{n}" == "Classical.em":
+                p = EmTyping(c, ci.Type);   // PropRecursors.cs: in the model directly, without choice
+                break;
+            case ConstKind.Recursor when text == "(/)" && n is StrName { Value: "rec" } prn && env.Find(prn.Prefix) is { IsRec: false } pind:
+                {
+                    // A proposition's recursor into Prop, as a constant on its own (PropRecursors.cs).
+                    Define(prn.Prefix);
+                    p = IntroPiProp(c, ci.Type, (d, body) => PropRecHolds(c, d, body, pind, ci));
+                    break;
+                }
             case ConstKind.Definition or ConstKind.Theorem or ConstKind.Opaque when (ci.Value ?? ci.OpaqueValue) is Expr v:
                 {
                     Proof inV = Check(c, v, ci.Type, ty);
@@ -1946,9 +1972,42 @@ public sealed partial class Model
         return _d.Trans(pre, _d.Trans(_d.Trans(Side(ta, ba), mid), _d.Symm(Side(tb, bb))));
     }
 
+    /// <summary>Two λ-abstractions over the same domain: their bodies under the binder (mpteq2dva).</summary>
+    private Proof ConvLam(PCtx c, Binder a, Binder b)
+    {
+        string ta = TrIn(c, a), tb = TrIn(c, b);
+        if (LabelOfText("class", ta) != "cmpt" || LabelOfText("class", tb) != "cmpt")
+        {
+            throw new Refused($"a λ that isn't a map in the model: {ta}  or  {tb}");
+        }
+        string da = KidOf("class", ta, "A"), db = KidOf("class", tb, "A");
+        if (da != db)
+        {
+            _ = AlphaIn(c.Ph, da, db);   // the same domain up to bound variables, or refused
+        }
+        string v = FreshFor(c.Ph, ta, tb, string.Join(' ', c.Binders));
+        (PCtx d, Expr fv) = Enter(c, a.Domain, v, da);
+        Proof pb = Conv(d, _ops.Instantiate(a.Body, [fv]), _ops.Instantiate(b.Body, [fv]));
+        string ba = Lhs(pb), bb = Rhs(pb);
+        Proof mid = pr.Apply("mpteq2dva", S(("ph", c.Ph), ("x", v), ("A", da), ("B", ba), ("C", bb)), pb);
+        return _d.Trans(_d.Trans(AlphaIn(c.Ph, ta, $"( {v} e. {da} |-> {ba} )"), mid), AlphaIn(c.Ph, $"( {v} e. {da} |-> {bb} )", tb));
+    }
+
     /// <summary>Same head and argument count: the arguments pairwise. Null when that doesn't work out.</summary>
     private Proof? TryCongr(PCtx c, Expr a, Expr b)
     {
+        if (a is Binder { IsPi: false } la && b is Binder { IsPi: false } lb)
+        {
+            try
+            {
+                return ConvLam(c, la, lb);
+            }
+            catch (Refused e)
+            {
+                Debug($"ConvLam: {e.Message}");
+                return null;
+            }
+        }
         if (a is Binder { IsPi: true } pa && b is Binder { IsPi: true } pb)
         {
             try
