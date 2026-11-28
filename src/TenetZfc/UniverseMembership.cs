@@ -215,6 +215,25 @@ public sealed partial class Model
             Proof tyIn = ty == "2o" ? UnivMem(d, "2o", g) : LevelIn(d.Ph, pr.Render(pr.Parse("class", ty.Split(' '))!.Children[0]), k);
             return GruEl(d.Ph, k, ty, x, tyIn, cur);
         }
+        // A value of a function variable, typed by its own hypothesis (a motive z e. X_ y e. D ( G ^m P ), applied):
+        // down the application chain by ApplyText, and the last application into G at any argument, since a function's
+        // value is in its range or (/) (fvrn0), both in G.
+        if (n.Rule.Label == "cfv" && FnType(d, C(1)) is (Proof pf, string tyf)
+            && pr.Parse("class", tyf.Split(' ')) is { Rule.Label: "co" } tyn && pr.Render(tyn.Children[2]) == "^m" && pr.Render(tyn.Children[0]) == g)
+        {
+            string fn = C(1), arg = C(0), fdom = pr.Render(tyn.Children[1]);
+            Proof isF = _d.Syl(pf, pr.Apply("elmapi", S(("A", fn), ("B", g), ("C", fdom))));
+            if ((TryHyp(d, $"{arg} e. {fdom}") ?? HypAlpha(d, arg, fdom)) is Proof ai)
+            {
+                return pr.Apply("ffvelcdmd", S(("ph", d.Ph), ("F", fn), ("A", fdom), ("B", g), ("C", arg)), isF, ai);
+            }
+            Proof ranIn = _d.Syl(isF, pr.Apply("frn", S(("F", fn), ("A", fdom), ("B", g))));
+            Proof zeroIn = UnivMem(d, "(/)", g);
+            Proof both = pr.Apply("unssd", S(("ph", d.Ph), ("A", $"ran {fn}"), ("B", "{ (/) }"), ("C", g)), ranIn,
+                pr.Apply("snssd", S(("ph", d.Ph), ("A", "(/)"), ("B", g)), zeroIn));
+            Proof inUn = _d.Lift(d.Ph, pr.Apply("fvrn0", S(("F", fn), ("X", arg))));
+            return pr.Apply("sseldd", S(("ph", d.Ph), ("A", $"( ran {fn} u. {{ (/) }} )"), ("B", g), ("C", x)), both, inUn);
+        }
         // A value of a function into G: F e. ( G ^m D ) and a e. D (elmapi, ffvelcdmd).
         if (n.Rule.Label == "cfv")
         {
@@ -474,7 +493,7 @@ public sealed partial class Model
             Proof df = pr.Apply("df2o3", S());
             return _d.Lift(d.Ph, pr.Apply("eleqtrri", S(("A", "(/)"), ("B", "{ (/) , 1o }"), ("C", "2o")), pr.Apply("prid1", S(("A", "(/)"), ("B", "1o")), pr.Apply("0ex", S())), df));
         }
-        if (ConstApp(x) is (Name head, List<string> cargs) && cargs.Count > 0)
+        if (ConstApp(x) is (Name head, List<string> cargs))
         {
             // A proposition former applied (Bool.Reflects b p): through its typing lemma, argument by argument.
             return ConstAppMem(d, head, cargs, "2o");
@@ -527,6 +546,29 @@ public sealed partial class Model
                 // in Nat by its constructor form, as the literal itself is.
                 Typed lm = LitMem(d, (NatLit)t.Nat(lv));
                 return lm.Ty == dom ? lm.P : pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", x), ("B", lm.Ty), ("C", dom)), lm.P, AlphaIn(d.Ph, lm.Ty, dom));
+            }
+            if (!level && xn.Rule.Label == "cfv" && FnType(d, pr.Render(xn.Children[1])) is (Proof pf, string tyf))
+            {
+                // A function variable's value (z e. ( ( lean.Nat ` U ) ^m D ), applied), by its own hypothesis.
+                string fv = pr.Render(xn.Children[1]), arg = pr.Render(xn.Children[0]);
+                SyntaxTree tyn = pr.Parse("class", tyf.Split(' '))!;
+                string fdom = pr.Render(tyn.Children[1]);
+                Proof? aIn = TryHyp(d, $"{arg} e. {fdom}") ?? HypAlpha(d, arg, fdom);
+                if (aIn is Proof ai)
+                {
+                    (Proof cur, string ty) = ApplyText(d.Ph, pf, fv, tyf, arg, ai);
+                    if (ty == dom)
+                    {
+                        return cur;
+                    }
+                    try
+                    {
+                        return pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", x), ("B", ty), ("C", dom)), cur, AlphaIn(d.Ph, ty, dom));
+                    }
+                    catch (Refused)
+                    {
+                    }
+                }
             }
             if (!level && ConstApp(x) is (Name head, List<string> cargs))
             {
@@ -600,6 +642,50 @@ public sealed partial class Model
     }
 
     /// <summary>Every fact the context has: its conjuncts and its locals' memberships.</summary>
+    /// <summary>
+    /// ( d.Ph -> f e. T ) with T a map type (X_ or ^m), for a function variable with such a hypothesis or an application
+    /// chain of one (each argument in its domain); null otherwise.
+    /// </summary>
+    private (Proof P, string Ty)? FnType(PCtx d, string f)
+    {
+        foreach ((Proof p, string h) in Facts(d))
+        {
+            if (h.StartsWith($"{f} e. ", StringComparison.Ordinal)
+                && pr.Parse("class", h[(f.Length + 4)..].Split(' ')) is { } tn
+                && (tn.Rule.Label == "cixp" || tn.Rule.Label == "co" && pr.Render(tn.Children[2]) == "^m"))
+            {
+                return (p, h[(f.Length + 4)..]);
+            }
+        }
+        SyntaxTree? n = pr.Parse("class", f.Split(' '));
+        if (n is not { Rule.Label: "cfv" })
+        {
+            return null;
+        }
+        string g = pr.Render(n.Children[1]), a = pr.Render(n.Children[0]);
+        if (FnType(d, g) is not (Proof pg, string tyg))
+        {
+            return null;
+        }
+        SyntaxTree tg = pr.Parse("class", tyg.Split(' '))!;
+        string dom = pr.Render(tg.Children[1]);
+        Proof? aIn = TryHyp(d, $"{a} e. {dom}") ?? HypAlpha(d, a, dom);
+        if (aIn is null)
+        {
+            try
+            {
+                aIn = TextMem(d, a, dom);
+            }
+            catch (Refused)
+            {
+                return null;
+            }
+        }
+        (Proof cur, string ty) = ApplyText(d.Ph, pg, g, tyg, a, aIn.Value);
+        SyntaxTree tn2 = pr.Parse("class", ty.Split(' '))!;
+        return tn2.Rule.Label == "cixp" || tn2.Rule.Label == "co" && pr.Render(tn2.Children[2]) == "^m" ? (cur, ty) : null;
+    }
+
     private IEnumerable<(Proof, string)> Facts(PCtx d)
     {
         foreach (string h in Conjuncts(d.Ph))
