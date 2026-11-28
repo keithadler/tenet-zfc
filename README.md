@@ -3,6 +3,10 @@
 [![CI](https://github.com/keithadler/tenet-zfc/actions/workflows/ci.yml/badge.svg)](https://github.com/keithadler/tenet-zfc/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/keithadler/tenet-zfc)](https://github.com/keithadler/tenet-zfc/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Lean 4.36.0](https://img.shields.io/badge/Lean-4.36.0-blue)](https://github.com/leanprover/lean4/releases/tag/v4.36.0)
+[![.NET 8 and 10](https://img.shields.io/badge/.NET-8%20%7C%2010-512bd4)](https://dotnet.microsoft.com/)
+[![Checked by metamath-exe, mmverify.py and mmj2](https://img.shields.io/badge/checked%20by-metamath--exe%20%C2%B7%20mmverify.py%20%C2%B7%20mmj2-brightgreen)](#how-it-works)
+[![Target: set.mm](https://img.shields.io/badge/target-set.mm%20%28ZFC%29-orange)](https://github.com/metamath/set.mm)
 
 **Lean 4 proofs, turned into ZFC proofs that two independent Metamath verifiers check.**
 

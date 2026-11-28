@@ -1658,6 +1658,20 @@ public sealed partial class Model
                         Proof bi = _d.Syl(Exists(d.Ph, tv), pr.Apply("elabg", S(("x", qv), ("ph", qb), ("ps", pt), ("A", tv), ("V", "_V")), subst));
                         Proof holds = pr.Apply("mpbid", S(("ph", d.Ph), ("ps", $"{tv} e. {q}"), ("ch", pt)), tQ, bi);
                         string folded = Lhs(eqB);
+                        if (pt != $"{folded} e. {target}" && ind.Type is not null && IsProposition(ind)
+                            && pt.StartsWith($"{folded} e. ", StringComparison.Ordinal)
+                            && Subst(pt[(folded.Length + 4)..], tv, "(/)") == target)
+                        {
+                            // A recursor of a proposition (False.rec into any sort): the major premise is a proof, which
+                            // the target writes (/), and tv, a member of the proposition, is (/) (lean-pf0).
+                            EnsurePf0();
+                            Proof isProp = UnivMem(d, iapp, "2o");
+                            Proof is0 = _d.Syl(_d.Jca(isProp, HypIn(d, $"{tv} e. {iapp}")), pr.Apply("lean-pf0", S(("A", iapp), ("B", tv))));
+                            string have = pt[(folded.Length + 4)..];
+                            Proof eqT = _d.Congruence("class", Subst(have, tv, "Z"), "Z", is0);
+                            holds = pr.Apply("eleqtrd", S(("ph", d.Ph), ("A", folded), ("B", have), ("C", target)), holds, eqT);
+                            pt = $"{folded} e. {target}";
+                        }
                         if (pt != $"{folded} e. {target}")
                         {
                             throw new Refused($"{n}'s typing came out as {pt}, not {folded} e. {target}");
