@@ -36,7 +36,7 @@ public class SetVarTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Contains(" a ", dv);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void EquationsWithDeclaredSetVariablesVerifyAndTheirDefinitionsPassTheCheck()
     {
         if (SetMm is null)

@@ -67,7 +67,7 @@ public class TheoremTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal("No.such.theorem is not in the export", e.Message);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_THEOREMS", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void NatAddZeroIsProvedThroughTheModelAndVerifies()
     {
         if (SetMm is null || System.Environment.GetEnvironmentVariable("TENET_ZFC_THEOREMS") is null)
@@ -120,7 +120,7 @@ public class TheoremTests(Xunit.Abstractions.ITestOutputHelper output)
     /// Starter-library theorems (tests/fixtures/library.ndjson), proved in one translator so they share their lemmas,
     /// and checked by both verifiers: a few quick ones here; CI's theorem step and docs/milestone3.md cover all of them.
     /// </summary>
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_THEOREMS", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void LibraryTheoremsAreProvedThroughTheModelAndVerify()
     {
         if (SetMm is null || System.Environment.GetEnvironmentVariable("TENET_ZFC_THEOREMS") is null)
@@ -167,7 +167,7 @@ public class TheoremTests(Xunit.Abstractions.ITestOutputHelper output)
         }
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_THEOREMS", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void QuotientTheoremsAreProvedInTheTowerAndVerify()
     {
         // Quot.ind's typing (every class is a class of some element), Quot.lift's (a function on the classes), and the

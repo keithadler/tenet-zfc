@@ -28,7 +28,7 @@ If only .NET 10 is installed, `dotnet build` still builds both targets; to run t
 dotnet test -c Release
 ```
 
-Without the checkers, the tests that need `set.mm` or a verifier skip themselves. To run them, set these variables (CI does, in the `emit-and-verify` job):
+Without the checkers, the tests that need `set.mm` or a verifier report as skipped, each naming the variables it needs (`[VerifierFact]` in `tests/TenetZfc.Tests/VerifierFact.cs`), so a run without them never looks like a full pass. The slow theorem tests also need `TENET_ZFC_THEOREMS` set to anything. To run them, set these variables (CI does, in the `emit-and-verify` job):
 
 | Variable | Value |
 |---|---|

@@ -177,7 +177,7 @@ public class MetamathTests
     /// Compressed proofs, checked by both real verifiers against set.mm; and the same file with one letter of a proof
     /// changed, which both must reject.
     /// </summary>
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void CompressedProofsPassBothVerifiersAndACorruptedOneFails()
     {
         string? dir = System.Environment.GetEnvironmentVariable("TENET_ZFC_SETMM");
@@ -228,7 +228,7 @@ public class MetamathTests
     }
 
     /// <summary>Generated arithmetic theorems, checked by both real verifiers against set.mm.</summary>
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM", "TENET_ZFC_METAMATH", "TENET_ZFC_MMVERIFY")]
     public void GeneratedArithmeticPassesBothVerifiers()
     {
         string? dir = System.Environment.GetEnvironmentVariable("TENET_ZFC_SETMM");

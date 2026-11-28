@@ -24,7 +24,7 @@ public class TheoremAllTests
         Assert.Equal(all[3].Name, every3[1].Name);
     }
 
-    [Fact]
+    [VerifierFact("TENET_ZFC_SETMM")]
     public void AChunkRecordsEachTheoremAndSkipsOneThatCrashedTheProcess()
     {
         if (SetMm is not string dir)
