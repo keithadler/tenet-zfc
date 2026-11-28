@@ -175,7 +175,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             throw new Refused(why);
         }
         var r = ClassVars.Concat(ExtraClassVars).Take(count).ToList();
-        foreach (string x in r.Skip(ClassVars.Length).Where(_declaredVars.Add))
+        foreach (string x in r.Skip(ClassVars.Length).Where(_declaredVars.Add).Where(x => !InDatabase($"c{x}")))
         {
             string text = $"""
                 $( A class variable of tenet-zfc's own: set.mm's are used up. $)
@@ -203,7 +203,7 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             int n = int.Parse(x[2..]);
             int upTo = Math.Min(ExtraSetVars.Length, 2 * n + Letters.Length);
             var text = new System.Text.StringBuilder();
-            foreach (string v in ExtraSetVars.Take(upTo).Prepend(x).Where(_declaredVars.Add))
+            foreach (string v in ExtraSetVars.Take(upTo).Prepend(x).Where(_declaredVars.Add).Where(v => !InDatabase($"v{v}")))
             {
                 text.Append($"""
                     $( A set variable of tenet-zfc's own: set.mm's are used up. $)
@@ -354,13 +354,39 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             {"$}"}
 
             """;
-        _out.AppendLine(text);
+        bool fromLibrary = Defined($"df-{LabelPart(tok)}", $"|- {tok} = ( {UniverseVar} e. {UniverseDomain} |-> {body} )", n);
         _values[tok] = body;
         _tokenNames[tok] = n;
+        if (fromLibrary)
+        {
+            return;
+        }
+        _out.AppendLine(text);
         if (!dryRun)
         {
             pr.Database.Extend(text);
         }
+    }
+
+    /// <summary>A statement the database already has: one of a library it was read with (Database.ReadChain).</summary>
+    private bool InDatabase(string label) => pr.Database.Statements.ContainsKey(label);
+
+    /// <summary>
+    /// Whether the database already has this definition, from a library. A library's definition that reads differently
+    /// from the one this run would write is refused: lemmas proved against the one don't hold of the other.
+    /// </summary>
+    private bool Defined(string label, string statement, Name n)
+    {
+        if (!pr.Database.Statements.TryGetValue(label, out Statement? have))
+        {
+            return false;
+        }
+        if ($"{have.Expr}" != statement)
+        {
+            _defined.Remove(n);
+            throw new Refused($"the library defines {n} differently ({label})");
+        }
+        return true;
     }
 
     /// <summary>The first <paramref name="count"/> binders of a Π-type, as ( x e. ⟦A⟧ |-> … ) binders, each bound to a fresh set variable.</summary>
@@ -999,8 +1025,13 @@ public sealed partial class Model(Terms t, Environment env, Prover pr, bool dryR
             {"$}"}
 
             """;
-        _out.AppendLine(text);
+        bool fromLibrary = Defined($"df-{LabelPart(tok)}", $"|- {tok} = {definiens}", n);
         _values[tok] = definiens;
+        if (fromLibrary)
+        {
+            return;
+        }
+        _out.AppendLine(text);
         if (!dryRun)
         {
             pr.Database.Extend(text);

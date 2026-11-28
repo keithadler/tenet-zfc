@@ -30,6 +30,10 @@ const string Usage = """
                                                          chunk-NNNN.mm files that share lemmas within a chunk and verify
                                                          independently; outcomes per theorem in chunk-NNNN.tsv; resumes
                                                          where it stopped (scripts/summarize-all for the totals)
+      tenet-zfc library <export.ndjson> <set.mm> <out.mm> <name | lean-ty-label | @file>... [--budget seconds]
+                                                         a library of typing lemmas, each proved once, for theorem and
+                                                         theorem-all to cite with --library instead of proving them in
+                                                         every run; with --library itself, a layer on another library
       tenet-zfc bridge <set.mm> <out.mm>                 milestone 3: the bridge lemmas recursive types rest on
       tenet-zfc theorem <export.ndjson> <set.mm> <out.mm> <name>...
                                                          milestone 3: prove Lean theorems through the generic model
@@ -52,6 +56,9 @@ const string Usage = """
 
     emit, define, define-all, bridge and nat-bridge write proofs in Metamath's compressed format, sharing every repeated subproof;
     add --uncompressed (anywhere) for flat label lists.
+
+    theorem, theorem-all and library take --library <lib.mm> (anywhere): a library written by tenet-zfc library, beside
+    set.mm. Its lemmas are cited, not proved again, and the output includes the library by name (docs/milestone3.md).
 
     the model interprets universes as a tower of Grothendieck universes, one per level, so that structurally
     recursive definitions mean what Lean means; add --single-universe (anywhere) for the old model with one universe
@@ -98,6 +105,14 @@ bool singleUniverse = args.Contains("--single-universe");
 // Universe elimination (docs/milestone4.md): a tower of weak universes, which ZFC proves exists, instead of Grothendieck universes.
 bool lowered = args.Contains("--lowered");
 args = args.Where(a => a is not "--single-universe" and not "--tower" and not "--lowered").ToArray();
+// A library of typing lemmas (tenet-zfc library) for theorem, theorem-all and library itself to cite: a .mm file beside
+// set.mm that includes it. Outputs then include the library by name, as they otherwise include set.mm.
+string? library = null;
+if (Array.IndexOf(args, "--library") is int li and >= 0 && li + 1 < args.Length)
+{
+    library = args[li + 1];
+    args = args.Where((_, i) => i != li && i != li + 1).ToArray();
+}
 if (args.Length >= 5 && args[0] == "define")
 {
     // Milestone 3: definitions through the generic model, each with its definitional equation. In tower mode the
@@ -190,16 +205,16 @@ if (args.Length >= 4 && args[0] == "define-all")
 }
 if (args.Length >= 4 && args[0] == "theorem-all")
 {
-    return TheoremAllCommand(args[1], args[2], args[3], args[4..], uncompressed);
+    return TheoremAllCommand(args[1], args[2], args[3], args[4..], uncompressed, library);
 }
 if (args.Length >= 5 && args[0] == "theorem")
 {
     // Milestone 3: Lean theorems proved through the generic model, in its tower mode (docs/milestone3.md).
     var tt = new Terms();
     TenetZfc.Environment tenv = Reader.ReadExport(tt, args[1]);
-    var tpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.Read(args[2]));
+    var tpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.ReadChain(library ?? args[2]));
     var translator = new TheoremTranslator(tt, tenv, tpr);
-    var tw = new TenetZfc.Metamath.Writer(Path.GetFileName(args[2]), "Lean theorems proved through tenet-zfc's model (docs/milestone3.md)", CompressAgainst(tpr.Database));
+    var tw = new TenetZfc.Metamath.Writer(Path.GetFileName(library ?? args[2]), "Lean theorems proved through tenet-zfc's model (docs/milestone3.md)", CompressAgainst(tpr.Database));
     var done = new List<(string Label, TenetZfc.Metamath.Expr Statement, List<string> Proof, string Name)>();
     int tstatus = 0;
     foreach (string name in args[4..])
@@ -251,7 +266,67 @@ if (args.Length >= 5 && args[0] == "theorem")
         tw.Theorem(d.Label, $"The Lean theorem {d.Name}, proved through the model from its proof term.", d.Statement, proofOut, dv.Select(p => $"{p.Item1} {p.Item2}"));
     }
     File.WriteAllText(args[3], tw.ToString());
+    if (library is not null)
+    {
+        Console.WriteLine($"library {Path.GetFileName(library)}: {translator.LibraryLemmas} typing lemmas cited, not proved again");
+    }
     return tstatus;
+}
+if (args.Length >= 5 && args[0] == "library")
+{
+    // A library of typing lemmas, each proved once (docs/milestone3.md, "A library of lemmas"). Every chunk of
+    // theorem-all used to prove the lemmas of the constants its theorems use from nothing; with --library it cites
+    // these. The constants are named as theorem names them, or by a lemma's label (lean-ty-Nat.le_trans), or listed
+    // one per line in @file. With --library itself, this library is built on another and includes it.
+    int lbudget = 600;
+    if (Array.IndexOf(args, "--budget") is int bi and >= 0 && bi + 1 < args.Length && int.TryParse(args[bi + 1], out int lb) && lb > 0)
+    {
+        lbudget = lb;
+        args = args.Where((_, i) => i != bi && i != bi + 1).ToArray();
+    }
+    var lt = new Terms();
+    TenetZfc.Environment lenv = Reader.ReadExport(lt, args[1]);
+    var lpr = new TenetZfc.Metamath.Prover(TenetZfc.Metamath.Database.ReadChain(library ?? args[2]));
+    var ltr = new TheoremTranslator(lt, lenv, lpr);
+    // What the library below already has, so that a lemma found there is reported as such whether this run asked for
+    // it first or met it while proving another.
+    var below = lpr.Database.Statements.Keys.Where(k => k.StartsWith("lean-ty-", StringComparison.Ordinal)).ToHashSet();
+    var wanted = args[4..].SelectMany(a => a.StartsWith('@') ? File.ReadAllLines(a[1..]).Select(l => l.Trim()).Where(l => l != "" && !l.StartsWith('#')) : [a]).ToList();
+    int lproved = 0, lcited = 0;
+    foreach (string given in wanted)
+    {
+        var lsw = Stopwatch.StartNew();
+        int lemmasBefore = ltr.LemmaSteps.Count;
+        lpr.Deadline = DateTime.UtcNow.AddSeconds(lbudget);
+        try
+        {
+            string label = ltr.TypeConstant(given);
+            bool cited = below.Contains(label);
+            if (cited) lcited++; else lproved++;
+            Console.WriteLine($"{given}: {label} ({(cited ? "already in the library" : $"{ltr.LemmaSteps.Count - lemmasBefore} new lemmas")}, {lsw.Elapsed.TotalSeconds:F1}s)");
+        }
+        catch (Model.Refused e)
+        {
+            Console.WriteLine($"{given}: refused: {e.Message}");
+        }
+        catch (TimeoutException)
+        {
+            Console.WriteLine($"{given}: timeout: over the {lbudget}s budget");
+        }
+        catch (InvalidOperationException e)
+        {
+            // A proof step that doesn't check: a bug in the translator, reported, and the others go on.
+            Console.WriteLine($"{given}: failed: {e.Message}");
+        }
+        lpr.Deadline = null;
+    }
+    var lw = new TenetZfc.Metamath.Writer(Path.GetFileName(library ?? args[2]), "A library of typing lemmas for tenet-zfc's model, each proved once (docs/milestone3.md)", CompressAgainst(lpr.Database));
+    lw.Assumptions(ltr.Model.Assumptions());
+    lw.Raw(ltr.Declarations);
+    File.WriteAllText(args[3], lw.ToString());
+    Console.WriteLine($"library {Path.GetFileName(args[3])}: {ltr.LemmaSteps.Count} lemmas written for {lproved} of {wanted.Count} constants"
+        + (lcited > 0 ? $", {lcited} already in {Path.GetFileName(library!)}" : ""));
+    return lproved + lcited == wanted.Count ? 0 : 1;
 }
 if (args.Length == 3 && args[0] == "bridge")
 {
@@ -531,7 +606,7 @@ static int DefineAllCommand(string export, string setmm, string outDir, string[]
 }
 
 // Theorems at scale: every theorem (or every Nth) through the model, in chunks that verify independently.
-static int TheoremAllCommand(string export, string setmm, string outDir, string[] opts, bool uncompressed)
+static int TheoremAllCommand(string export, string setmm, string outDir, string[] opts, bool uncompressed, string? library)
 {
     int chunkSize = 50, jobs = 1, budget = 120, every = 1;
     string? only = null;
@@ -565,11 +640,12 @@ static int TheoremAllCommand(string export, string setmm, string outDir, string[
     var terms = new Terms();
     TenetZfc.Environment env = Reader.ReadExport(terms, export);
     Directory.CreateDirectory(outDir);
-    var run = new TheoremAll(terms, env, setmm, compress: !uncompressed) { BudgetSeconds = budget };
+    var run = new TheoremAll(terms, env, setmm, compress: !uncompressed) { BudgetSeconds = budget, Library = library };
     List<ConstInfo> targets = run.Targets(every);
     int chunks = (targets.Count + chunkSize - 1) / chunkSize;
     // The run's parameters, so that a resumed run can't silently mix chunks of different shapes.
-    string shape = $"export {Path.GetFileName(export)}, every {every}, chunk size {chunkSize}: {targets.Count} theorems in {chunks} chunks";
+    string shape = $"export {Path.GetFileName(export)}, every {every}, chunk size {chunkSize}: {targets.Count} theorems in {chunks} chunks"
+        + (library is null ? "" : $", library {Path.GetFileName(library)}");
     string shapeFile = Path.Combine(outDir, "theorem-all.shape");
     if (File.Exists(shapeFile) && File.ReadAllText(shapeFile).Trim() != shape)
     {

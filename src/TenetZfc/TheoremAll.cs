@@ -28,8 +28,17 @@ public sealed class TheoremAll(Terms t, Environment env, string setmmPath, bool 
         .Where((_, i) => i % every == 0)
         .ToList();
 
-    private string? _setmm;
+    private List<string>? _setmm;
     private readonly object _read = new();
+
+    /// <summary>
+    /// A library of lemmas to cite instead of proving them in every chunk (tenet-zfc library): a .mm file beside
+    /// set.mm that includes it, directly or through other libraries. Each chunk's output then includes the library.
+    /// </summary>
+    public string? Library { get; init; }
+
+    /// <summary>The file a chunk's output includes: the library when there is one, set.mm otherwise.</summary>
+    private string Base => Library ?? setmmPath;
 
     /// <summary>The time budget for one theorem, with the lemmas it is the first to need.</summary>
     public double BudgetSeconds { get; init; } = 120;
@@ -49,7 +58,7 @@ public sealed class TheoremAll(Terms t, Environment env, string setmmPath, bool 
     {
         lock (_read)
         {
-            _setmm ??= File.ReadAllText(setmmPath);
+            _setmm ??= Database.IncludeChain(Base).Select(File.ReadAllText).ToList();
         }
         string name = $"chunk-{index:D4}";
         string progress = Path.Combine(outDir, name + ".progress");
@@ -64,10 +73,10 @@ public sealed class TheoremAll(Terms t, Environment env, string setmmPath, bool 
             }
         }
         var db = new Database();
-        db.Extend(_setmm);
+        _setmm.ForEach(db.Extend);
         var pr = new Prover(db);
         var translator = new TheoremTranslator(t, env, pr);
-        var w = new Writer(Path.GetFileName(setmmPath),
+        var w = new Writer(Path.GetFileName(Base),
             $"tenet-zfc theorem-all, {name}: {theorems.Count} Lean theorems proved through the model of docs/milestone3.md",
             compress ? db : null);
         var proved = new List<(string Label, string Name, Metamath.Expr Statement, List<string> Proof, IEnumerable<string> Distinct)>();
