@@ -127,6 +127,33 @@ When the export has `Nat.mul`, `nat-bridge` also proves the multiplication bridg
 
 CI proves these with the bridge, from `tests/fixtures/library.ndjson`, and checks the output with all three checkers. Still missing from the multiplication bridge: `Nat.sub`, `Nat.le`/`Nat.lt` as `<_`/`<`, and `Int` as `ZZ` (tasks2.md, task 4).
 
+## Order: `<=` and `<` (tower mode)
+
+When the export has `Nat.le.intro` and `Nat.sub_add_cancel`, `nat-bridge` proves that Lean's order on the model's `Nat` is `set.mm`'s:
+
+| Label | Statement |
+|---|---|
+| `lean-nat-le` | `( ( U e. lean.-tower /\ ( A e. N /\ B e. N ) ) -> ( (/) e. ⟦A ≤ B⟧ <-> ( F ` A ) <_ ( F ` B ) ) )` |
+| `lean-nat-lt` | the same for `<` |
+| `lean-nat-lt-def` | `A < B` on `Nat` is, by definition, `succ A ≤ B` (`ProveDefEq`) |
+
+Both directions of `lean-nat-le` come from Lean's own theorems, proved through the model rather than written by hand:
+- **A ≤ B gives F A <_ F B.** `Nat.sub_add_cancel` gives `( B - A ) + A = B` in the model. Through `F`, `F B = F ( B - A ) + F A`, and `F ( B - A )` is in `NN0` (`nn0addge2`). `Nat.sub` is typed by its typing lemma, `lean-ty-Nat.sub`.
+- **F A <_ F B gives A ≤ B.** `k = F B - F A` is in `NN0` (`nn0sub2`), and `C = F⁻¹ k` is in the model's `Nat`. `A + C = B`, because their values under `F` agree (`lean-nat-natadd`, `pncan3`, `lean-nat-eq`), and `Nat.le.intro` gives `A ≤ B`.
+
+`lean-nat-lt` follows: `A < B` is `succ A ≤ B`, `F ( succ A ) = F A + 1` (`lean-nat-fsucc`), and `nn0ltp1le` gives `( M < N <-> ( M + 1 ) <_ N )`.
+
+The restatement reads `≤` and `<` too. Lean's own proofs come out in `NN0`:
+
+| Lean | Restated (`lean-nn0-…`) |
+|---|---|
+| `Nat.le_add_right` | `A <_ ( A + B )` |
+| `Nat.lt_succ_self` | `A < ( A + 1 )` |
+
+**Cross-check:** `lean-nn0-Nat.le_add_right-setmm` proves the same statement as `lean-nn0-Nat.le_add_right` from `set.mm`'s own `nn0addge1`: two independent proofs of one statement, as with `ccatlen`. CI proves all of this from `tests/fixtures/natorder.ndjson` and checks the output with all three checkers.
+
+`Nat.sub` is in the bridge's vocabulary only through its typing. Truncated subtraction as `set.mm` arithmetic (task D, item 2) is still to do.
+
 ## In the one-universe model, the rules are false
 
 `--single-universe` builds the bridge over the old model, with one universe `U e. Univ` for every level. There `Nat.add`'s computation rules are false, so `lean-nat-natadd` takes them as hypotheses. The reason:

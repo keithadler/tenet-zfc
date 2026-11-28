@@ -382,6 +382,9 @@ public sealed class ProofKit(Prover pr)
                     UseS("frecseq123", [("R", L("R")), ("S", R("R")), ("A", L("A")), ("B", R("A")), ("F", L("F")), ("G", R("F"))]));
             case "wceq":
                 return Use("eqeq12d", Sub("A"), Sub("B"));
+            case "wbr":
+                // A R B, the relation fixed (<_ and < in the order bridge's restatements).
+                return UseS("breq12d", [("R", L("R"))], Sub("A"), Sub("B"));
             case "wf":
                 return Use("feq123d", Sub("F"), Sub("A"), Sub("B"));
             case "wf1":
