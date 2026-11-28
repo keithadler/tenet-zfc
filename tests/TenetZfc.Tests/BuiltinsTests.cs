@@ -35,6 +35,38 @@ public class BuiltinsTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    public void InTheTowerAStringLiteralsConstantsAreTheInstancesWhateverIsDefinedFirst()
+    {
+        // The literal's List.cons and Char.ofNat were looked up by their names as exported. Char.ofNat then came out
+        // defined through the exported dite when a string literal was the first to need it, and through dite.{1}
+        // when anything else was: two texts for one definition, by the order of a run.
+        static (string OfNat, string Cons) Define(params string[] order)
+        {
+            var t = new Terms();
+            var mono = new Monomorph(t, Reader.ReadExport(t, Fixture("strings.ndjson")));
+            var m = new Model(t, mono.Env, new Prover(new Database()), dryRun: true, tower: true);
+            foreach (string n in order)
+            {
+                m.Define(mono.Instance(t.Of(n), []));
+            }
+            string d = m.Declarations;
+            string Of(string label)
+            {
+                int i = d.IndexOf($"{label} $a", StringComparison.Ordinal);
+                return d[i..d.IndexOf(" $.", i, StringComparison.Ordinal)];
+            }
+            return (Of("df-lean.Char.ofNat"), Of("df-lean.String.-cons"));
+        }
+        var literalFirst = Define("Lean.origin", "Char.ofNat");
+        var constantFirst = Define("Char.ofNat", "Lean.origin");
+        Assert.Equal(constantFirst.OfNat, literalFirst.OfNat);
+        Assert.Contains("lean.dite.{1}", literalFirst.OfNat);
+        Assert.DoesNotContain("( lean.dite ` u )", literalFirst.OfNat);
+        // The literal's list is List.{0}'s, as a theorem about it has it.
+        Assert.Contains("( y e. ( ( lean.List.{0} ` u ) ` ( lean.Char ` u ) ) |-> ( ( ( ( lean.List.cons.{0} ` u ) ` ( lean.Char ` u ) )", literalFirst.Cons);
+    }
+
+    [Fact]
     public void PropAxiomsAreProofsAndChoiceIsTheLeastElementInAWellOrdering()
     {
         var t = new Terms();

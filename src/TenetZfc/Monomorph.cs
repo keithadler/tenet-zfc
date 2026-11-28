@@ -25,7 +25,7 @@ public sealed class Monomorph
         _t = t;
         _src = src;
         _ops = new Ops(t);
-        Env = new Environment(src);
+        Env = new Environment(src) { InstanceOf = Instance };
     }
 
     /// <summary>The environment of instances, over the original one.</summary>

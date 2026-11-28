@@ -90,9 +90,18 @@ public sealed partial class Model
         return $"( {str} ` {list} )";
     }
 
-    /// <summary>( lean.c ` u ), defining c first.</summary>
+    /// <summary>
+    /// ( lean.c ` u ), defining c first. Over an environment of instances, c is its instance with every universe
+    /// parameter at level 0 (List.{0}, for a list of characters): the one a theorem about the string's list uses.
+    /// By its raw name it was the constant as exported, a second List beside List.{0}, and Char.ofNat was defined
+    /// from whichever of the two a chunk met first.
+    /// </summary>
     private string ConstAt(Name n, string u)
     {
+        if (env.InstanceOf is { } instanceOf && env.Find(n) is ConstInfo raw)
+        {
+            n = instanceOf(n, raw.LevelParams.Select(_ => t.Zero).ToArray());
+        }
         Define(n);
         if (_choiceDependent.Contains(Token(n)!))
         {
